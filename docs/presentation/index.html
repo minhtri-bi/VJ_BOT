@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light">
+<title>VJBot — Khi AI hỏi, người học nghĩ</title>
+<style>
+/* Offline-friendly typography matches the approved Friendly preview. */
+:root{--bg:#eaf0f8;--ink:#172f52;--muted:#465c78;--blue:#2157a0;--mint:#d8eee3;--pink:#f6e1e6;--yellow:#fff0c6;--white:#fff;--line:#c2cede;--title-size:clamp(2rem,5vw,5rem);--h2-size:clamp(1.7rem,3.6vw,3.4rem);--h3-size:clamp(1.1rem,2vw,1.7rem);--body-size:clamp(1rem,1.65vw,1.6rem);--small-size:clamp(.8rem,1vw,1rem);--slide-padding:clamp(1rem,3vw,4.5rem);--content-gap:clamp(.75rem,1.5vw,1.5rem);--element-gap:clamp(.5rem,1vw,1rem)}
+*{box-sizing:border-box}html,body{margin:0;height:100%;overflow-x:hidden}html{scroll-snap-type:y mandatory;scroll-behavior:smooth}body{background:var(--bg);color:var(--ink);font-family:'Segoe UI',Tahoma,sans-serif}button,a{-webkit-tap-highlight-color:transparent}button{font:inherit;cursor:pointer}button:disabled{cursor:default;opacity:.45}a{color:var(--blue)}:focus-visible{outline:3px solid var(--blue);outline-offset:4px}button,a{touch-action:manipulation}button{min-width:44px;min-height:44px}h1,h2,h3,p,figure{margin:0}h1{font-size:var(--title-size);line-height:1.04;letter-spacing:-.05em;font-weight:750}h2{font-size:var(--h2-size);line-height:1.1;letter-spacing:-.04em;font-weight:750;max-width:27ch}h3{font-size:var(--h3-size);line-height:1.2}p,li{font-size:var(--body-size);line-height:1.45}p{max-width:65ch}strong{font-weight:750}.small,figcaption{font-size:var(--small-size);line-height:1.4;color:var(--muted)}.eyebrow{font-size:var(--small-size);letter-spacing:.1em;text-transform:uppercase;font-weight:750;color:var(--blue)}.slide{width:100vw;height:100vh;height:100dvh;overflow:hidden;scroll-snap-align:start;position:relative;display:flex;flex-direction:column;padding:var(--slide-padding);padding-bottom:clamp(5rem,10vh,7rem)}.slide-content{flex:1;display:flex;flex-direction:column;justify-content:center;max-height:100%;min-height:0;gap:var(--content-gap)}.topline{display:flex;justify-content:space-between;align-items:center;gap:1rem;margin-bottom:clamp(.75rem,3vh,2rem);font-size:var(--small-size);color:var(--muted)}.brand{font-weight:800;letter-spacing:-.03em;color:var(--ink);font-size:clamp(1rem,1.5vw,1.4rem)}.tag{display:inline-flex;align-items:center;background:var(--white);padding:.4em .8em;border-radius:99px;font-size:var(--small-size);font-weight:650;white-space:nowrap}.two{display:grid;grid-template-columns:1.05fr 1fr;gap:clamp(1rem,4vw,4rem);align-items:center;min-height:0}.stack{display:flex;flex-direction:column;gap:var(--content-gap);min-width:0}.cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--content-gap)}.cards.four{grid-template-columns:repeat(4,minmax(0,1fr))}.card{background:var(--white);border:1px solid #d7e0ed;border-radius:clamp(1rem,2vw,2rem);padding:clamp(1rem,2vw,2rem);display:flex;flex-direction:column;gap:var(--element-gap);min-width:0}.card p{font-size:clamp(.95rem,1.4vw,1.35rem)}.mint{background:var(--mint)}.pink{background:var(--pink)}.yellow{background:var(--yellow)}.blue{background:var(--blue);color:#fff;border-color:var(--blue)}.blue .small,.blue .eyebrow{color:#e4edff}.large-number{font-size:clamp(2.3rem,5vw,4.7rem);line-height:1;font-weight:750;letter-spacing:-.07em;color:var(--blue)}.quote{font-size:clamp(1.5rem,3vw,3rem);line-height:1.2;letter-spacing:-.03em}.highlight{color:var(--blue)}.caption{font-size:var(--small-size);color:var(--muted)}.takeaway{display:flex;gap:1rem;align-items:center;padding-top:clamp(.25rem,1vh,1rem);font-size:clamp(1rem,1.65vw,1.5rem);font-weight:650}.takeaway:before{content:'';width:.6em;height:.6em;border-radius:50%;background:var(--blue);flex-shrink:0}.conversation{background:#fff;border-radius:clamp(1rem,2.5vw,2rem);padding:clamp(1rem,2vw,2rem);display:flex;flex-direction:column;gap:clamp(.6rem,1.4vh,1.2rem);border:1px solid #d1dcec}.bubble{padding:clamp(.8rem,1.5vw,1.4rem);border-radius:1rem;background:#eef3fa;font-size:clamp(1rem,1.7vw,1.6rem);line-height:1.4}.bubble.student{margin-left:clamp(1rem,4vw,4rem);background:var(--mint)}.who{display:block;font-size:var(--small-size);letter-spacing:.07em;font-weight:750;margin-bottom:.4em;color:var(--blue)}.jp{font-family:'Yu Gothic','Meiryo',sans-serif;font-size:clamp(1.3rem,2.5vw,2.5rem);line-height:1.5}.flow{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--element-gap);counter-reset:flow}.flow .card{position:relative}.flow .card:before{counter-increment:flow;content:counter(flow,decimal-leading-zero);font-size:clamp(1.7rem,3vw,3rem);color:var(--blue);font-weight:750;line-height:1}.big-message{font-size:clamp(1.3rem,2.5vw,2.5rem);line-height:1.35;max-width:30ch}.pill-list{display:flex;gap:var(--element-gap);flex-wrap:wrap}.pill-list span{border:1px solid var(--line);border-radius:99px;padding:.5em .9em;font-size:var(--small-size)}.roles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--element-gap)}.role{font-size:var(--small-size);padding:clamp(.6rem,1vw,1rem);border-radius:1rem;background:#fff}.role b{display:block;margin-bottom:.3em}.screenshot{display:block;width:100%;max-height:40vh;object-fit:contain;border-radius:clamp(.6rem,1.2vw,1.2rem);box-shadow:0 .8rem 2rem #172f5215}.proof-layout{grid-template-columns:1.4fr 1fr}.decision-row{display:grid;grid-template-columns:.8fr 1.6fr;gap:var(--element-gap);padding:clamp(.7rem,1.4vh,1.4rem) 0;border-bottom:1px solid var(--line)}.decision-row strong,.decision-row span{font-size:var(--body-size);line-height:1.4}.checklist{list-style:none;margin:0;padding:0;display:grid;gap:clamp(.5rem,1.3vh,1.1rem)}.checklist li{display:flex;gap:.7em;align-items:baseline}.checklist li:before{content:'✓';color:var(--blue);font-weight:800}.section-stamp{font-size:clamp(5rem,15vw,14rem);line-height:.85;font-weight:800;letter-spacing:-.08em;color:#2157a015;position:absolute;right:4vw;top:8vh;pointer-events:none;z-index:-1}.lead{max-width:40ch}.divider{background:#dfe9f6}.closing{background:#dcece8}.hero-orbit{background:#fff;border-radius:clamp(2rem,4vw,4rem);padding:clamp(1.5rem,3vw,3rem);transform:rotate(-2deg);box-shadow:0 1.5rem 4rem #172f5210}.hero-orbit>*{transform:rotate(2deg)}.hero-orbit .quote{margin:clamp(1rem,3vh,2rem) 0}.callout{background:var(--mint);padding:clamp(.8rem,1.7vw,1.5rem);border-radius:1rem;font-size:var(--body-size);line-height:1.4}.reveal{transition:opacity .4s ease,transform .4s ease}.js .slide:not(.visible) .reveal{opacity:0;transform:translateY(16px)}.slide.visible .reveal{opacity:1;transform:none}.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}.controls{position:fixed;bottom:clamp(.4rem,1.2vh,1rem);left:50%;transform:translateX(-50%);z-index:20;display:flex;align-items:center;gap:clamp(.3rem,.8vw,.8rem);padding:.3rem .6rem;background:#fffffff2;box-shadow:0 .3rem 1.5rem #172f5220;border:1px solid var(--line);border-radius:99px;max-width:96vw}.controls button,.controls a{border:0;border-radius:99px;background:none;color:var(--ink);padding:.4rem .65rem;font-size:var(--small-size);text-decoration:none;white-space:nowrap}.controls button:hover,.controls a:hover{background:var(--bg)}.counter{min-width:3.7em;text-align:center;font-size:var(--small-size);font-variant-numeric:tabular-nums}.progress{position:fixed;top:0;left:0;height:4px;width:100%;z-index:30;appearance:none;border:0}.progress::-webkit-progress-bar{background:#d4dfef}.progress::-webkit-progress-value{background:var(--blue)}.progress::-moz-progress-bar{background:var(--blue)}.speaker-footer{display:flex;justify-content:space-between;gap:1rem;margin-top:clamp(.7rem,2vh,1.5rem);font-size:var(--small-size);color:var(--muted)}.demo-actions{display:flex;align-items:center;gap:var(--element-gap);flex-wrap:wrap}.demo-actions button{border:1px solid var(--blue);border-radius:99px;padding:.55em 1em;background:var(--blue);color:white;font-size:var(--small-size)}.demo-actions button.secondary{background:#fff;color:var(--blue)}.demo-panel{min-height:clamp(13rem,32vh,23rem);justify-content:center}.demo-panel .bubble{animation:enter .25s ease}@keyframes enter{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}.demo-dots{display:flex;gap:.5rem;align-items:center}.demo-dots span{width:.65rem;height:.65rem;border-radius:50%;background:#c3d1e4}.demo-dots span.active{background:var(--blue)}dialog{width:min(850px,92vw);max-height:85vh;border:1px solid var(--line);border-radius:1.5rem;padding:clamp(1rem,3vw,2.5rem);color:var(--ink);background:white}dialog::backdrop{background:#102035aa}dialog header{display:flex;gap:1rem;justify-content:space-between;align-items:center;margin-bottom:1rem}dialog h2{font-size:clamp(1.3rem,2.5vw,2rem)}dialog p{font-size:clamp(1rem,1.5vw,1.25rem);margin:.9rem 0}dialog button{border:1px solid var(--line);background:var(--bg);border-radius:99px;padding:.5rem 1rem}dialog .stage-note{background:var(--yellow);padding:.8rem 1rem;border-radius:.8rem}dialog .timing{font-weight:700;color:var(--blue)}.print-only{display:none}
+@media(max-height:700px){:root{--slide-padding:clamp(.9rem,3vw,2rem);--content-gap:clamp(.6rem,1.7vw,1.3rem);--title-size:clamp(1.8rem,4.5vw,3.5rem);--h2-size:clamp(1.5rem,3.3vw,2.8rem);--body-size:clamp(.95rem,1.55vw,1.35rem)}.topline{margin-bottom:1rem}.slide{padding-bottom:4.7rem}.card{padding:clamp(.8rem,1.5vw,1.5rem)}}
+@media(max-height:600px){:root{--slide-padding:clamp(.7rem,2.5vw,1.5rem);--content-gap:clamp(.4rem,1vw,.8rem);--title-size:clamp(1.5rem,4vw,2.8rem);--h2-size:clamp(1.3rem,3vw,2.3rem);--body-size:clamp(.85rem,1.4vw,1.2rem);--small-size:clamp(.75rem,1vw,.9rem)}.slide{padding-bottom:4rem}.topline{margin-bottom:.6rem}.speaker-footer{margin-top:.5rem}.hero-orbit{padding:1rem}.card p{font-size:clamp(.8rem,1.3vw,1.1rem)}.screenshot{max-height:34vh}.demo-panel{min-height:10rem}}
+@media(max-height:500px){:root{--slide-padding:clamp(.5rem,1.8vw,1rem);--title-size:clamp(1.3rem,3.6vw,2.3rem);--h2-size:clamp(1.15rem,2.8vw,1.9rem);--h3-size:clamp(.95rem,1.8vw,1.3rem);--body-size:clamp(.8rem,1.25vw,1.05rem);--small-size:clamp(.7rem,1vw,.85rem)}.topline{margin-bottom:.3rem}.card{padding:.7rem;gap:.4rem}.card p{font-size:.8rem}.large-number{font-size:2rem}.two{gap:1rem}.bubble{padding:.65rem;font-size:.95rem}.jp{font-size:1.2rem}.quote{font-size:1.5rem}.role{padding:.5rem}.flow .card:before{font-size:1.6rem}.speaker-footer{font-size:.7rem}.demo-panel{min-height:9rem}.demo-actions button{min-height:36px}.decision-row{padding:.5rem 0}.controls button{min-height:36px}.caption{font-size:.7rem}}
+@media(max-width:600px) and (min-height:501px){:root{--title-size:clamp(2rem,8vw,3rem);--h2-size:clamp(1.5rem,6.3vw,2.2rem);--body-size:clamp(.95rem,3.7vw,1.1rem);--content-gap:.75rem;--slide-padding:1.1rem}.two,.proof-layout{grid-template-columns:1fr;gap:.8rem}.cards{grid-template-columns:1fr;gap:.6rem}.cards .card{padding:.8rem;gap:.3rem}.cards .large-number{display:none}.cards .card p{font-size:.9rem}.cards.four,.flow,.roles{grid-template-columns:repeat(2,minmax(0,1fr))}.flow .card{padding:.75rem}.flow .card:before{font-size:1.6rem}.flow h3{font-size:1rem}.flow p{font-size:.85rem}.hero-orbit{padding:1rem;border-radius:1.5rem}.hero-orbit .quote{font-size:1.5rem;margin:.65rem 0}.conversation{padding:.85rem}.bubble{font-size:1rem;padding:.75rem}.jp{font-size:1.45rem}.topline{font-size:.75rem}.tag{font-size:.7rem}.speaker-footer{font-size:.7rem}.role{font-size:.75rem;padding:.6rem}.screenshot{max-height:24vh}.big-message{font-size:1.25rem}.demo-panel{min-height:12rem}.decision-row strong,.decision-row span{font-size:.9rem}.controls .optional{display:none}.takeaway{font-size:1rem}.quote{font-size:1.6rem}.pill-list span{font-size:.75rem;padding:.4em .6em}}
+/* Compact layouts remove repeated framing, not the eight-step content. */
+html{scrollbar-width:none}
+body{overflow-x:clip}
+@media(max-width:600px),(max-height:500px){
+  .topline .brand{display:none}
+  .topline{justify-content:flex-end}
+  .slide-content>.eyebrow{display:none}
+  .conversation .quote{font-size:clamp(1.15rem,3vw,1.4rem)}
+  .conversation .quote br{display:none}
+  .conversation .quote .highlight{margin:0 .25em}
+  .card .tag{align-self:flex-start}
+}
+@media(max-width:600px) and (min-height:501px){
+  .topline{margin-bottom:.7rem}
+  .cards .card:has(.tag){display:grid;grid-template-columns:1fr 1fr;align-items:center}
+  .cards .card:has(.tag) p{grid-column:1/-1}
+  .cards .card:has(.tag) h3{font-size:1rem}
+  .cards .card:has(.tag) .tag{font-size:.65rem;justify-self:start}
+  .two .card{padding:.8rem;gap:.45rem}
+  .two .card p,.checklist li{font-size:.9rem;line-height:1.35}
+  .checklist{gap:.4rem}
+  .conversation{gap:.5rem}
+  .demo-panel{min-height:10rem}
+  .decision-row{padding:.5rem 0;grid-template-columns:.65fr 1.75fr}
+  .screenshot{max-height:21vh}
+}
+@media(max-height:500px){
+  .slide{padding-bottom:3.3rem}
+  .topline{margin-bottom:.3rem}
+  .card .tag{font-size:.65rem}
+  .conversation{padding:.7rem;gap:.4rem}
+  .who{font-size:.65rem}
+  .card p,.checklist li{line-height:1.3}
+  .checklist{gap:.4rem}
+  .screenshot{max-height:30vh}
+  .decision-row{padding:.3rem 0}
+  .demo-panel{min-height:8rem}
+  .demo-actions{gap:.4rem}
+  .demo-actions button{padding:.3rem .7rem}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important}html{scroll-behavior:auto}}
+@media print{@page{size:A4 landscape;margin:0}.slide{height:210mm;width:297mm;break-after:page;padding:12mm;overflow:hidden}.controls,.progress,dialog{display:none!important}.reveal{opacity:1!important;transform:none!important}.slide-content{gap:5mm}body{print-color-adjust:exact;-webkit-print-color-adjust:exact}.print-only{display:block}.demo-actions{display:none}}
+</style>
+</head>
+<body>
+<progress class="progress" max="12" value="1" aria-label="Tiến độ bài thuyết trình"></progress>
+<main id="slides" aria-label="Bài thuyết trình VJBot gồm 12 slide">
+<!-- Speaker 1: problem and criteria, 0:00–2:00. -->
+<section class="slide" id="slide-1" data-speaker="1" data-seconds="20" data-step="intro" aria-labelledby="title-1">
+<div class="topline"><span class="brand">VJBot</span><span class="tag">REVERSE CHATBOX</span></div>
+<div class="slide-content"><div class="two reveal"><div class="stack"><p class="eyebrow">Tiếng Nhật · Tự học · Hội thoại</p><h1 id="title-1">Nếu AI hỏi,<br>ai phải <span class="highlight">nghĩ?</span></h1><p class="lead">Không chỉ đọc câu trả lời.<br>Tự tạo ra câu trả lời của mình.</p></div><div class="hero-orbit"><span class="tag">Một thay đổi về vai trò</span><p class="quote">“Thầy hỏi.<br>Em thử.<br>Mình cùng sửa.”</p><p class="small">Reverse Chatbox trong web VJBot</p></div></div><div class="roles reveal"><div class="role"><b>Người 1 · 0:00–2:00</b>Vấn đề & tiêu chí</div><div class="role"><b>Người 2 · 2:00–4:00</b>Phương án & ý tưởng</div><div class="role"><b>Người 3 · 4:00–6:00</b>Khả thi & lựa chọn</div><div class="role"><b>Người 4 · 6:00–8:00</b>Bản thử & cải tiến</div></div></div>
+<div class="speaker-footer"><span>Người 1 · Mở đầu</span><span>00:00–00:20</span></div>
+<template class="notes"><p>Chào thầy cô và các bạn. Nếu một chatbot luôn trả lời giúp, ai đang thực sự luyện tập? Nhóm em giới thiệu VJBot, web hỗ trợ học tiếng Nhật. Hôm nay, nhóm tập trung vào Reverse Chatbox: AI đặt câu hỏi để người học tự diễn đạt.</p><p class="stage-note">Dừng một nhịp sau câu hỏi mở đầu. Không giới thiệu danh sách tính năng. Bấm sang slide 2.</p></template>
+</section>
+<section class="slide" id="slide-2" data-speaker="1" data-seconds="50" data-step="1" aria-labelledby="title-2">
+<div class="topline"><span class="brand">VJBot / Câu chuyện bắt đầu</span><span class="tag">01 · Identify the Problem</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Xác định vấn đề</p><h2 id="title-2" class="reveal">Đọc thấy hiểu.<br>Đến lượt mình lại bí.</h2><div class="two reveal"><div class="stack"><p>Lan vừa học cách nói <strong>“muốn làm gì”</strong>.</p><div class="callout">Nhìn ví dụ thì hiểu.<br>Không có mẫu trước mắt: em sẽ nói gì?</div><p class="small">Lan là nhân vật minh họa, không phải người tham gia khảo sát.</p></div><div class="conversation"><span class="who">KHOẢNG TRỐNG CẦN GIẢI QUYẾT</span><p class="quote">Biết đáp án<br><span class="highlight">≠</span><br>Tự diễn đạt được</p><p class="small">Một lời giải có sẵn chưa cho thấy người học tự làm được.</p></div></div><p class="takeaway reveal">Cần cơ hội thử, không chỉ thêm một lời giải.</p></div>
+<div class="speaker-footer"><span>Người 1 · Bước 1/8</span><span>00:20–01:10</span></div>
+<template class="notes"><p>Hãy hình dung Lan, một bạn đang học tiếng Nhật sơ cấp. Lan vừa đọc cách nói “muốn làm gì” và thấy ví dụ khá dễ hiểu. Nhưng khi cất ví dụ đi, rồi được hỏi cuối tuần muốn làm gì, Lan lại chưa tự nói được.</p><p>Lan ở đây là nhân vật minh họa, không phải kết quả khảo sát. Tình huống này giúp nhóm xác định vấn đề: đọc hiểu một lời giải chưa cho thấy mình có thể tự sử dụng kiến thức. Nếu chatbot đưa ngay câu hoàn chỉnh, Lan có thể tiếp tục đọc mà chưa cần thử. Vì vậy, nhóm muốn tạo một cuộc hội thoại buộc người học tham gia bằng câu trả lời của chính mình, nhưng vẫn có hỗ trợ khi bị bí.</p><p class="stage-note">Nhấn vào sự khác nhau giữa “hiểu khi đọc” và “tự sử dụng”. Không tuyên bố mọi chatbot đều chỉ đưa đáp án.</p></template>
+</section>
+<section class="slide" id="slide-3" data-speaker="1" data-seconds="50" data-step="2" aria-labelledby="title-3">
+<div class="topline"><span class="brand">VJBot / Thế nào là làm tốt?</span><span class="tag">02 · Identify Criteria and Constraints</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Tiêu chí & giới hạn</p><h2 id="title-3" class="reveal">AI hỗ trợ suy nghĩ.<br>Không nghĩ thay.</h2><div class="two reveal"><div class="card"><h3>Điều cần đạt</h3><ul class="checklist"><li>Một câu hỏi vừa sức mỗi lượt.</li><li>Chờ câu trả lời thật của người học.</li><li>Gợi ý đúng chỗ đang vướng.</li><li>Phản hồi bám câu người học viết.</li></ul></div><div class="card yellow"><h3>Điều phải chấp nhận</h3><p>AI có thể hiểu sai hoặc gợi ý quá nhiều.</p><p>Mạng, hạn mức và thời gian phản hồi có giới hạn.</p><p>Chưa có bằng chứng về hiệu quả học lâu dài.</p></div></div><p class="takeaway reveal">Kiểm tra từng lượt học, không chỉ kiểm tra ô chat mở được.</p></div>
+<div class="speaker-footer"><span>Người 1 · Bước 2/8 · Chuyển Người 2</span><span>01:10–02:00</span></div>
+<template class="notes"><p>Từ vấn đề đó, nhóm đặt bốn tiêu chí. Thứ nhất, mỗi lượt chỉ có một câu hỏi phù hợp. Thứ hai, AI phải chờ người học trả lời, không tự đoán bài làm. Thứ ba, khi người học bí, gợi ý cần giúp họ tiến thêm một bước thay vì giải hết. Cuối cùng, phản hồi phải dựa trên đúng câu họ vừa viết.</p><p>Nhóm cũng phải tính đến giới hạn. AI có thể hiểu sai, mạng có thể chậm và dịch vụ có hạn mức. Một cuộc chat chạy được cũng chưa chứng minh người học nhớ lâu hơn. Vì vậy, tiêu chí không phải “AI nói thật nhiều”, mà là “người học có cơ hội tự nghĩ và thử lại”. Tiếp theo, bạn thứ hai sẽ trình bày các hướng giải quyết mà nhóm cân nhắc.</p><p class="stage-note">Chuyển người sau câu cuối. Mốc mục tiêu: tổng 2 phút.</p></template>
+</section>
+<!-- Speaker 2: alternative concepts and interaction ideas, 2:00–4:00. -->
+<section class="slide divider" id="slide-4" data-speaker="2" data-seconds="40" data-step="3" aria-labelledby="title-4">
+<div class="topline"><span class="brand">VJBot / Không phải cứ thêm AI là đủ</span><span class="tag">03 · Brainstorm Possible Solutions</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Các hướng giải quyết</p><h2 id="title-4" class="reveal">Ba cách giúp Lan học tiếp.</h2><div class="cards reveal"><div class="card"><span class="large-number">A</span><h3>Thêm lời giải</h3><p>Dễ tra cứu và đọc lại.</p><p class="small">Nhưng Lan vẫn có thể chỉ đọc.</p></div><div class="card"><span class="large-number">B</span><h3>Chat hỏi đáp</h3><p>Lan hỏi, AI giải thích.</p><p class="small">Hữu ích, nhưng Lan phải biết hỏi gì.</p></div><div class="card mint"><span class="large-number">C</span><h3>Chat hỏi ngược</h3><p>AI gợi mở, Lan tự trả lời.</p><p class="small">Cần kiểm soát câu hỏi và mức gợi ý.</p></div></div><p class="takeaway reveal">Chọn theo hành vi muốn tạo ra: người học tự diễn đạt.</p><p class="caption">So sánh lập luận thiết kế, không phải kết quả thử nghiệm A/B.</p></div>
+<div class="speaker-footer"><span>Người 2 · Bước 3/8</span><span>02:00–02:40</span></div>
+<template class="notes"><p>Để giải quyết tình huống của Lan, có ba hướng. Một là bổ sung lời giải: thuận tiện tra cứu, nhưng người học vẫn có thể chỉ đọc. Hai là chat hỏi đáp: Lan hỏi, AI giải thích. Cách này hữu ích khi Lan đã biết mình chưa hiểu chỗ nào.</p><p>Hướng thứ ba là đảo vai chủ động. AI đặt một câu hỏi hoặc tình huống, rồi chờ Lan tự trả lời. Nhóm chọn phát triển hướng này vì nó trực tiếp tạo cơ hội luyện tập. Đây là so sánh về thiết kế, không phải tuyên bố nhóm đã thử nghiệm ba phương án và đo được phương án thắng.</p><p class="stage-note">Không phủ nhận giá trị của chat hỏi đáp. Chỉ phân biệt vai trò chủ động trong hoạt động luyện tập.</p></template>
+</section>
+<section class="slide" id="slide-5" data-speaker="2" data-seconds="40" data-step="4" aria-labelledby="title-5">
+<div class="topline"><span class="brand">VJBot / Đảo chiều chủ động</span><span class="tag">04 · Generate Ideas</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Cụ thể hóa ý tưởng</p><h2 id="title-5" class="reveal">Reverse là đảo vai.<br>Không phải đảo văn bản.</h2><div class="two reveal"><div class="card"><span class="eyebrow">Một lượt hỏi đáp</span><p class="big-message">Người học hỏi.<br>AI đưa lời giải.</p></div><div class="card mint"><span class="eyebrow">Một lượt luyện tập đảo ngược</span><p class="big-message">AI hỏi.<br><strong>Người học tạo câu.</strong></p></div></div><div class="pill-list reveal"><span>Đọc bài làm nền</span><span>Thử nói hoặc viết</span><span>Nhận hỗ trợ vừa đủ</span><span>Thử lại bằng ý của mình</span></div><p class="caption">Khi người học hỏi thẳng để hiểu bài, thầy vẫn giải thích; không ép mọi lượt thành bài kiểm tra.</p></div>
+<div class="speaker-footer"><span>Người 2 · Bước 4/8</span><span>02:40–03:20</span></div>
+<template class="notes"><p>“Reverse” ở đây không phải đảo chữ trong tin nhắn. Đó là thay đổi vai trò chủ động. Sau khi có bài học làm nền, người học bước vào chat để tự dùng kiến thức, thay vì chỉ xin thêm một đáp án.</p><p>Thầy Lâm sẽ gợi mở một tình huống vừa sức, chờ câu trả lời rồi hỗ trợ phần còn vướng. Tuy nhiên, đảo ngược không có nghĩa là thầy chỉ hỏi mãi. Nếu Lan nói “em chưa hiểu”, thầy vẫn cần giải thích ngắn gọn. Điểm nhóm muốn giữ là người học có một lượt tự thử, chứ không bị bỏ mặc hoặc bị biến mọi câu hỏi thành một bài kiểm tra.</p></template>
+</section>
+<section class="slide" id="slide-6" data-speaker="2" data-seconds="40" data-step="4" aria-labelledby="title-6">
+<div class="topline"><span class="brand">VJBot / Thiết kế một lượt học</span><span class="tag">04 · Generate Ideas · tiếp</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Từ ý tưởng đến hội thoại</p><h2 id="title-6" class="reveal">Cùng một mục tiêu.<br>Không phát sẵn câu trả lời.</h2><div class="flow reveal"><div class="card"><h3>Thầy hỏi</h3><p>“Cuối tuần, em muốn làm gì?”</p></div><div class="card mint"><h3>Lan thử</h3><p lang="ja">映画を見ます。</p><p class="small">Em xem / sẽ xem phim.</p></div><div class="card yellow"><h3>Thầy phản hồi</h3><p>Câu đúng ngữ pháp, nhưng chưa thể hiện ý “muốn”.</p></div><div class="card pink"><h3>Lan sửa</h3><p lang="ja">映画を見たいです。</p><p class="small">Em muốn xem phim.</p></div></div><p class="takeaway reveal">Phân biệt “sai ngữ pháp” với “chưa đạt ý muốn nói”.</p><p class="caption">Hội thoại do nhóm soạn để minh họa nguyên lý; không phải bản ghi phản hồi AI thực tế.</p></div>
+<div class="speaker-footer"><span>Người 2 · Bước 4/8 · Chuyển Người 3</span><span>03:20–04:00</span></div>
+<template class="notes"><p>Ví dụ, thầy hỏi Lan muốn làm gì cuối tuần. Lan viết “映画を見ます”, nghĩa là em xem hoặc sẽ xem phim. Câu này đúng ngữ pháp, nên không nên gắn nhãn sai toàn bộ. Điểm còn thiếu là ý “muốn” trong yêu cầu.</p><p>Thầy phản hồi đúng chỗ đó để Lan thử đổi thành “映画を見たいです”. Như vậy, Lan vẫn tự hoàn thành câu của mình. Hội thoại trên là kịch bản minh họa do nhóm soạn, chưa phải kết quả AI chạy thật. Từ ý tưởng này, bạn thứ ba sẽ giải thích cách nhóm giữ đúng mạch hội thoại khi xây dựng hệ thống.</p><p class="stage-note">Đọc chậm hai câu tiếng Nhật. Đây là ví dụ minh họa; không nói “AI chắc chắn luôn chấm như vậy”.</p></template>
+</section>
+<!-- Speaker 3: feasibility and selected system design, 4:00–6:00. -->
+<section class="slide" id="slide-7" data-speaker="3" data-seconds="40" data-step="5" aria-labelledby="title-7">
+<div class="topline"><span class="brand">VJBot / Một lời nhắc có đủ không?</span><span class="tag">05 · Explore Possibilities</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Xem xét khả năng thực hiện</p><h2 id="title-7" class="reveal">Linh hoạt đến đâu?<br>Kiểm soát bằng cách nào?</h2><div class="cards reveal"><div class="card"><h3>Kịch bản cố định</h3><p>Dễ giữ thứ tự câu hỏi.</p><p class="small">Khó xử lý câu trả lời tự do.</p></div><div class="card"><h3>Chỉ dặn AI “hãy hỏi”</h3><p>Hội thoại linh hoạt.</p><p class="small">Có thể quên câu đang hỏi hoặc đổi chủ đề.</p></div><div class="card mint"><h3>AI + ngữ cảnh + trạng thái</h3><p>Bám bài, giữ câu hỏi còn dang dở.</p><p class="small">Cần kiểm tra luồng; nội dung vẫn có thể sai.</p></div></div><p class="takeaway reveal">Không chỉ nhớ tin nhắn. Cần nhớ đang học đến đâu.</p></div>
+<div class="speaker-footer"><span>Người 3 · Bước 5/8</span><span>04:00–04:40</span></div>
+<template class="notes"><p>Khi xem xét cách làm, nhóm phải cân bằng sự linh hoạt với khả năng kiểm soát. Kịch bản cố định giữ được thứ tự, nhưng khó xử lý những câu trả lời rất khác nhau. Nếu chỉ dặn AI “hãy hỏi học sinh”, hội thoại linh hoạt hơn nhưng có thể quên câu đang hỏi.</p><p>Hướng hiện tại kết hợp AI với ngữ cảnh bài học và trạng thái phiên. Hệ thống giữ lại mục tiêu đang luyện, câu hỏi chưa giải quyết và mức gợi ý. Cách này giúp duy trì mạch học rõ hơn. Tuy vậy, kiểm soát được luồng chưa có nghĩa là mọi nhận xét tiếng Nhật đều chính xác.</p></template>
+</section>
+<section class="slide" id="slide-8" data-speaker="3" data-seconds="45" data-step="6" aria-labelledby="title-8">
+<div class="topline"><span class="brand">VJBot / Phương án được chọn</span><span class="tag">06 · Select an Approach</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Chọn cách triển khai</p><h2 id="title-8" class="reveal">AI tạo lời thoại.<br>Ứng dụng giữ mạch học.</h2><div class="two reveal"><div class="stack"><div class="decision-row"><strong>Đúng bài</strong><span>Máy chủ lấy nội dung theo bài / mục đang chọn.</span></div><div class="decision-row"><strong>Đúng lượt</strong><span>Giữ câu hỏi chờ trả lời và mức gợi ý.</span></div><div class="decision-row"><strong>Đúng trạng thái</strong><span>Phản hồi lỗi không trở thành lượt học thành công.</span></div></div><div class="card blue"><p class="eyebrow">Vai trò của công nghệ</p><h3>Web + Worker + D1 + API AI</h3><p>Hiển thị · điều phối · lưu phiên · sinh phản hồi</p><p class="small">Kiến trúc phục vụ hội thoại, không phải trọng tâm của bài trình bày.</p></div></div><p class="takeaway reveal">Gợi ý phải tiếp tục câu đang vướng, không mở một bài khác.</p></div>
+<div class="speaker-footer"><span>Người 3 · Bước 6/8</span><span>04:40–05:25</span></div>
+<template class="notes"><p>Phương án được chọn phân chia trách nhiệm rõ ràng. AI tạo cách hỏi và cách giải thích. Ứng dụng giữ mạch học. Khi Lan chọn một bài hoặc một mục, máy chủ lấy nội dung tương ứng thay vì để AI tự đoán từ chữ trên màn hình.</p><p>Trong phiên, hệ thống giữ câu hỏi chưa được giải quyết và mức gợi ý. Vì vậy, khi Lan bấm xin gợi ý, mục tiêu vẫn là giúp câu đang vướng, không tự mở bài khác. Nếu yêu cầu AI bị lỗi, lượt đó không được lưu như một phản hồi thành công. Phần kỹ thuật dùng giao diện web, Worker, D1 và API AI; vai trò của chúng là hỗ trợ vòng luyện tập này, chứ không thay thế người học.</p></template>
+</section>
+<section class="slide" id="slide-9" data-speaker="3" data-seconds="35" data-step="6" aria-labelledby="title-9">
+<div class="topline"><span class="brand">VJBot / App là nơi vòng học diễn ra</span><span class="tag">06 · Select an Approach · tiếp</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Đặt chat vào đúng ngữ cảnh</p><h2 id="title-9" class="reveal">Bài học là điểm tựa.<br>Chat là nơi tự thử.</h2><div class="two proof-layout reveal"><figure><img class="screenshot" src="assets/vjbot-public.webp" alt="Ảnh trang chủ VJBot: Tiếng Nhật, từng ngày; các bước Đọc bài học, Thầy hỏi em trả lời, Nhận xét rồi thử lại." width="1024" height="640"><figcaption>Ảnh trang web công khai, chụp 14/11/2026; chưa đăng nhập. Không phải bằng chứng chat AI trực tiếp.</figcaption></figure><div class="stack"><div class="card mint"><h3>Một hành trình ngắn</h3><p>Đọc bài cần học.<br>Luyện với Thầy Lâm.<br>Tự trả lời và thử lại.</p></div><p class="small">Các mục thư viện, thẻ nhớ và tiến độ chỉ hỗ trợ. Không đi sâu trong bài này.</p></div></div></div>
+<div class="speaker-footer"><span>Người 3 · Bước 6/8 · Chuyển Người 4</span><span>05:25–06:00</span></div>
+<template class="notes"><p>Đây là ảnh trang web công khai của VJBot. Nhóm đặt Reverse Chatbox trong một hành trình ngắn: có bài học làm nền, luyện với Thầy Lâm, rồi thử lại sau phản hồi. Người học không phải bắt đầu từ một ô chat hoàn toàn trống ngữ cảnh.</p><p>Các phần như thư viện, thẻ nhớ hay tiến độ là công cụ hỗ trợ; nhóm không đi sâu vào chúng hôm nay. Ảnh này xác nhận giao diện web đang hiện diện, không chứng minh một phiên AI trực tiếp. Tiếp theo, bạn thứ tư sẽ dẫn một lượt minh họa và nêu những điểm thiết kế cần tiếp tục kiểm tra.</p></template>
+</section>
+<!-- Speaker 4: clearly labeled scripted prototype and refinements, 6:00–8:00. -->
+<section class="slide" id="slide-10" data-speaker="4" data-seconds="60" data-step="7" aria-labelledby="title-10">
+<div class="topline"><span class="brand">VJBot / Thử một vòng hội thoại</span><span class="tag">07 · Build a Model or Prototype</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Xây dựng & trình diễn bản thử</p><h2 id="title-10" class="reveal">Người học giữ lượt chủ động.</h2><div class="two reveal"><div class="stack"><p class="lead">Một câu hỏi.<br>Một lần tự thử.<br>Một phản hồi có mục đích.</p><div class="pill-list"><span>1 · Hỏi</span><span>2 · Thử</span><span>3 · Phản hồi</span><span>4 · Sửa</span><span>5 · Vận dụng</span></div><p class="caption"><strong>Minh họa có kịch bản.</strong> Không gọi API, không phải bản ghi AI. Lời phản hồi thực tế có thể khác.</p></div><div class="stack"><div id="demo-panel" class="conversation demo-panel" aria-live="polite" aria-atomic="true"><span class="eyebrow" id="demo-stage">01 / 05 · Thầy đặt câu hỏi</span><div class="bubble" id="demo-bubble"><span class="who">THẦY LÂM</span>Cuối tuần, em muốn làm gì? Em thử trả lời bằng tiếng Nhật nhé.</div></div><div class="demo-actions"><button type="button" id="demo-back" class="secondary" disabled>Lượt trước</button><button type="button" id="demo-next">Lượt tiếp</button><span class="demo-dots" aria-hidden="true"><span class="active"></span><span></span><span></span><span></span><span></span></span></div></div></div></div>
+<div class="speaker-footer"><span>Người 4 · Bước 7/8</span><span>06:00–07:00</span></div>
+<template class="notes"><p>Phần này là minh họa có kịch bản, không phải AI đang trả lời trực tiếp. Nhóm dùng nó để giải thích rõ vòng học mà bản web hướng tới.</p><p>Đầu tiên, thầy đưa một tình huống và chờ. Lan phải tự tạo câu. Ở lượt tiếp theo, Lan viết “映画を見ます”. Thầy không kết luận sai toàn bộ, mà chỉ ra câu này chưa thể hiện ý “muốn”. Lan thử sửa thành “映画を見たいです”. Sau đó, thầy có thể chuyển sang một tình huống mới: nói điều em muốn ăn, thay vì lặp lại nguyên câu về xem phim.</p><p>Điểm cần quan sát là ai đang tạo câu trả lời. Trong cả vòng, người học vẫn phải tự làm. Với bản AI thật, nhóm cần kiểm tra câu hỏi có vừa sức không, gợi ý có tiết lộ quá nhiều không, và phản hồi có hiểu đúng câu của người học không.</p><p class="stage-note">Bấm “Lượt tiếp” 4 lần theo lời nói; mỗi lần dành khoảng 8–10 giây. Không mở cấu hình API. Nếu demo live chưa chuẩn bị, giữ nguyên nhãn “minh họa có kịch bản”, không giả là chat thật.</p></template>
+</section>
+<section class="slide" id="slide-11" data-speaker="4" data-seconds="40" data-step="8" aria-labelledby="title-11">
+<div class="topline"><span class="brand">VJBot / Cải tiến để người học vẫn được nghĩ</span><span class="tag">08 · Refine the Design</span></div>
+<div class="slide-content"><p class="eyebrow reveal">Cải tiến thiết kế</p><h2 id="title-11" class="reveal">Không chỉ hỏi nhiều hơn.<br>Phải hỗ trợ đúng hơn.</h2><div class="cards reveal"><div class="card"><span class="tag">Quy tắc hiện có</span><h3>Không ép khuôn</h3><p>Đánh giá câu thật, không tự bịa lỗi hay áp một câu trả lời mẫu duy nhất.</p></div><div class="card mint"><span class="tag">Cơ chế hiện có</span><h3>Không mất mạch</h3><p>Gợi ý giữ câu hỏi đang mở; đổi mục học thì bỏ trạng thái cũ.</p></div><div class="card yellow"><span class="tag">Cần kiểm chứng tiếp</span><h3>Có tự dùng lại được?</h3><p>Người học thử tình huống mới, không nhìn mẫu; người có chuyên môn rà phản hồi.</p></div></div><p class="takeaway reveal">Chạy đúng luồng ≠ dạy đúng ≠ giúp nhớ lâu.</p></div>
+<div class="speaker-footer"><span>Người 4 · Bước 8/8</span><span>07:00–07:40</span></div>
+<template class="notes"><p>Ở bước cải tiến, nhóm tập trung vào chất lượng của từng lượt. Quy tắc hiện có yêu cầu thầy xem đúng câu người học viết, không tự bịa lỗi hoặc ép mọi câu trả lời vào một mẫu. Hệ thống cũng giữ câu hỏi khi xin gợi ý và bỏ ngữ cảnh cũ khi đổi mục học.</p><p>Nhưng có quy tắc chưa bảo đảm AI luôn làm đúng. Phần cần kiểm chứng tiếp là phản hồi có phù hợp về tiếng Nhật không, và người học có tự vận dụng được ở tình huống mới không. Nhóm cần cả người rà chuyên môn lẫn lần thử thực tế với người học, thay vì dùng số lượng test phần mềm để kết luận hiệu quả học tập.</p></template>
+</section>
+<section class="slide closing" id="slide-12" data-speaker="4" data-seconds="20" data-step="closing" aria-labelledby="title-12">
+<div class="topline"><span class="brand">VJBot / Điều nhóm muốn thay đổi</span><span class="tag">KẾT LUẬN</span></div>
+<div class="slide-content"><div class="two reveal"><div class="stack"><p class="eyebrow">Tám bước · Một mục tiêu</p><h1 id="title-12">Bớt nhận<br>đáp án sẵn.<br><span class="highlight">Thêm lượt<br>tự trả lời.</span></h1></div><div class="stack"><div class="card"><p class="quote">“Em có thể tự nói<br>điều mình muốn chưa?”</p><p class="small">Câu hỏi dành cho Lan, cũng là thước đo nhóm muốn theo đuổi.</p></div><p>Reverse Chatbox đặt nỗ lực của người học ở trung tâm.</p><p class="small">Cảm ơn thầy cô và các bạn. Nhóm xin nhận câu hỏi.</p></div></div></div>
+<div class="speaker-footer"><span>Người 4 · Kết thúc</span><span>07:40–08:00</span></div>
+<template class="notes"><p>Quay lại với Lan: mục tiêu không phải là có thêm một câu trả lời hay để đọc, mà là tự nói được điều mình muốn. Qua tám bước thiết kế, Reverse Chatbox đặt nỗ lực của người học ở trung tâm. Nhóm em xin cảm ơn và nhận câu hỏi.</p><p class="stage-note">Dừng tại slide này khi hỏi đáp. Không chuyển sang giới thiệu các tính năng khác.</p></template>
+</section>
+</main>
+<nav class="controls" aria-label="Điều khiển trình chiếu"><button type="button" id="prev" aria-label="Slide trước">←</button><span class="counter" id="counter" aria-live="polite">1 / 12</span><button type="button" id="next" aria-label="Slide tiếp">→</button><button type="button" id="notes-open" aria-haspopup="dialog" aria-controls="notes-dialog">Lời thoại <span class="optional">· N</span></button><a class="optional" href="speaker-script.html" target="_blank" rel="noopener">Bản tập nói ↗</a></nav>
+<dialog id="notes-dialog" aria-labelledby="notes-title"><header><h2 id="notes-title">Lời thoại</h2><button type="button" id="notes-close" autofocus>Đóng</button></header><p class="timing" id="notes-time"></p><div id="notes-body"></div></dialog>
+<noscript><p>Trình duyệt đang tắt JavaScript. Cuộn để xem slide; mở speaker-script.html để đọc lời thoại.</p></noscript>
+<script>
+/* Only presentation navigation and an explicitly scripted example run here. No network or model calls. */
+class SlidePresentation {
+  constructor() {
+    this.slides = Array.from(document.querySelectorAll('.slide'));
+    this.index = 0;
+    this.dialog = document.querySelector('#notes-dialog');
+    this.lastWheel = 0;
+    document.documentElement.classList.add('js');
+    this.observer = new IntersectionObserver(entries => {
+      for (const entry of entries) if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+        if (entry.intersectionRatio >= .65) this.update(this.slides.indexOf(entry.target));
+      }
+    }, {threshold:[.1,.65]});
+    this.slides.forEach(slide => this.observer.observe(slide));
+    document.querySelector('#prev').addEventListener('click', () => this.go(this.index - 1));
+    document.querySelector('#next').addEventListener('click', () => this.go(this.index + 1));
+    document.querySelector('#notes-open').addEventListener('click', () => this.openNotes());
+    document.querySelector('#notes-close').addEventListener('click', () => this.dialog.close());
+    document.addEventListener('keydown', event => {
+      if (this.dialog.open || event.ctrlKey || event.metaKey || event.altKey || event.target.closest('input,textarea,select,[contenteditable]')) return;
+      if (event.key.toLowerCase() === 'n') { event.preventDefault(); this.openNotes(); return; }
+      if (event.target.closest('button,a') && [' ', 'Enter'].includes(event.key)) return;
+      const delta = ['ArrowRight','ArrowDown','PageDown',' '].includes(event.key) ? 1 : ['ArrowLeft','ArrowUp','PageUp'].includes(event.key) ? -1 : 0;
+      if (delta) { event.preventDefault(); this.go(this.index + delta); }
+      if (event.key === 'Home' || event.key === 'End') { event.preventDefault(); this.go(event.key === 'Home' ? 0 : this.slides.length - 1); }
+    });
+    document.addEventListener('wheel', event => {
+      if (this.dialog.open || event.ctrlKey || Math.abs(event.deltaY) < 8) return;
+      event.preventDefault();
+      if (performance.now() - this.lastWheel < 550) return;
+      this.lastWheel = performance.now();
+      this.go(this.index + Math.sign(event.deltaY));
+    }, {passive:false});
+    let start = null;
+    document.addEventListener('touchstart', event => {
+      start = !this.dialog.open && event.touches.length === 1 && !event.target.closest('button,a') ? {x:event.touches[0].clientX,y:event.touches[0].clientY} : null;
+    }, {passive:true});
+    document.addEventListener('touchend', event => {
+      if (!start || !event.changedTouches[0]) return;
+      const dx = start.x - event.changedTouches[0].clientX, dy = start.y - event.changedTouches[0].clientY;
+      if (Math.abs(dx) > 55 && Math.abs(dx) > Math.abs(dy)) this.go(this.index + Math.sign(dx));
+      start = null;
+    }, {passive:true});
+    const target = this.slides.findIndex(slide => '#' + slide.id === location.hash);
+    this.update(target < 0 ? 0 : target);
+    this.slides[this.index].classList.add('visible');
+  }
+  update(index) {
+    this.index = index;
+    document.querySelector('#counter').textContent = `${index + 1} / ${this.slides.length}`;
+    document.querySelector('.progress').value = index + 1;
+    document.querySelector('#prev').disabled = index === 0;
+    document.querySelector('#next').disabled = index === this.slides.length - 1;
+  }
+  go(index) {
+    index = Math.max(0, Math.min(index, this.slides.length - 1));
+    this.update(index);
+    this.slides[index].scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches ? 'instant' : 'smooth',block:'start'});
+  }
+  openNotes() {
+    const slide = this.slides[this.index];
+    document.querySelector('#notes-title').textContent = `Người ${slide.dataset.speaker} · Slide ${this.index + 1}`;
+    document.querySelector('#notes-time').textContent = `${slide.dataset.seconds} giây · ${slide.querySelector('.speaker-footer').lastElementChild.textContent}`;
+    document.querySelector('#notes-body').replaceChildren(slide.querySelector('.notes').content.cloneNode(true));
+    this.dialog.showModal();
+  }
+}
+new SlidePresentation();
+/* Scripted dialogue illustrates the design; it is never presented as an actual AI response. */
+const demoTurns = [
+  {title:'Thầy đặt câu hỏi',who:'THẦY LÂM',text:'Cuối tuần, em muốn làm gì? Em thử trả lời bằng tiếng Nhật nhé.'},
+  {title:'Người học tự thử',who:'LAN',text:'映画を見ます。',student:true,japanese:true},
+  {title:'Phản hồi đúng ý còn thiếu',who:'THẦY LÂM',text:'Câu này nói em xem hoặc sẽ xem phim. Để nói “muốn”, em thử đổi 見ます theo mẫu vừa học nhé.'},
+  {title:'Người học tự sửa',who:'LAN',text:'映画を見たいです。',student:true,japanese:true},
+  {title:'Vận dụng ở tình huống mới',who:'THẦY LÂM',text:'Câu này đã diễn đạt ý muốn xem phim. Nếu nói về món em muốn ăn, em sẽ nói thế nào?'}
+];
+let demoIndex = 0;
+function renderDemo() {
+  const turn = demoTurns[demoIndex], bubble = document.querySelector('#demo-bubble');
+  document.querySelector('#demo-stage').textContent = `${String(demoIndex + 1).padStart(2,'0')} / 05 · ${turn.title}`;
+  bubble.className = `bubble${turn.student ? ' student' : ''}`;
+  const label = document.createElement('span');label.className = 'who';label.textContent = turn.who;
+  const text = document.createElement('span');text.textContent = turn.text;
+  if (turn.japanese) {text.lang = 'ja';text.className = 'jp';}
+  bubble.replaceChildren(label,text);
+  document.querySelector('#demo-back').disabled = demoIndex === 0;
+  document.querySelector('#demo-next').disabled = demoIndex === demoTurns.length - 1;
+  document.querySelectorAll('.demo-dots span').forEach((dot,index) => dot.classList.toggle('active',index === demoIndex));
+}
+document.querySelector('#demo-back').addEventListener('click', () => {if (demoIndex > 0) {demoIndex--;renderDemo();}});
+document.querySelector('#demo-next').addEventListener('click', () => {if (demoIndex < demoTurns.length - 1) {demoIndex++;renderDemo();}});
+</script>
+</body>
+</html>
