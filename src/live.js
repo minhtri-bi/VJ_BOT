@@ -145,7 +145,8 @@ export async function mistralLiveRoute(request,env) {
       body:JSON.stringify({
         llm:{model},
         stt:{model:'voxtral-mini-transcribe-realtime-3'},
-        tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3144'},
+        // Haruto is the male Japanese preset, so the teacher keeps one male voice.
+        tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3133'},
         instructions:teaching,welcome_message:MISTRAL_WELCOME})
     });
     let response=await create(provider.models[0]||'mistral-small-latest');
