@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 
-function liveUI({microphone,reply,settings,geminiReply}={}) {
+function liveUI({microphone,reply,settings,geminiReply,mistralReply}={}) {
   const elements=new Map(),windowEvents={},tracks=[{enabled:true,stopped:false,stop(){this.stopped=true;}}],requests=[];
   const stream={getTracks:()=>tracks,getAudioTracks:()=>tracks};
   const element=id=>{
@@ -16,7 +16,14 @@ function liveUI({microphone,reply,settings,geminiReply}={}) {
     return elements.get(id);
   };
   const channel={readyState:'open',events:{},sent:[],closed:false,addEventListener(name,fn){this.events[name]=fn;},send(value){this.sent.push(JSON.parse(value));},close(){this.closed=true;},emit(event){this.events.message({data:JSON.stringify(event)});}};
-  let peer,permissions=0,socket;
+  let peer,permissions=0,socket,room;
+  class FakeRoom {
+    constructor(){room=this;this.events={};this.published=false;this.localParticipant={publishTrack:async()=>{this.published=true;}};}
+    on(name,fn){this.events[name]=fn;}
+    async connect(url,token){this.url=url;this.token=token;}
+    disconnect(){this.closed=true;}
+    emit(name,...args){this.events[name]?.(...args);}
+  }
   class FakeSocket {
     constructor(url){socket=this;this.url=url;this.events={};this.sent=[];this.readyState=1;}
     addEventListener(name,fn){this.events[name]=fn;}
@@ -45,17 +52,20 @@ function liveUI({microphone,reply,settings,geminiReply}={}) {
   }
   const context=vm.createContext({console,Date,JSON,setInterval,clearInterval,setTimeout,clearTimeout,AbortController,
     RTCPeerConnection:Peer,MediaStream:class{},signedInUser:{user_id:'email:admin',is_admin:true},activeCurriculumLevel:'N5',
-    WebSocket:FakeSocket,AudioContext:FakeAudioContext,atob,btoa,URL,encodeURIComponent,Float32Array,Int16Array,
+    WebSocket:FakeSocket,AudioContext:FakeAudioContext,atob,btoa,URL,encodeURIComponent,Float32Array,Int16Array,TextDecoder,
+    VJLiveKit:{Room:FakeRoom,RoomEvent:{TrackSubscribed:'ts',TrackUnsubscribed:'tu',DataReceived:'dr',Disconnected:'dc'},Track:{Kind:{Audio:'audio'},Source:{Microphone:'microphone'}}},
     location:{hash:'#classroom'},navigator:{mediaDevices:{getUserMedia:()=>{permissions++;return microphone?microphone():Promise.resolve(stream);}}},
     apiFetch:async(path,options)=>{
       if(path==='/api/ai/settings')return Response.json(settings??{is_admin:true,source:'platform'});
       requests.push({path,body:JSON.parse(options.body),signal:options.signal});
       if(path==='/api/live/gemini')return geminiReply?geminiReply():Response.json({token:'auth_tokens/test-token',ws:'wss://test/ws',model:'gemini-live',greeting:'こんにちは',commands:{repeat:'lặp lại'}},{status:201});
+      if(path==='/api/live/mistral')return options.method==='DELETE'?Response.json({ok:true})
+        :mistralReply?mistralReply():Response.json({id:'sess_test1',participantToken:'pt-test',serverUrl:'wss://lk.test',model:'mistral-live',greeting:'こんにちは',commands:{}},{status:201});
       return reply?reply():Response.json({model:'gpt-live-1',voice:'shida',id:'live_test',sdp:'answer',greeting:'こんにちは'});
     },
     document:{getElementById:element,createElement:()=>element('node_'+elements.size),querySelector:element,querySelectorAll:()=>[]},addEventListener:(name,fn)=>{windowEvents[name]=fn;}});
   context.window=context;vm.runInContext(readFileSync('static/live-transcript.js','utf8'),context);vm.runInContext(readFileSync('static/live.js','utf8'),context);
-  return {context,element,channel,tracks,requests,stream,peer:()=>peer,socket:()=>socket,permissions:()=>permissions,windowEvents};
+  return {context,element,channel,tracks,requests,stream,peer:()=>peer,socket:()=>socket,room:()=>room,permissions:()=>permissions,windowEvents};
 }
 const captions=(ui,role)=>ui.element('live-transcript').children.filter(row=>row.className==='live-turn '+role).map(row=>row.children[1].textContent).join('');
 
@@ -100,12 +110,30 @@ test('learners with a Gemini connection open a websocket session with timed capt
   } finally {ui.windowEvents.pagehide();}
 });
 
+test('learners with a Mistral key open a LiveKit room with cumulative captions and a session delete on close',async()=>{
+  const ui=liveUI({settings:{is_admin:false,source:'own',own:{protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'m'}}});
+  try {
+    await ui.element('live-start').events.click();
+    assert.equal(ui.requests.length,1);assert.equal(ui.requests[0].path,'/api/live/mistral');
+    assert.deepEqual(ui.requests[0].body,{level:'N5',lesson:null});
+    const room=ui.room();assert.equal(room.url,'wss://lk.test');assert.equal(room.token,'pt-test');assert.equal(room.published,true);
+    const segment=content=>({type:'transcription.segment',id:'s1',role:'assistant',content,final:true});
+    room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは'))),null,null,'voice_agent.events');
+    room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは！'))),null,null,'voice_agent.events');
+    room.emit('dr',new TextEncoder().encode(JSON.stringify({type:'transcription.segment',id:'u1',role:'user',content:'はい',final:true})),null,null,'voice_agent.events');
+    assert.equal(captions(ui,'assistant'),'こんにちは！');assert.equal(captions(ui,'user'),'はい');
+    ui.element('live-end').events.click();
+    assert.equal(room.closed,true);assert.equal(ui.tracks[0].stopped,true);assert.equal(ui.element('live-start').disabled,false);
+    assert.equal(ui.requests.at(-1).path,'/api/live/mistral');assert.deepEqual(ui.requests.at(-1).body,{id:'sess_test1'});
+  } finally {ui.windowEvents.pagehide();}
+});
+
 test('a learner without a live-capable key gets a guidance message instead of a call',async()=>{
   const ui=liveUI({settings:{is_admin:false,source:'own',own:{protocol:'openai',base_url:'https://openrouter.ai/api/v1',model:'m'}}});
   try {
     await ui.element('live-start').events.click();
     assert.equal(ui.requests.length,0);assert.equal(ui.socket(),undefined);assert.equal(ui.peer(),undefined);
-    assert.equal(ui.element('live-status').textContent,'Nói trực tiếp cần kết nối OpenAI chính thức hoặc Gemini gốc trong Cài đặt.');
+    assert.equal(ui.element('live-status').textContent,'Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.');
   } finally {ui.windowEvents.pagehide();}
 });
 

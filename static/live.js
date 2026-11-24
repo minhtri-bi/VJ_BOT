@@ -6,6 +6,7 @@
   const BARS=33,SILENCE='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
   let audioContext=null,analyser=null,waveFrame=null,callOwner=null,statsTimer=null,remoteLevel=0;
   let liveSocket=null,captureNode=null,captureSource=null,nextPlayTime=0,liveEngineCached=null;
+  let mistralRoom=null,mistralSessionId=null,mistralSegments={};
   const audioSources=[];
   let wakeLock=null,commands={},teacherAnalyser=null,teacherHeardAt=0,teacherExpectedUntil=0,teacherSpeaking=false,userMuted=false;
   // Keep the screen on during a call: iPhone locking the screen drops the microphone.
@@ -54,8 +55,10 @@
     clearInterval(timer); clearTimeout(closeTimer); clearTimeout(connectTimer); clearTimeout(disconnectedTimer);
     abort?.abort(); abort=null;
     stream?.getTracks().forEach(track=>track.stop()); stream=null;
-    const oldChannel=channel, oldPeer=peer, oldSocket=liveSocket; channel=null;peer=null;liveSocket=null;
-    oldChannel?.close(); oldPeer?.close(); oldSocket?.close();
+    const oldChannel=channel, oldPeer=peer, oldSocket=liveSocket, oldRoom=mistralRoom, sessionId=mistralSessionId;
+    channel=null;peer=null;liveSocket=null;mistralRoom=null;mistralSessionId=null;mistralSegments={};
+    oldChannel?.close(); oldPeer?.close(); oldSocket?.close(); oldRoom?.disconnect?.();
+    if(sessionId)apiFetch('/api/live/mistral',{method:'DELETE',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:sessionId})}).catch(()=>{});
     captureSource?.disconnect?.();captureNode?.disconnect?.();captureSource=null;captureNode=null;nextPlayTime=0;
     if(waveFrame!==null)cancelAnimationFrame(waveFrame);waveFrame=null;
     clearInterval(statsTimer);statsTimer=null;remoteLevel=0;
@@ -124,7 +127,7 @@
     cleanup('Đã kết thúc cuộc trò chuyện.');
   }
   async function start() {
-    if (peer || liveSocket || el('live-start').disabled) return;
+    if (peer || liveSocket || mistralRoom || el('live-start').disabled) return;
     if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection==='undefined') {status('Trình duyệt cần hỗ trợ WebRTC và micro qua HTTPS hoặc localhost.');return;}
     // iOS only lets an element play later if it was started inside this tap: unlock it with a silent clip.
     const speaker=el('live-audio');
@@ -141,7 +144,8 @@
       stream=microphone;
       const engine=await liveEngine();
       if(engine==='gemini'){await startGemini(run,microphone);return;}
-      if(engine!=='openai'){cleanup('Nói trực tiếp cần kết nối OpenAI chính thức hoặc Gemini gốc trong Cài đặt.');return;}
+      if(engine==='mistral'){await startMistral(run,microphone);return;}
+      if(engine!=='openai'){cleanup('Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.');return;}
       const connection=peer=new RTCPeerConnection();
       connectWave(stream);
       stream.getTracks().forEach(track=>connection.addTrack(track,stream));
@@ -214,6 +218,7 @@
       const host=protocol=>new URL((own?.base_url||'').trim()||settings?.bases?.[protocol]||'https://x').hostname;
       if(settings?.is_admin)liveEngineCached='openai';
       else if(own?.protocol==='gemini' && /(^|\.)generativelanguage\.googleapis\.com$/.test(host('gemini')))liveEngineCached='gemini';
+      else if(own?.protocol==='openai' && /(^|\.)mistral\.ai$/.test(host('openai')))liveEngineCached='mistral';
       else if(own?.protocol==='openai' && /(^|\.)openai\.com$/.test(host('openai')))liveEngineCached='openai';
       else liveEngineCached='none';
     } catch { liveEngineCached='none'; }
@@ -280,6 +285,63 @@
     });
     socket.addEventListener('close',()=>{if(run===version)cleanup('Kết nối đã đóng.');});
     socket.addEventListener('error',()=>{if(run===version)cleanup('Không kết nối được cuộc trò chuyện trực tiếp. Kiểm tra mạng và thiết bị rồi thử lại.');});
+    status('Đang kết nối với thầy…');
+    connectTimer=setTimeout(()=>{if(run===version)cleanup('Kết nối hết thời gian. Hãy thử lại.');},35000);
+  }
+  // Mistral Voice Agents run in a LiveKit room; livekit-client is vendored and loaded on demand.
+  function loadLiveKit() {
+    if(window.VJLiveKit)return Promise.resolve();
+    if(loadLiveKit.promise)return loadLiveKit.promise;
+    loadLiveKit.promise=new Promise((resolve,reject)=>{
+      const script=document.createElement('script');script.src='livekit.min.js';
+      script.addEventListener('load',resolve);script.addEventListener('error',()=>{loadLiveKit.promise=null;reject(new Error('load'));});
+      document.head.appendChild(script);
+    });
+    return loadLiveKit.promise;
+  }
+  async function startMistral(run,microphone) {
+    const context=globalThis.teacherContext?.();
+    const lesson=(typeof chatLessonContext!=='undefined'?chatLessonContext:null) || context?.lesson;
+    abort=new AbortController();
+    const [response]=await Promise.all([apiFetch('/api/live/mistral',{method:'POST',signal:abort.signal,headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({level:lesson?.level || activeCurriculumLevel || 'N5',lesson:lesson?{id:lesson.id,level:lesson.level}:null})}),loadLiveKit()]);
+    const result=await response.json();
+    if(run!==version)return;
+    if(!response.ok)throw Object.assign(new Error(result.detail || 'Không mở được cuộc gọi.'),{userFacing:true});
+    commands={};
+    const {Room,RoomEvent,Track}=window.VJLiveKit,room=mistralRoom=new Room();
+    mistralSessionId=result.id;
+    room.on(RoomEvent.TrackSubscribed,track=>{
+      if(run!==version || track.kind!==Track.Kind.Audio)return;
+      const media=new MediaStream([track.mediaStreamTrack]);
+      el('live-audio').srcObject=media;connectWave(media,true);
+      el('live-audio').play().catch(()=>{if(run===version){el('live-play-audio').hidden=false;status('Nhấn Bật âm thanh để nghe thầy.');}});
+      teacherHeardAt=Date.now();turn();
+    });
+    room.on(RoomEvent.DataReceived,(payload,participant,_kind,topic)=>{
+      if(run!==version || topic!=='voice_agent.events')return;
+      let event;try{event=JSON.parse(new TextDecoder().decode(payload));}catch{return;}
+      if(event?.type!=='transcription.segment' || !['user','assistant'].includes(event.role) || typeof event.content!=='string' || typeof event.id!=='string')return;
+      const previous=mistralSegments[event.id]||'';
+      if(event.final && event.content===previous)return;
+      if(!event.content.startsWith(previous))return;
+      mistralSegments[event.id]=event.content;
+      const delta=event.content.slice(previous.length);if(!delta)return;
+      const now=Date.now()-startedAt;
+      timeline.add({type:event.role==='user'?'session.input_transcript.delta':'session.output_transcript.delta',
+        delta,start_ms:Math.max(0,now-2000),end_ms:now});
+      if(event.role==='assistant')teacherHeardAt=Date.now();
+    });
+    room.on(RoomEvent.Disconnected,()=>{if(run===version)cleanup('Kết nối đã đóng.');});
+    await room.connect(result.serverUrl,result.participantToken);
+    if(run!==version){room.disconnect();return;}
+    await room.localParticipant.publishTrack(microphone.getAudioTracks()[0],{source:Track.Source.Microphone});
+    if(run!==version){room.disconnect();return;}
+    connectWave(microphone);
+    ready=true;clearTimeout(connectTimer);controls(true);startedAt=Date.now();keepAwake();teacherExpectedUntil=Date.now()+4000;turn();
+    timer=setInterval(()=>{const seconds=Math.floor((Date.now()-startedAt)/1000);
+      el('live-duration').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+      if(seconds>=600)end();},1000);
     status('Đang kết nối với thầy…');
     connectTimer=setTimeout(()=>{if(run===version)cleanup('Kết nối hết thời gian. Hãy thử lại.');},35000);
   }

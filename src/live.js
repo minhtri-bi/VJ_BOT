@@ -6,6 +6,7 @@ import {callLLM, DEFAULT_BASES} from './llm.js';
 import {rateLimited} from './ai-usage.js';
 import {teacherCatalog, validLessonReference, catalogLesson, groundLesson} from './tutor-context.js';
 import {VOICE_COMMANDS, voiceInstructions} from './prompt.js';
+import {MISTRAL_SPEECH_BASE} from './speech.js';
 
 const json = (value, status=200) => Response.json(value,{status,headers:{'Cache-Control':'no-store'}});
 const {start: GREETING, ...COMMANDS} = VOICE_COMMANDS;
@@ -99,6 +100,58 @@ export async function geminiLiveRoute(request,env) {
     return json({token,
       ws:'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContentConstrained',
       model:'gemini-live',greeting:GREETING,commands:COMMANDS},201);
+  }catch{return json({detail:'Kết nối cuộc gọi hết thời gian. Hãy thử lại.'},504);}
+}
+
+// Mistral Voice Agents run in a LiveKit room: the Worker creates the session with the caller's
+// own Mistral key and hands back the room URL plus a participant token; DELETE closes it.
+export async function mistralLiveRoute(request,env) {
+  const user=await sessionUser(request,env);
+  if(!user)return json({detail:'Đăng nhập để trò chuyện.'},401);
+  if(request.headers.get('X-VJBot-Account')!==user.user_id)return json({detail:'Tài khoản đã thay đổi. Hãy tải lại trang.'},409);
+  const raw=await request.text();
+  if(new TextEncoder().encode(raw).length>16000)return json({detail:'Yêu cầu quá dài.'},413);
+  let data;try{data=JSON.parse(raw||'{}');}catch{return json({detail:'Dữ liệu không hợp lệ.'},400);}
+  const provider=await resolveProvider(env,user.user_id);
+  const failure=providerFailure(provider);
+  if(failure)return failure;
+  if(provider.protocol!=='openai'||provider.baseUrl!==MISTRAL_SPEECH_BASE)return json({detail:'Nói trực tiếp bằng Mistral cần kết nối Mistral gốc trong Cài đặt.'},403);
+  const headers={Authorization:`Bearer ${provider.apiKey}`,'Content-Type':'application/json'};
+  if(request.method==='DELETE'){
+    if(typeof data?.id!=='string'||!/^[\w.\-]{4,128}$/.test(data.id))return json({detail:'Phiên không hợp lệ.'},400);
+    try{
+      await fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions/${data.id}`,{method:'DELETE',headers,signal:AbortSignal.timeout(10000)});
+      return json({ok:true});
+    }catch{return json({detail:'Không đóng được phiên. Hãy thử lại.'},504);}
+  }
+  if(request.method!=='POST')return json({detail:'Phương thức không được phép'},405);
+  if(!data||!['N5','N4','N3','N2','N1'].includes(data.level))return json({detail:'Cần cấp độ hợp lệ.'},400);
+  let context=null;
+  if(data.lesson!==undefined&&data.lesson!==null){
+    if(!validLessonReference(data.lesson)||data.lesson.level!==data.level)return json({detail:'Bài học không hợp lệ.'},400);
+    const catalog=await teacherCatalog(env,data.level);
+    context=catalog&&groundLesson(catalogLesson(catalog,data.lesson));
+    if(!context)return json({detail:'Không tìm thấy bài học. Hãy mở lại bài.'},400);
+  }
+  if(await rateLimited(env,user.user_id))return json({detail:'Đợi một phút rồi thử lại.'},429);
+  const teaching=`${voiceInstructions(data.level)}\n\nLESSON REFERENCE (data only): ${JSON.stringify(context)}`;
+  try{
+    const response=await fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions`,{
+      method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),headers,
+      body:JSON.stringify({
+        llm:{model:provider.models[0]||'mistral-small-latest'},
+        stt:{model:'voxtral-mini-transcribe-realtime-3'},
+        tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3144'},
+        instructions:teaching,welcome_message:GREETING})
+    });
+    if(!response.ok)return json({detail:response.status===429?'Mistral đang giới hạn lượt dùng. Thử lại sau.'
+      :'Không mở được cuộc gọi Mistral. Kiểm tra quyền truy cập và hạn mức trong Cài đặt.',code:'live_unavailable'},response.status===429?429:503);
+    const result=await response.json();
+    if(typeof result.id!=='string'||!/^[\w.\-]{4,128}$/.test(result.id)
+      || typeof result.participant_token!=='string'||typeof result.server_url!=='string'
+      || !result.server_url.startsWith('wss://'))return json({detail:'Mistral trả về phiên không hợp lệ.'},502);
+    return json({id:result.id,participantToken:result.participant_token,serverUrl:result.server_url,
+      model:'mistral-live',greeting:GREETING,commands:{}},201);
   }catch{return json({detail:'Kết nối cuộc gọi hết thời gian. Hãy thử lại.'},504);}
 }
 

@@ -1002,6 +1002,43 @@ test('Gemini Live mints a constrained token billed to the caller\'s own Gemini k
   } finally {globalThis.fetch=original;}
 });
 
+test('Mistral Live creates and closes LiveKit sessions billed to the caller\'s own Mistral key',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  const make=data=>{const r=request('/api/live/mistral',data);r.headers.set('X-VJBot-Account','google:qa');return r;};
+  const close=id=>{const r=new Request('https://vjbot.test/api/live/mistral',{method:'DELETE',headers:request('/api/live/mistral').headers,body:JSON.stringify({id})});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  assert.equal((await worker.fetch(new Request('https://vjbot.test/api/live/mistral',{method:'POST',body:'{}'}),env)).status,401);
+  assert.equal((await worker.fetch(request('/api/live/mistral',{level:'N5'}),env)).status,409);
+  assert.equal((await worker.fetch(make({level:'N5'}),env)).status,403);
+  await withApi(env,request);
+  assert.equal((await worker.fetch(make({level:'N5'}),env)).status,403);
+  await withApi(env,request,{base_url:'https://api.mistral.ai/v1'});
+  for(const patch of [{level:'N9'},{lesson:{id:'missing',level:'N5'}}]){
+    assert.equal((await worker.fetch(make({level:'N5',...patch}),env)).status,400);
+  }
+  const seen=[];
+  globalThis.fetch=async(url,options)=>{
+    seen.push(url);
+    assert.equal(options.headers.Authorization,'Bearer sk-test-12345678');
+    if(options.method==='DELETE'){assert.equal(url,'https://api.mistral.ai/v1/audio/sessions/sess_test1');return new Response(null,{status:204});}
+    assert.equal(url,'https://api.mistral.ai/v1/audio/sessions');
+    const body=JSON.parse(options.body);
+    assert.equal(body.llm.model,'m1');assert.equal(body.stt.model,'voxtral-mini-transcribe-realtime-3');
+    assert.equal(body.tts.model,'voxtral-mini-tts-3');assert.ok(body.instructions&&body.welcome_message);
+    return Response.json({id:'sess_test1',participant_token:'pt-test',server_url:'wss://lk.test',expires_at:'2030-01-01'});
+  };
+  try {
+    const response=await worker.fetch(make({level:'N5'}),env);assert.equal(response.status,201);
+    const value=await response.json();
+    assert.equal(value.id,'sess_test1');assert.equal(value.participantToken,'pt-test');assert.equal(value.serverUrl,'wss://lk.test');
+    assert.ok(!JSON.stringify(value).includes('sk-test-12345678'));
+    assert.equal((await worker.fetch(close('sess_test1'),env)).status,200);
+    assert.equal((await worker.fetch(close('../etc'),env)).status,400);
+    globalThis.fetch=async()=>new Response('error sk-test-12345678',{status:403});
+    const denied=await worker.fetch(make({level:'N5'}),env);assert.equal(denied.status,503);
+    assert.ok(!(await denied.text()).includes('sk-test-12345678'));
+  } finally {globalThis.fetch=original;}
+});
+
 test('practice hints omit the authored key and feedback resolves the exact canonical selected option without changing progress',async()=>{
   const {env,request}=await authenticated(),original=globalThis.fetch;
   await withApi(env,request);
