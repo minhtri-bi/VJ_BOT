@@ -209,9 +209,6 @@ dialog::backdrop, #auth-dialog::backdrop, .picker-overlay {
 }
 
 /* Voice: whole-turn stamps, turn indicator, quick commands */
-.live-turn[data-cont=true] { margin-top: -16px; }
-.live-turn[data-cont=true] > header { display: none; }
-.live-turn.user[data-cont=true] { border-top-left-radius: 4px; border-top-right-radius: 4px; }
 .live-commands { display: flex; gap: 8px; overflow-x: auto; padding: 2px 0 4px; scrollbar-width: none; flex-shrink: 0; -webkit-overflow-scrolling: touch; }
 .live-commands::-webkit-scrollbar { display: none; }
 .live-commands[hidden] { display: none; }
@@ -274,12 +271,6 @@ dialog::backdrop, #auth-dialog::backdrop, .picker-overlay {
 #panel-classroom .live-stage:not([data-active=true]) #live-wave { opacity: .4; }
 .live-stage:not([data-active=true]) .live-orb { animation: orb-breathe 4s var(--ios-ease, ease-in-out) infinite; }
 @keyframes orb-breathe { 50% { transform: scale(1.04); } }
-/* Once the conversation has text, the stage shrinks into a header so the transcript gets the room. */
-#panel-classroom .classroom-voice:has(#live-transcript[data-empty=false]) .live-stage { flex-direction: row; gap: 12px; padding: 10px 14px; border-radius: 18px; }
-#panel-classroom .classroom-voice:has(#live-transcript[data-empty=false]) .live-orb { width: 52px; height: 52px; margin: 0; box-shadow: 0 0 0 calc(2px + var(--level) * 8px) color-mix(in srgb, currentColor calc(10% + var(--level) * 40%), transparent); }
-#panel-classroom .classroom-voice:has(#live-transcript[data-empty=false]) .live-orb > img { width: 36px; height: 64px; margin-top: 22px; }
-#panel-classroom .classroom-voice:has(#live-transcript[data-empty=false]) .live-id { text-align: left; flex: 1; min-width: 0; }
-#panel-classroom .classroom-voice:has(#live-transcript[data-empty=false]) #live-wave { width: 120px; height: 36px; }
 @media (prefers-reduced-motion: reduce) { .live-orb, .live-stage:not([data-active=true]) .live-orb { animation: none; transition: none; } }
 
 /* Drawer: wide enough to read, 48px rows, level chip as one row, Lâm as a compact footer card. */
