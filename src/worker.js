@@ -9,7 +9,7 @@ import {speechResponse, openAISpeechResponse, mistralSpeechResponse, MISTRAL_SPE
 import {antigravityOAuthRoute} from './antigravity-oauth.js';
 import { tutorChat } from './tutor-chat.js';
 import { clearTutorConversation } from './tutor-session.js';
-import {liveRoute, geminiLiveRoute, mistralLiveRoute} from './live.js';
+import {liveRoute, liveTranslationRoute, geminiLiveRoute, mistralLiveRoute} from './live.js';
 import {practiceCoach} from './practice-coach.js';
 import {transcriptionRoute} from './transcription.js';
 import {recordTaskAttempt,taskEvidenceSummary} from './task-attempts.js';
@@ -71,6 +71,7 @@ export default {
     try {
       if (url.pathname.startsWith('/api/auth/')) return await authRoute(request,env);
       if (url.pathname === '/api/live') return await liveRoute(request,env);
+      if (url.pathname === '/api/live/translate') return await liveTranslationRoute(request,env);
       if (url.pathname === '/api/live/gemini') return await geminiLiveRoute(request,env);
       if (url.pathname === '/api/live/mistral') return await mistralLiveRoute(request,env);
       if (url.pathname === '/api/stt') return await transcriptionRoute(request,env);

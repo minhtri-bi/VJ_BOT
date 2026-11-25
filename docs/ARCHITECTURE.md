@@ -63,7 +63,7 @@ Open-writing criteria are revealed only after an answer receipt, and excluded fr
 | `static/learning.js`, `study-plan.js`, `lesson-checks.js`, `completion.js`, `practice.js` | Source lesson adapters, complete typed task inventories, explicit choice/recall/writing/dictation, progress evidence and independent manual markers |
 | `static/navigation.js`, `workspace.js` | Route theo hash, sidebar, dashboard, level hub và catalog luyện/thi thử |
 | `src/transcription.js`, `static/recorded-input.js`, `speech-input.js` | Kaiwa: bản ghi giới hạn, chép lời OpenAI và nhận diện trình duyệt dự phòng, hủy khi rời bài |
-| `src/live.js`, `static/live.js` | Voice liên tục: SDP qua Worker, media WebRTC trực tiếp OpenAI / WebSocket Gemini / LiveKit Mistral, waveform Web Audio, theo lượt nói; không giữ bản chép lời |
+| `src/live.js`, `static/live.js`, `static/live-transcript.js` | Admin Voice liên tục: SDP qua Worker, media WebRTC trực tiếp OpenAI, waveform Web Audio, hội thoại theo mốc thời gian và bản dịch Việt tạm thời; dịch bằng request riêng có giới hạn |
 | `src/admin-ai.js`, `static/admin-ai.js` | Catalog model/suy luận hợp lệ, tùy chọn từng admin |
 | `static/vi-labels.js` | Nhãn và công thức ngữ pháp tiếng Việt, nạp từ điển dịch |
 | `static/*.css` | Nhiều lớp CSS chồng lên nhau, xem [ROADMAP](ROADMAP.md). `surfaces.css` (nạp trước `motion.css`) là hệ thống bề mặt dùng chung: thẻ, pill trạng thái, hộp thoại/popover/overlay, khối bài học, bố cục Cài đặt hai cột. `workbench.css` điều chỉnh sidebar/chat/catalog; `motion.css` cung cấp token chuyển động (`--ease-out`, `--dur-1..3`) và độ nổi (`--elev-1..3`), hiệu ứng vào trang, so le, hover, hộp thoại; chỉ chạy khi không bật giảm chuyển động |

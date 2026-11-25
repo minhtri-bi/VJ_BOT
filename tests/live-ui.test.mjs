@@ -64,16 +64,22 @@ function liveUI({microphone,reply,settings,geminiReply,mistralReply,mistralConne
       return reply?reply():Response.json({model:'gpt-live-1',voice:'shida',id:'live_test',sdp:'answer',greeting:'こんにちは'});
     },
     document:{getElementById:element,createElement:()=>element('node_'+elements.size),querySelector:element,querySelectorAll:()=>[]},addEventListener:(name,fn)=>{windowEvents[name]=fn;}});
-  context.window=context;vm.runInContext(readFileSync('static/live.js','utf8'),context);
+  context.window=context;vm.runInContext(readFileSync('static/live-transcript.js','utf8'),context);vm.runInContext(readFileSync('static/live.js','utf8'),context);
   return {context,element,channel,tracks,requests,stream,peer:()=>peer,socket:()=>socket,room:()=>room,permissions:()=>permissions,windowEvents};
 }
-test('live voice relays only SDP and lesson references and ends cleanly',async()=>{
+const captions=(ui,role)=>ui.element('live-transcript').children.filter(row=>row.className==='live-turn '+role).map(row=>row.children[1].textContent).join('');
+
+test('live voice relays only SDP and lesson references, appends exact timed captions and ends cleanly',async()=>{
   const ui=liveUI();
   await ui.element('live-start').events.click();
   try {
     assert.equal(ui.requests[0].path,'/api/live');assert.deepEqual(ui.requests[0].body,{sdp:'v=0\r\nm=audio 9 test\r\n',level:'N5',lesson:null});
     assert.equal(ui.peer().answer.sdp,'answer');
     assert.equal(ui.channel.sent[0].type,'session.commentary.append');
+    ui.channel.emit({type:'session.output_transcript.delta',delta:'こんにちは',start_ms:0,end_ms:100});
+    ui.channel.emit({type:'session.input_transcript.delta',delta:'はい',start_ms:70,end_ms:150});
+    ui.channel.emit({type:'session.output_transcript.delta',delta:'！',start_ms:100,end_ms:200});
+    assert.equal(captions(ui,'assistant'),'こんにちは！');assert.equal(captions(ui,'user'),'はい');
     ui.element('live-mute').events.click();assert.equal(ui.tracks[0].enabled,false);
     ui.element('live-mute').events.click();assert.equal(ui.tracks[0].enabled,true);
     ui.element('live-end').events.click();assert.equal(ui.channel.sent.at(-1).type,'session.close');assert.equal(ui.tracks[0].enabled,false);
@@ -82,7 +88,7 @@ test('live voice relays only SDP and lesson references and ends cleanly',async()
   } finally {ui.windowEvents.pagehide();}
 });
 
-test('learners with a Gemini connection open a websocket session with commands',async()=>{
+test('learners with a Gemini connection open a websocket session with timed captions and commands',async()=>{
   const ui=liveUI({settings:{is_admin:false,source:'own',own:{protocol:'gemini',base_url:'',model:'gm'},
     bases:{gemini:'https://generativelanguage.googleapis.com'}}});
   try {
@@ -94,6 +100,8 @@ test('learners with a Gemini connection open a websocket session with commands',
     socket.emit('message',{setupComplete:{}});
     const audio=Buffer.from(new Int16Array([100,-100,200]).buffer).toString('base64');
     socket.emit('message',{serverContent:{modelTurn:{parts:[{inlineData:{data:audio}}]},outputTranscription:{text:'こんにちは'}}});
+    socket.emit('message',{serverContent:{inputTranscription:{text:'はい'}}});
+    assert.equal(captions(ui,'assistant'),'こんにちは');assert.equal(captions(ui,'user'),'はい');
     ui.element('live-commands').events.click({target:{dataset:{command:'repeat'}}});
     assert.equal(socket.sent.at(-1).clientContent.turns[0].parts[0].text,'lặp lại');
     ui.element('live-end').events.click();
@@ -102,7 +110,7 @@ test('learners with a Gemini connection open a websocket session with commands',
   } finally {ui.windowEvents.pagehide();}
 });
 
-test('learners with a Mistral key open a LiveKit room and the session is deleted on close',async t=>{
+test('learners with a Mistral key open a LiveKit room with cumulative captions and a session delete on close',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   const ui=liveUI({settings:{is_admin:false,source:'own',own:{protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'m'}}});
   try {
@@ -114,6 +122,11 @@ test('learners with a Mistral key open a LiveKit room and the session is deleted
     assert.equal(ui.element('live-stage').dataset.active,'true');
     assert.match(ui.element('live-status').textContent,/lượt em nói/i);
     assert.equal(ui.tracks[0].stopped,false);
+    const segment=content=>({type:'transcription.segment',id:'s1',role:'assistant',content,final:true});
+    room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは'))),null,null,'voice_agent.events');
+    room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは！'))),null,null,'voice_agent.events');
+    room.emit('dr',new TextEncoder().encode(JSON.stringify({type:'transcription.segment',id:'u1',role:'user',content:'はい',final:true})),null,null,'voice_agent.events');
+    assert.equal(captions(ui,'assistant'),'こんにちは！');assert.equal(captions(ui,'user'),'はい');
     ui.element('live-end').events.click();
     assert.equal(room.closed,true);assert.equal(ui.tracks[0].stopped,true);assert.equal(ui.element('live-start').disabled,false);
     assert.equal(ui.requests.at(-1).path,'/api/live/mistral');assert.deepEqual(ui.requests.at(-1).body,{id:'sess_test1'});
@@ -236,6 +249,8 @@ test('opening live shows the panel without requesting a microphone until explici
   await ui.element('live-start').events.click();
   try{
     assert.equal(ui.permissions(),1);assert.equal(ui.requests.length,1);
+    for(const [type,delta] of [['session.input_transcript.delta','こんにちは'],['session.output_transcript.delta','こんにちは。'],['session.input_transcript.delta','学生です'],['session.output_transcript.delta','何年生ですか？']])ui.channel.emit({type,delta,start_ms:100,end_ms:200});
+    assert.equal(captions(ui,'assistant'),'こんにちは。何年生ですか？');assert.equal(captions(ui,'user'),'こんにちは学生です');
     ui.context.stopLiveConversation();assert.equal(ui.tracks[0].enabled,false);ui.channel.emit({type:'session.closed'});assert.equal(ui.peer().closed,true);
     const endedStatus=ui.element('live-status').textContent;
     await ui.context.openLiveConversation();
@@ -249,10 +264,11 @@ test('signed-in learners open the live view without media or fetch until they pr
   assert.equal(ui.element('classroom-voice').hidden,false);assert.equal(ui.requests.length,0);assert.equal(ui.peer(),undefined);
 });
 
-test('switching accounts during an active call disables the mic and hides the live view',async()=>{
+test('switching accounts during an active call disables the mic and clears the previous transcript',async()=>{
   const ui=liveUI();await ui.context.openLiveConversation();await ui.element('live-start').events.click();
+  ui.channel.emit({type:'session.input_transcript.delta',delta:'私の話',start_ms:0,end_ms:400});
   ui.context.signedInUser={user_id:'email:other-admin',is_admin:true};ui.context.checkLiveAccount();
-  assert.equal(ui.tracks[0].enabled,false);
+  assert.equal(ui.tracks[0].enabled,false);assert.equal(ui.element('live-transcript').children.length,0);
   assert.equal(ui.element('classroom-voice').hidden,true);ui.channel.emit({type:'session.closed'});ui.windowEvents.pagehide();
 });
 
