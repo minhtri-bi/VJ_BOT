@@ -987,7 +987,7 @@ test('Gemini Live mints a constrained token billed to the caller\'s own Gemini k
     const setup=JSON.parse(options.body).authToken.config.bidiGenerateContentSetup;
     assert.equal(setup.model,'models/gemini-2.5-flash-native-audio-preview-09-2025');
     assert.deepEqual(setup.generationConfig.responseModalities,['AUDIO']);
-    assert.equal(setup.inputAudioTranscription,undefined);assert.equal(setup.outputAudioTranscription,undefined);
+    assert.ok(setup.inputAudioTranscription&&setup.outputAudioTranscription);
     return Response.json({name:'auth_tokens/gemini-test-token'});
   };
   try {
@@ -1313,6 +1313,75 @@ test('learner transcription transcribes through an owned official Mistral chat c
     await withApi(env,request);
     assert.equal((await worker.fetch(make(body,chatId),env)).status,403);
     assert.equal((await (await worker.fetch(make({action:'capabilities'},chatId),env)).json()).supported,false);
+  }finally{globalThis.fetch=original;}
+});
+
+test('live translation requires a matching account and bounded caption data before fetching',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;env.OPENAI_API_KEY='server-translation-key';
+  await withApi(env,request,{base_url:'https://api.openai.com/v1'});
+  const segments=[{id:'caption_1',role:'user',text:'私は学生です。'}];
+  const make=body=>{const r=new Request('https://vjbot.test/api/live/translate',{method:'POST',headers:request('/api/live/translate').headers,body:JSON.stringify(body)});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  let calls=0;globalThis.fetch=async()=>{calls++;throw new Error('must not fetch');};
+  try{
+    assert.equal((await worker.fetch(new Request('https://vjbot.test/api/live/translate',{method:'POST',body:'{}'}),env)).status,401);
+    assert.equal((await worker.fetch(make({segments}),env)).status,503);assert.equal(calls,1);calls=0;
+    assert.equal((await worker.fetch(request('/api/live/translate',{segments}),env)).status,409);
+    for(const data of [null,{},[],{segments:[]},{segments:Array(9).fill(segments[0])},{segments:[...segments,...segments]},
+      {segments:[{...segments[0],role:'system'}]},{segments:[{...segments[0],id:'<script>'}]},{segments:[{...segments[0],text:'x'.repeat(1201)}]}]){
+      assert.equal((await worker.fetch(make(data),env)).status,400,JSON.stringify(data)?.slice(0,60));
+    }
+    assert.equal(calls,0);
+    const crossed=make({segments});crossed.headers.set('Origin','https://attacker.test');assert.equal((await worker.fetch(crossed,env)).status,403);
+    delete env.OPENAI_API_KEY;assert.equal((await worker.fetch(make({segments}),env)).status,503);
+  }finally{globalThis.fetch=original;}
+});
+
+test('live translation uses only the server key, checks exact returned IDs and never stores transcript text',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;await asAdmin(env);env.OPENAI_API_KEY='server-translation-key';
+  const segments=[{id:'caption_1',role:'user',text:'私は学生です。'},{id:'caption_2',role:'assistant',text:'こんにちは。'}];
+  const make=()=>{const r=request('/api/live/translate',{segments});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  let output={translations:[{id:'caption_2',text_vi:'Xin chào.'},{id:'caption_1',text_vi:'Tôi là học sinh.'}]};
+  let fetches=0;
+  globalThis.fetch=async(url,options)=>{
+    fetches++;
+    assert.equal(url,'https://api.openai.com/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer '+env.OPENAI_API_KEY);
+    const body=JSON.parse(options.body);assert.equal(body.model,'gpt-5.4-mini');assert.equal(body.reasoning_effort,'none');
+    assert.deepEqual(JSON.parse(body.messages[1].content),segments);assert.equal(body.response_format.json_schema.strict,true);assert.equal(body.response_format.json_schema.name,'voice_translation');
+    assert.ok(!options.body.includes('do-not-forward'));
+    return Response.json({choices:[{message:{content:JSON.stringify(output)}}]});
+  };
+  try{
+    const probe=request('/api/live/translate',{segments,api_connection:{protocol:'openai',base_url:'https://api.openai.com/v1',model:'gpt-5.4-mini',api_key:'do-not-forward'}});
+    probe.headers.set('X-VJBot-Account','google:qa');
+    assert.equal((await worker.fetch(probe,env)).status,400);assert.equal(fetches,0);
+    let response=await worker.fetch(make(),env);assert.equal(response.status,200);assert.deepEqual((await response.json()).translations,output.translations);
+    assert.equal((await env.DB.prepare('SELECT count(*) n FROM conversations').first()).n,0);
+    for(const invalid of [{translations:[{id:'other',text_vi:'x'}]}, {translations:[{id:'caption_1',text_vi:'a'},{id:'caption_1',text_vi:'b'}]},
+      {translations:[{id:'caption_1',text_vi:''},{id:'caption_2',text_vi:'x'}]},{}]){
+      output=invalid;assert.equal((await worker.fetch(make(),env)).status,502);
+    }
+    globalThis.fetch=async()=>new Response('echo '+env.OPENAI_API_KEY,{status:503});
+    response=await worker.fetch(make(),env);assert.equal(response.status,503);assert.ok(!(await response.text()).includes(env.OPENAI_API_KEY));
+    await env.DB.prepare('INSERT OR REPLACE INTO ai_usage(user_id,bucket,count) VALUES(?,?,20)').bind('google:qa',Math.floor(Date.now()/60000)).run();
+    assert.equal((await worker.fetch(make(),env)).status,429);
+  }finally{globalThis.fetch=original;}
+});
+
+test('live translation follows device-stored chat connections such as Mistral',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  const segments=[{id:'caption_1',role:'user',text:'私は学生です。'}];
+  const device={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'mistral-small-latest',api_key:'sk-test-12345678'};
+  const make=connection=>{const r=request('/api/live/translate',{segments,...(connection?{api_connection:connection}:{})});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(url,'https://api.mistral.ai/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer sk-test-12345678');
+    const body=JSON.parse(options.body);assert.equal(body.model,'mistral-small-latest');assert.equal(body.response_format.json_schema.name,'voice_translation');
+    return Response.json({choices:[{message:{content:JSON.stringify({translations:[{id:'caption_1',text_vi:'Tôi là học sinh.'}]})}}]});
+  };
+  try{
+    const response=await worker.fetch(make(device),env);
+    assert.equal(response.status,200);assert.deepEqual((await response.json()).translations,[{id:'caption_1',text_vi:'Tôi là học sinh.'}]);
+    globalThis.fetch=async()=>{throw new Error('must not fetch');};
+    assert.equal((await worker.fetch(make(),env)).status,403);
   }finally{globalThis.fetch=original;}
 });
 

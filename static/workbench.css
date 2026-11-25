@@ -93,6 +93,17 @@
 #panel-classroom .live-stage p {margin:0;font-size:11px}
 #live-wave {display:block;width:100%;height:48px;color:var(--accent)}
 .live-stage:not([data-active=true]) #live-wave {opacity:.35}
+.live-transcript {flex:1;min-height:0;overflow:auto;scrollbar-width:thin;padding:12px 0;overscroll-behavior:contain}
+.live-transcript[data-empty=true]::before {content:'Lời nói và bản dịch sẽ xuất hiện ở đây.';display:block;text-align:center;color:var(--muted);font-size:13px;padding:32px 16px}
+.live-turn {max-width:88%;margin:0 0 24px;padding:0 4px;overflow-wrap:anywhere}
+.live-turn.user {margin-left:auto;background:var(--surface-2);border-radius:10px;padding:12px 16px}
+.live-turn header {display:flex;align-items:center;gap:12px;margin-bottom:6px;font-size:11px;color:var(--muted)}
+.live-turn header strong {color:var(--ink);font-size:12px;font-weight:500}
+.live-turn header span {margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap}
+.live-turn p {margin:0;white-space:pre-wrap;line-height:1.8}
+.live-original {font:400 16px/1.8 var(--font-jp)}
+.live-turn .live-translation {color:var(--muted);font:400 13px/1.7 var(--font-sans);margin-top:8px;padding-top:8px;border-top:1px solid var(--line)}
+.live-translation-retry {border:0;background:none;color:var(--accent);padding:8px 0;min-height:36px;font:500 12px var(--font-sans);cursor:pointer}
 #panel-classroom .live-controls {justify-content:center;flex-shrink:0;padding-top:8px}
 #live-start:disabled {display:none}
 #live-status {text-align:center}
@@ -135,11 +146,14 @@
   #panel-classroom .live-stage>img {height:54px;width:30px}
   #panel-classroom .live-stage h2 {font-size:14px}
   #live-wave {height:40px}.live-heading>span {display:block}
+  .live-turn {max-width:94%;margin-bottom:20px}.live-turn.user {padding:10px 12px}.live-original {font-size:15px}
+  .live-translation-retry {min-height:44px}
   #exam-catalog .exam-set {grid-template-columns:24px minmax(0,1fr) auto;gap:8px;padding:12px 0}
   .exam-catalog-nav a {min-height:44px}.exam-set-action {font-size:11px}
   #panel-quiz .quiz-question-area {padding:16px!important}
 }
 @media(prefers-reduced-motion:reduce) {#app-sidebar,#app-sidebar * {animation:none!important;transition:none!important}}
+@media(prefers-reduced-motion:no-preference) {.live-turn {animation:caption-arrive 180ms var(--ease-out) both}@keyframes caption-arrive {from {opacity:0;transform:translateY(6px)}to {opacity:1;transform:translateY(0)}}}
 /* Practice uses the same control scale as the surrounding lesson. */
 :root {--practice-line:var(--line);--practice-green:var(--accent)}
 .lesson-mode-switch {margin-bottom:20px}

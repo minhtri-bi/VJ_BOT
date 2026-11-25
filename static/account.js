@@ -14,7 +14,7 @@ function antigravityConnectionId(owner) {
 async function apiFetch(path,options={}) {
   if(signedInUser) {
     const owner=signedInUser.user_id;
-    const inference=['/api/chat','/api/kaiwa/evaluate','/api/practice/coach','/api/tts','/api/stt','/api/ai/test'].includes(path)&&options.method?.toUpperCase()==='POST';
+    const inference=['/api/chat','/api/kaiwa/evaluate','/api/practice/coach','/api/tts','/api/stt','/api/ai/test','/api/live/translate'].includes(path)&&options.method?.toUpperCase()==='POST';
     const speech=inference&&path==='/api/tts', voice=speech||path==='/api/stt', revision=voiceRevision;
     const managed=inference&&signedInUser.is_admin===true;
     let oauth,connectionId,method,voiceChoice,prepared=options;
