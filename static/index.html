@@ -49,6 +49,7 @@
   <link rel="stylesheet" href="loading.css">
   <link rel="stylesheet" href="sakuga.css">
   <link rel="stylesheet" href="guide.css">
+  <link rel="stylesheet" href="classroom-vfx.css">
 </head>
 <body data-page="landing">
   <div id="app-loading-screen" class="retro-loading-overlay" role="status" aria-live="polite" aria-label="Đang tải VJBot">
@@ -294,7 +295,7 @@
               <!-- Chat Stage Header -->
               <div class="chat-header">
                 <div class="chat-header-left">
-                  <img class="chat-teacher-avatar" src="assets/lam/teacher.svg" alt="" width="32" height="42">
+                  <img class="chat-teacher-avatar" src="assets/lam/pixel/display/south.png" alt="" width="32" height="58">
                   <div>
                     <h1 class="chat-title">Thầy Lâm</h1><span id="chat-connection-status" role="status"></span>
 
@@ -327,20 +328,18 @@
               <div class="chat-messages-stage" id="chat-messages" role="log" aria-live="polite">
                 <!-- Welcome State -->
                 <div class="chat-welcome-state" id="chat-welcome">
-
-                  <img class="welcome-mascot" src="assets/lam/pixel/south.png" alt="" width="120" height="120">
+                  <div class="welcome-stage" aria-hidden="true">
+                    <span class="welcome-speedlines"></span>
+                    <span class="welcome-shadow"></span>
+                    <img class="welcome-mascot" src="assets/lam/pixel/display/idle/0.png" alt="" width="116" height="211" draggable="false">
+                    <span class="welcome-impact">ドン</span>
+                  </div>
                   <h2 class="welcome-title">Hôm nay, em muốn luyện gì?</h2>
 
                   <div class="welcome-chips-row">
-                    <button type="button" class="welcome-chip-btn" data-preset="Thầy Lâm ơi, em muốn bắt đầu luyện bài 1 ngay!">
-                       Bắt đầu bài học
-                    </button>
-                    <button type="button" class="welcome-chip-btn" data-preset="Thầy Lâm hãy đặt 1 câu hỏi kiểm tra phản xạ tiếng Nhật cho em!">
-                       Đặt câu hỏi phản xạ
-                    </button>
-                    <button type="button" class="welcome-chip-btn" data-preset="Thầy hãy giúp em luyện một đoạn hội thoại tiếng Nhật.">
-                      Luyện hội thoại
-                    </button>
+                    <button type="button" class="welcome-chip-btn" data-preset="Thầy Lâm ơi, em muốn bắt đầu luyện bài 1 ngay!">Bắt đầu bài học</button>
+                    <button type="button" class="welcome-chip-btn" data-preset="Thầy Lâm hãy đặt 1 câu hỏi kiểm tra phản xạ tiếng Nhật cho em!">Đặt câu hỏi phản xạ</button>
+                    <button type="button" class="welcome-chip-btn" data-preset="Thầy hãy giúp em luyện một đoạn hội thoại tiếng Nhật.">Luyện hội thoại</button>
                   </div>
                 </div>
               </div>
@@ -1082,6 +1081,7 @@
   <script src="account-menu.js"></script>
   <script src="live-transcript.js"></script>
   <script src="live.js"></script>
+  <script src="classroom-vfx.js"></script>
 
 </body>
 </html>
