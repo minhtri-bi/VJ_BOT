@@ -6,13 +6,12 @@
   const BARS=33,SILENCE='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
   let audioContext=null,analyser=null,waveFrame=null,callOwner=null,statsTimer=null,remoteLevel=0;
   let liveSocket=null,captureNode=null,captureSource=null,nextPlayTime=0;
-  let mistralRoom=null,mistralClose=null,mistralSegments={};
+  let mistralRoom=null,mistralClose=null;
   const audioSources=[];
   let wakeLock=null,commands={},teacherAnalyser=null,teacherHeardAt=0,teacherExpectedUntil=0,teacherSpeaking=false,userMuted=false;
   // Keep the screen on during a call: iPhone locking the screen drops the microphone.
   const keepAwake=async()=>{try{wakeLock?.release?.();wakeLock=await navigator.wakeLock?.request('screen');}catch{wakeLock=null;}};
   const letSleep=()=>{wakeLock?.release?.().catch(()=>{});wakeLock=null;};
-  const timeline = createLiveTranscript(el('live-transcript'));
   const status = text => { el('live-status').textContent=text; };
   function controls(active) {
     el('live-start').disabled=active;
@@ -56,7 +55,7 @@
     abort?.abort(); abort=null;
     stream?.getTracks().forEach(track=>track.stop()); stream=null;
     const oldChannel=channel, oldPeer=peer, oldSocket=liveSocket, oldRoom=mistralRoom, closeMistral=mistralClose;
-    channel=null;peer=null;liveSocket=null;mistralRoom=null;mistralClose=null;mistralSegments={};
+    channel=null;peer=null;liveSocket=null;mistralRoom=null;mistralClose=null;
     oldChannel?.close(); oldPeer?.close(); oldSocket?.close(); oldRoom?.disconnect?.();
     closeMistral?.();
     captureSource?.disconnect?.();captureNode?.disconnect?.();captureSource=null;captureNode=null;nextPlayTime=0;
@@ -70,7 +69,6 @@
     el('live-play-audio').hidden=true;
     el('live-mute').setAttribute('aria-pressed','false');el('live-mute').textContent='Tắt micro';
     controls(false); if (message) status(message);
-    timeline.finish();
   }
   function connectWave(media,teacher=false) {
     if(!audioContext || !analyser)return;
@@ -134,7 +132,6 @@
     if(!speaker.srcObject){speaker.src=SILENCE;speaker.play?.()?.catch?.(()=>{});}
     const run=++version, owner=signedInUser?.user_id;
     callOwner=owner;
-    timeline.reset();
     el('live-duration').textContent='00:00';controls(true);status('Cho phép micro để bắt đầu…');
     try {
       globalThis.stopSpeech?.();globalThis.stopJapaneseInputs?.();
@@ -177,7 +174,7 @@
             if(seconds>=600)end();
           },1000);
         } else if(event.type==='session.closed')cleanup('Đã kết thúc cuộc trò chuyện.');
-        else if(['session.input_transcript.delta','session.output_transcript.delta'].includes(event.type)){if(event.type==='session.output_transcript.delta')teacherHeardAt=Date.now();timeline.add(event);}
+        else if(event.type==='session.output_transcript.delta')teacherHeardAt=Date.now();
         else if(event.type==='error')cleanup('Cuộc gọi gặp lỗi và đã kết thúc. Hãy thử lại.');
       });
       events.addEventListener('close',()=>{if(run===version)cleanup('Kết nối đã đóng.');});
@@ -284,9 +281,6 @@
         source.connect(speakerContext.destination);
         nextPlayTime=Math.max(nextPlayTime,speakerContext.currentTime);source.start(nextPlayTime);nextPlayTime+=buffer.duration;
       }
-      const now=Date.now()-startedAt;
-      if(content?.inputTranscription?.text)timeline.add({type:'session.input_transcript.delta',delta:content.inputTranscription.text,start_ms:Math.max(0,now-1500),end_ms:now});
-      if(content?.outputTranscription?.text)timeline.add({type:'session.output_transcript.delta',delta:content.outputTranscription.text,start_ms:Math.max(0,now-1500),end_ms:now});
       if(event.goAway || content?.turnComplete===false)teacherHeardAt=Date.now();
     });
     socket.addEventListener('close',()=>{if(run===version)cleanup('Kết nối đã đóng.');});
@@ -343,20 +337,6 @@
       el('live-audio').play().catch(()=>{if(run===version){el('live-play-audio').hidden=false;status('Nhấn Bật âm thanh để nghe thầy.');}});
       teacherHeardAt=Date.now();turn();
     });
-    room.on(RoomEvent.DataReceived,(payload,participant,_kind,topic)=>{
-      if(run!==version || topic!=='voice_agent.events')return;
-      let event;try{event=JSON.parse(new TextDecoder().decode(payload));}catch{return;}
-      if(event?.type!=='transcription.segment' || !['user','assistant'].includes(event.role) || typeof event.content!=='string' || typeof event.id!=='string')return;
-      const previous=mistralSegments[event.id]||'';
-      if(event.final && event.content===previous)return;
-      if(!event.content.startsWith(previous))return;
-      mistralSegments[event.id]=event.content;
-      const delta=event.content.slice(previous.length);if(!delta)return;
-      const now=Date.now()-startedAt;
-      timeline.add({type:event.role==='user'?'session.input_transcript.delta':'session.output_transcript.delta',
-        delta,start_ms:Math.max(0,now-2000),end_ms:now});
-      if(event.role==='assistant')teacherHeardAt=Date.now();
-    });
     room.on(RoomEvent.Disconnected,()=>{if(run===version)cleanup('Kết nối đã đóng.');});
     connectTimer=setTimeout(()=>{if(run===version)cleanup('Kết nối hết thời gian. Hãy thử lại.');},35000);
     await room.connect(result.serverUrl,result.participantToken);
@@ -371,7 +351,6 @@
   }
   function mode(live) {
     if(!live && (peer || el('live-start').disabled))end();
-    if(!live)timeline.stop();
     if(live && !callOwner && !peer && !closing && !el('live-start').disabled)status('Em bấm Bắt đầu nói khi sẵn sàng nhé.');
     el('classroom-voice').hidden=!live;
     el('classroom-text').hidden=live;
@@ -400,14 +379,13 @@
   for(const button of document.querySelectorAll('[data-chat-mode]'))button.addEventListener('click',()=>mode(button.dataset.chatMode==='live'));
   // The browser drops the wake lock when the tab is hidden; take it again on return.
   window.addEventListener('focus',()=>{if(ready&&!closing)keepAwake();});
-  window.addEventListener('pagehide',()=>{end(true);timeline.stop();});
-  window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#classroom')){end();timeline.stop();}});
+  window.addEventListener('pagehide',()=>{end(true);});
+  window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#classroom'))end();});
   window.checkLiveAccount=()=>{
-    timeline.accountChanged();
     if(!signedInUser || callOwner && callOwner!==signedInUser?.user_id)mode(false);
   };
   window.addEventListener('vjbot-account-ready',window.checkLiveAccount);
-  window.stopLiveConversation=()=>{end();timeline.stop();timeline.accountChanged();};
+  window.stopLiveConversation=()=>{end();};
   window.openLiveConversation=()=>{if(!signedInUser)return;mode(true);};
   paint(new Float32Array(BARS),0);
 })();
