@@ -70,20 +70,35 @@ async function renderDashboard(){
     await Promise.all([ensureLessons(activeCurriculumLevel),loadPracticalCourse()]);
     if(version!==featureVersion)return;
     const units=createStudyPlan(activeCurriculumLevel);
-    const next=units.filter(u=>!u.optional && !completed.has(u.id)).flatMap(u=>u.steps).find(step=>!completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill)));
+    const required=units.filter(unit=>!unit.optional);
+    const nextUnit=required.find(unit=>!completed.has(unit.id) && unit.steps.some(step=>!completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill))));
+    const next=(nextUnit?.steps || required.flatMap(u=>u.steps)).find(step=>!completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill)));
     const nextTitle=next?.lesson.title || 'Ôn lại bài học';
     const nextHref=next?appRouteHash('lesson',{level:activeCurriculumLevel,skill:next.skill,id:activityId(next.lesson,activeCurriculumLevel,next.skill)}):`#curriculum/${activeCurriculumLevel}`;
-    const required=units.filter(unit=>!unit.optional);
     const chapterDone=unit=>completed.has(unit.id) || unit.steps.every(step=>completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill)));
+    const chapterCount=unit=>unit.steps.filter(step=>completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill))).length;
     const courseRows=required.slice(0,4);
     const recent=[...completed.values()].sort((a,b)=>(b.completed_at||'').localeCompare(a.completed_at||'')).slice(0,4);
-    host.innerHTML=`<a class="dashboard-next" href="${escapeHtml(nextHref)}"><span class="dashboard-next-label">Học tiếp · ${activeCurriculumLevel}</span><h2>${escapeHtml(nextTitle)}</h2><span class="dashboard-next-action">Mở bài học ↗</span></a>
-      <dl class="dashboard-numbers"><div><dt>Bài đã đánh dấu</dt><dd>${completed.size}</dd></div><div><dt>Đến hạn ôn</dt><dd>${due}</dd></div><div><dt>Ngày liên tiếp</dt><dd>${Number(progress.streak_days)||0}</dd></div></dl>
-      <div class="dashboard-grid"><section class="dashboard-course"><header class="dashboard-section-heading"><h2>Lộ trình ${activeCurriculumLevel}</h2><a href="#curriculum/${activeCurriculumLevel}">Tất cả ↗</a></header>
-        <div class="dashboard-chapters">${courseRows.map((unit,index)=>`<a href="#curriculum/${activeCurriculumLevel}"><span class="dashboard-chapter-index">${String(index+1).padStart(2,'0')}</span><span>${escapeHtml(unit.title)}</span><span>${chapterDone(unit)?'Đã đánh dấu':unit.steps.filter(step=>completed.has(activityId(step.lesson,activeCurriculumLevel,step.skill))).length+'/'+unit.steps.length}</span></a>`).join('')}</div>
-        <nav class="dashboard-levels" aria-label="Khóa học JLPT">${learningLevels.map(level=>`<a href="#curriculum/${level}" ${level===activeCurriculumLevel?'aria-current="true"':''}>${level}</a>`).join('')}</nav></section>
-      <section class="dashboard-practice"><header class="dashboard-section-heading"><h2>Luyện tập</h2></header><div class="dashboard-tools"><a href="#classroom"><h3>Thầy Lâm</h3><span>Hỏi &amp; luyện phản xạ</span><span aria-hidden="true">↗</span></a>${Object.entries(featureNames).map(([key,name],index)=>`<a href="#${key}/${activeCurriculumLevel}"><h3>${name}</h3><span>${['Ghi nhớ từ','Hội thoại tình huống','Chữ & cách đọc','Bộ đề theo cấp độ'][index]}</span><span aria-hidden="true">↗</span></a>`).join('')}</div></section></div>
-      <section class="dashboard-recent"><header class="dashboard-section-heading"><h2>Vừa đánh dấu</h2><a href="#mastery">Tiến độ ↗</a></header>${recent.map(item=>`<p><span>${escapeHtml(item.level)}</span><strong>${escapeHtml(item.title)}</strong><time>${item.completed_at?new Date(item.completed_at).toLocaleDateString('vi-VN'):''}</time></p>`).join('') || '<p class="dashboard-empty">Em chưa đánh dấu bài nào.</p>'}</section>`;
+    const toolMeta=[['classroom','Thầy Lâm','Hỏi & luyện phản xạ','#classroom'],...Object.entries(featureNames).map(([key,name],index)=>[key,name,['Ghi nhớ từ','Hội thoại tình huống','Chữ & cách đọc','Bộ đề theo cấp độ'][index],`#${key}/${activeCurriculumLevel}`])];
+    host.innerHTML=`<div class="study-dashboard">
+      <a class="study-hero" href="${escapeHtml(nextHref)}">
+        <span class="study-hero-copy"><span class="study-kicker">Học tiếp · ${activeCurriculumLevel}</span><strong>${escapeHtml(nextTitle)}</strong><small>${nextUnit?escapeHtml(nextUnit.title):'Chọn lại một bài trong lộ trình'}</small><span class="study-hero-action">Mở bài học ↗</span></span>
+        <img class="study-hero-mascot" src="assets/lam/pixel/south.png" width="68" height="124" alt="">
+      </a>
+      <dl class="study-stats" aria-label="Tóm tắt học tập">
+        <div><dt>Bài đã đánh dấu</dt><dd>${completed.size}</dd><span>trong sổ học</span></div>
+        <div><dt>Đến hạn ôn</dt><dd>${due}</dd><span>mục cần xem lại</span></div>
+        <div><dt>Ngày liên tiếp</dt><dd>${Number(progress.streak_days)||0}</dd><span>ngày có học</span></div>
+      </dl>
+      <div class="study-main-grid">
+        <section class="study-panel study-course"><header><h2>Lộ trình ${activeCurriculumLevel}</h2><a href="#curriculum/${activeCurriculumLevel}">Tất cả ↗</a></header>
+          <div class="study-chapters">${courseRows.map((unit,index)=>{const done=chapterCount(unit),total=unit.steps.length,finished=chapterDone(unit),percent=Math.round(done/Math.max(1,total)*100);return `<a href="#curriculum/${activeCurriculumLevel}" data-done="${finished?'true':'false'}"><span class="study-chapter-index">${String(index+1).padStart(2,'0')}</span><span class="study-chapter-copy"><strong>${escapeHtml(unit.title)}</strong><i aria-hidden="true"><b style="width:${finished?100:percent}%"></b></i></span><span class="study-chapter-state">${finished?'Đã đánh dấu':done+'/'+total}</span></a>`;}).join('')}</div>
+          <nav class="study-levels" aria-label="Khóa học JLPT">${learningLevels.map(level=>`<a href="#curriculum/${level}" ${level===activeCurriculumLevel?'aria-current="true"':''}>${level}</a>`).join('')}</nav>
+        </section>
+        <section class="study-panel study-practice"><header><h2>Luyện tập</h2></header><div class="study-tools">${toolMeta.map(([,name,desc,href])=>`<a href="${href}"><strong>${name}</strong><span>${desc}</span><em>Mở ↗</em></a>`).join('')}</div></section>
+      </div>
+      <section class="study-panel study-recent"><header><h2>Vừa đánh dấu</h2><a href="#mastery">Tiến độ ↗</a></header>${recent.length?`<div class="study-recent-list">${recent.map(item=>`<a href="#mastery"><span>${escapeHtml(item.level)}</span><strong>${escapeHtml(item.title)}</strong><time>${item.completed_at?new Date(item.completed_at).toLocaleDateString('vi-VN'):''}</time></a>`).join('')}</div>`:`<div class="study-empty"><img src="assets/lam/pixel/south.png" width="58" height="106" alt=""><strong>Chưa có dấu mốc nào</strong><p>Đánh dấu bài đầu tiên để sổ học bắt đầu ghi lại.</p><a href="#curriculum/${activeCurriculumLevel}">Chọn bài đầu tiên ↗</a></div>`}</section>
+    </div>`;
     globalThis.mountAiBanner?.(host);
   }catch{host.textContent='Chưa tải được tiến độ. ';const retry=document.createElement('button');retry.textContent='Thử lại';retry.onclick=renderDashboard;host.append(retry);}
 }
