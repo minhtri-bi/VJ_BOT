@@ -150,22 +150,29 @@ export async function mistralLiveRoute(request,env) {
   try{
     // The caller's chat model drives the agent's answers; Mistral only accepts its
     // instruct family for voice agents, so a rejected model retries on the default.
-    const create=model=>fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions`,{
+    // A rejected STT tuning retries bare rather than failing the call.
+    const create=(model,tuned)=>fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions`,{
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),headers,
       body:JSON.stringify({
         llm:{model},
         // 480 ms is Mistral's recommended accuracy/latency balance; lesson terms bias the transcript.
-        stt:{model:'voxtral-mini-transcribe-realtime-3',target_streaming_delay_ms:480,context_bias:bias},
+        stt:tuned?{model:'voxtral-mini-transcribe-realtime-3',target_streaming_delay_ms:480,context_bias:bias}
+          :{model:'voxtral-mini-transcribe-realtime-3'},
         // Haruto is the male Japanese preset, so the teacher keeps one male voice.
         tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3133'},
         instructions:teaching,welcome_message:MISTRAL_WELCOME})
     });
-    let response=await create(provider.models[0]||'mistral-small-latest');
-    if(response.status===422&&provider.models[0]&&provider.models[0]!=='mistral-small-latest'){
+    let model=provider.models[0]||'mistral-small-latest',tuned=true;
+    let response=await create(model,tuned);
+    for(let attempt=0;response.status===422&&attempt<2;attempt++){
       const reason=await response.json().catch(()=>null);
-      const rejected=Array.isArray(reason?.detail)&&reason.detail.some(e=>e?.type==='unsupported_model'
-        ||(Array.isArray(e?.loc)&&e.loc[0]==='body'&&e.loc[1]==='llm'));
-      if(rejected)response=await create('mistral-small-latest');
+      const detail=Array.isArray(reason?.detail)?reason.detail:[];
+      const hits=path=>detail.some(e=>path==='llm'&&e?.type==='unsupported_model'
+        ||(Array.isArray(e?.loc)&&e.loc[0]==='body'&&e.loc[1]===path));
+      if(hits('llm')&&model!=='mistral-small-latest')model='mistral-small-latest';
+      else if(hits('stt')&&tuned)tuned=false;
+      else break;
+      response=await create(model,tuned);
     }
     if(!response.ok)return json({detail:response.status===429?'Mistral đang giới hạn lượt dùng. Thử lại sau.'
       :'Không mở được cuộc gọi Mistral. Kiểm tra quyền truy cập và hạn mức trong Cài đặt.',code:'live_unavailable'},response.status===429?429:503);

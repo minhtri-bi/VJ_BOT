@@ -1125,6 +1125,24 @@ test('Mistral Live biases transcription toward unrestricted lesson vocabulary on
   }finally{globalThis.fetch=original;}
 });
 
+test('Mistral Live retries with bare STT when Mistral rejects the tuning, keeping the call alive',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  const api_connection={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'mistral-small-latest',api_key:'synthetic-device-mistral-key'};
+  const send=body=>{const r=request('/api/live/mistral',body);r.headers.set('X-VJBot-Account','google:qa');return worker.fetch(r,env);};
+  const bodies=[];
+  globalThis.fetch=async(_url,options)=>{
+    const body=JSON.parse(options.body);bodies.push(body);
+    if('target_streaming_delay_ms' in (body.stt||{}))return Response.json({detail:[{loc:['body','stt','target_streaming_delay_ms'],msg:'extra forbidden',type:'extra_forbidden'}]},{status:422});
+    return Response.json({id:'sess_sttfb',participant_token:'pt-s',server_url:'https://lk.test'});
+  };
+  try{
+    assert.equal((await send({level:'N5',api_connection})).status,201);
+    assert.equal(bodies.length,2);
+    assert.equal(bodies[0].stt.target_streaming_delay_ms,480);
+    assert.deepEqual(bodies[1].stt,{model:'voxtral-mini-transcribe-realtime-3'},'bare STT keeps the session working');
+  }finally{globalThis.fetch=original;}
+});
+
 test('practice hints omit the authored key and feedback resolves the exact canonical selected option without changing progress',async()=>{
   const {env,request}=await authenticated(),original=globalThis.fetch;
   await withApi(env,request);
