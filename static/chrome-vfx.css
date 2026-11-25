@@ -1,0 +1,239 @@
+/* Chrome craft layer: stable sidebar mascot, scene-cut feedback, settings/admin ink hierarchy. */
+
+/* Sidebar companion stays in normal flow; the nav compresses/scrolls instead of being overlapped. */
+@media(min-width:900px){
+  .app-shell #app-sidebar{overflow:hidden}
+  #app-sidebar .sidebar-header,#app-sidebar .sidebar-user-card,#app-sidebar .sidebar-footer{flex:none}
+  #app-sidebar .sidebar-nav{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding-bottom:8px!important;scrollbar-width:thin;scrollbar-color:var(--line) transparent}
+  #app-sidebar .sidebar-companion{
+    flex:none!important;min-height:0;margin-top:8px;padding:9px 12px 10px!important;border-top:2px dashed var(--line);
+    display:flex;align-items:stretch;justify-content:center;background:linear-gradient(180deg,transparent,color-mix(in srgb,var(--surface-2) 68%,transparent));
+  }
+  #app-sidebar #lam-walker{
+    position:relative!important;inset:auto!important;width:100%;max-width:196px;height:90px;min-height:90px;padding:7px 10px 6px;
+    display:flex!important;flex-direction:row;align-items:flex-end;justify-content:center;gap:10px;
+    border:2.5px solid var(--border-dark);border-radius:18px;background:var(--sheet);box-shadow:var(--shadow-sketch-sm);
+    transform:none!important;
+  }
+  #app-sidebar #lam-walker img{width:39px;height:71px;object-fit:contain;align-self:flex-end;filter:drop-shadow(2px 2px 0 var(--sk-soft))}
+  #app-sidebar #lam-walker .lam-label{align-self:center;padding:5px 0;color:var(--pencil);font-weight:850;font-size:12px;line-height:1.25}
+  body:not(.sidebar-expanded) #app-sidebar .sidebar-companion{padding-inline:8px!important}
+  body:not(.sidebar-expanded) #app-sidebar #lam-walker{max-width:52px;height:70px;min-height:70px;padding:5px;border-radius:15px}
+  body:not(.sidebar-expanded) #app-sidebar #lam-walker img{width:30px;height:55px}
+}
+
+/* Sakuga scene cut: a fast ink/speed-line sweep plus a restrained panel rise. */
+.chrome-scene-wipe{
+  position:fixed;inset:56px 0 0 232px;z-index:10020;pointer-events:none;opacity:0;transform:translateX(-115%);
+  background:
+    repeating-linear-gradient(102deg,transparent 0 34px,color-mix(in srgb,var(--ink) 13%,transparent) 34px 36px,transparent 36px 64px),
+    linear-gradient(100deg,transparent 0 28%,color-mix(in srgb,var(--sk-acc) 16%,transparent) 28% 62%,transparent 62%);
+}
+body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
+.chrome-scene-wipe.run{animation:chrome-scene-wipe 310ms var(--motion-curve) both}
+.tab-panel.chrome-scene-in{animation:chrome-panel-scene-in 240ms var(--motion-curve) both}
+@keyframes chrome-scene-wipe{
+  0%{opacity:0;transform:translateX(-115%)}
+  12%{opacity:1}
+  82%{opacity:1}
+  100%{opacity:0;transform:translateX(115%)}
+}
+@keyframes chrome-panel-scene-in{
+  from{opacity:0;translate:10px 0}
+  to{opacity:1;translate:0 0}
+}
+.tab-panel.chrome-panel-out{animation:chrome-panel-scene-out 90ms ease-in both}
+@keyframes chrome-panel-scene-out{to{opacity:.35;translate:-8px 0}}
+
+/* Mobile dock: same ink language, clear active tile, no floating visual noise. */
+@media(max-width:899px){
+  .chrome-scene-wipe{inset:56px 0 0 0}
+  .mobile-bottom-bar{
+    border-top:3px solid var(--border-dark)!important;background:var(--paper-card)!important;box-shadow:0 -4px 0 var(--sk-soft)!important;
+    padding:7px 8px calc(7px + env(safe-area-inset-bottom))!important;gap:5px;
+  }
+  .mobile-bottom-item{border-radius:15px;min-height:54px;color:var(--muted);font-weight:850}
+  .mobile-bottom-item .m-icon{border:2px solid transparent;box-shadow:none;transition:transform var(--motion-fast) var(--motion-curve),background-color var(--motion-fast) ease,border-color var(--motion-fast) ease}
+  .mobile-bottom-item.active{color:var(--ink);background:var(--sheet)!important;border:2px solid var(--border-dark);box-shadow:2px 3px 0 var(--sk-soft)}
+  .mobile-bottom-item.active .m-icon{background:var(--accent);color:var(--on-accent);border-color:var(--border-dark);box-shadow:2px 2px 0 var(--sk-soft)}
+  .mobile-bottom-item:active{transform:scale(.96)}
+}
+
+/* Settings: a real control room instead of flat rows. */
+#panel-settings .settings-layout{max-width:1100px;margin:0 auto;gap:26px 32px}
+#panel-settings .settings-container>h1,#panel-settings.settings-container>h1{font-size:clamp(28px,4vw,38px)!important;font-weight:950;letter-spacing:-.055em}
+#panel-settings .settings-nav{
+  position:sticky;top:82px;display:flex;flex-direction:column;align-items:stretch;gap:9px;padding:10px;
+  border:2.5px solid var(--border-dark);border-radius:20px;background:var(--sheet);box-shadow:var(--shadow-sketch);
+}
+#panel-settings .settings-nav button{
+  min-height:44px;padding:10px 12px;border:2px solid transparent;border-radius:14px;background:transparent;color:var(--pencil);
+  font-size:14px;font-weight:850;text-align:center;box-shadow:none;
+}
+#panel-settings .settings-nav button:hover{background:var(--surface-2);color:var(--ink)}
+#panel-settings .settings-nav button[aria-current=true]{
+  background:var(--ink);color:var(--sheet);border-color:var(--border-dark);box-shadow:3px 3px 0 var(--sk-acc);font-weight:900;
+}
+#panel-settings .settings-stack{display:grid;gap:22px;min-width:0}
+#panel-settings .settings-card{
+  position:relative;padding:24px!important;border:2.5px solid var(--border-dark)!important;border-radius:22px!important;
+  background:
+    radial-gradient(var(--screen-tone) 1px,transparent 1.2px) 0 0/22px 22px,
+    linear-gradient(180deg,var(--sheet),var(--paper-card))!important;
+  box-shadow:var(--shadow-sketch)!important;overflow:hidden;
+}
+#panel-settings .settings-card::after{content:"";position:absolute;inset:auto 18px 0;height:3px;background:repeating-linear-gradient(90deg,var(--sk-acc) 0 18px,transparent 18px 28px);opacity:.28;pointer-events:none}
+#panel-settings .settings-card>.card-head{
+  margin:0 0 20px;padding:0 0 15px;border-bottom:2px dashed var(--line);display:flex;align-items:center;justify-content:space-between;gap:16px;
+}
+#panel-settings .card-title{font-size:21px;font-weight:950;letter-spacing:-.035em;color:var(--ink)}
+#panel-settings .card-desc,#panel-settings .ai-field-hint,#panel-settings .ai-source,#panel-settings #admin-ai-message{color:var(--pencil);font-size:14px;line-height:1.65}
+#panel-settings .account-row{
+  display:flex;align-items:center;gap:14px;padding:16px;border:2px solid var(--border-dark);border-radius:17px;background:var(--surface-2);box-shadow:3px 3px 0 var(--sk-soft);
+}
+#panel-settings .account-initial,#panel-settings .sidebar-account-initial{border:2px solid var(--border-dark);background:var(--accent);color:var(--on-accent);box-shadow:2px 2px 0 var(--sk-soft)}
+#panel-settings .account-who{display:grid;gap:2px;min-width:0}
+#panel-settings .account-who strong{font-size:17px;font-weight:900;overflow-wrap:anywhere}
+#panel-settings .account-who span{color:var(--muted);font-size:13px;overflow-wrap:anywhere}
+#panel-settings .status-pill,#panel-settings .admin-badge{
+  display:inline-flex;align-items:center;justify-content:center;min-height:28px;padding:4px 10px;border:2px solid var(--border-dark);border-radius:999px;
+  background:var(--surface-2);color:var(--accent);font-size:12px;font-weight:900;box-shadow:2px 2px 0 var(--sk-soft);white-space:nowrap;
+}
+#panel-settings .card-actions,#panel-settings .ai-actions,#panel-settings .admin-ai-form .card-actions{
+  display:flex!important;flex-wrap:wrap;align-items:center;justify-content:center;gap:10px;margin-top:20px;
+}
+#panel-settings .card-actions>:is(button,a),#panel-settings .ai-actions>:is(button,a){
+  min-width:150px;justify-content:center;text-align:center;
+}
+#panel-settings .public-cta,#panel-settings .stage-btn,#panel-settings .delete-account-btn{font-weight:850}
+#panel-settings :is(input,select,textarea){
+  min-height:46px;border:2px solid var(--border-dark);border-radius:14px;background:var(--sheet);color:var(--ink);box-shadow:inset 2px 2px 0 var(--screen-tone);
+}
+#panel-settings :is(input,select,textarea):focus{border-color:var(--accent);box-shadow:3px 3px 0 var(--sk-soft);outline:none}
+#panel-settings label,#panel-settings legend{color:var(--pencil);font-size:13px;font-weight:850}
+#panel-settings .settings-field,#panel-settings .ai-field,#panel-settings .ai-form label{display:grid;gap:7px;margin-bottom:16px}
+#panel-settings .settings-field select,#panel-settings .ai-form select,#panel-settings .ai-form input{width:100%}
+#panel-settings .ai-current,#panel-settings .ai-saved-connections,#panel-settings .ai-form,#panel-settings .ai-voice-controls,#panel-settings .ai-voice-options{
+  border:2px solid var(--line);border-radius:17px;background:color-mix(in srgb,var(--surface-2) 74%,var(--sheet));padding:16px;margin:14px 0;
+}
+#panel-settings .ai-current{border-color:var(--border-dark);box-shadow:3px 4px 0 var(--sk-soft);background:var(--sheet)}
+#panel-settings .ai-current-heading,#panel-settings .ai-section-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:12px}
+#panel-settings .ai-current>strong{display:block;margin:6px 0;font-size:19px;font-weight:900;overflow-wrap:anywhere}
+#panel-settings .ai-disclosure,#panel-settings .ai-voice-help{
+  border:2px solid var(--line);border-radius:16px;background:var(--sheet);padding:0;margin:14px 0;overflow:hidden;
+}
+#panel-settings .ai-disclosure>summary,#panel-settings .ai-voice-help>summary{padding:14px 16px;font-weight:900;color:var(--ink)}
+#panel-settings .ai-disclosure>summary:hover,#panel-settings .ai-voice-help>summary:hover{background:var(--surface-2)}
+#panel-settings .ai-disclosure>div,#panel-settings .ai-disclosure>form,#panel-settings .ai-disclosure>fieldset,#panel-settings .ai-voice-help>div{border-top:2px dashed var(--line);padding:14px 16px}
+#panel-settings .ai-step{border:2px dashed var(--line);border-radius:15px;padding:14px;margin:12px 0}
+#panel-settings .ai-step-description{margin-top:0;color:var(--pencil)}
+#panel-settings .ai-connect-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+#panel-settings .ai-connect-options>button{
+  position:relative;display:grid!important;grid-template-columns:44px minmax(0,1fr) auto;gap:4px 12px;align-items:center;min-height:112px;padding:16px!important;
+  border:2.5px solid var(--border-dark)!important;border-radius:18px!important;background:var(--sheet)!important;box-shadow:var(--shadow-sketch-sm)!important;text-align:left;
+}
+#panel-settings .ai-connect-icon{grid-row:1/3;display:grid;place-items:center;width:44px;height:44px;border:2px solid var(--border-dark);border-radius:14px;background:var(--surface-2);color:var(--accent);font-weight:950}
+#panel-settings .ai-connect-options strong{font-size:16px;color:var(--ink)}
+#panel-settings .ai-connect-options span:not(.ai-connect-icon){color:var(--pencil);font-size:13px;line-height:1.35}
+#panel-settings .ai-connect-options small{grid-column:2;color:var(--muted);font-size:12px}
+#panel-settings .ai-connect-options b{grid-row:1/3;color:var(--accent);font-size:20px}
+#panel-settings .setting-toggle-row{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:16px;border:2px solid var(--border-dark);border-radius:16px;background:var(--surface-2);
+}
+#panel-settings .setting-toggle-row strong{font-size:15px;font-weight:900}
+#panel-settings .danger-card{border-color:var(--warn)!important;background:linear-gradient(180deg,var(--sheet),color-mix(in srgb,var(--warn) 7%,var(--sheet)))!important}
+#panel-settings .danger-card .card-title,#panel-settings .delete-account-btn{color:var(--warn)!important}
+#panel-settings .delete-account-btn{border-color:var(--warn)!important}
+#panel-settings progress{width:100%;height:14px;border:2px solid var(--border-dark);border-radius:999px;background:var(--surface-2);overflow:hidden}
+
+/* Admin: measurable hierarchy, inked rows, centered actions. */
+#panel-admin .admin-layout{max-width:1120px;margin:0 auto;gap:22px}
+#panel-admin .workspace-heading h1{font-size:clamp(30px,4vw,40px);font-weight:950;letter-spacing:-.055em}
+#panel-admin .workspace-heading .stage-btn{justify-content:center}
+#panel-admin .admin-ai-status{
+  padding:12px 16px;border:2px dashed var(--line);border-radius:15px;background:var(--surface-2);color:var(--pencil);font-weight:750;
+}
+#panel-admin .admin-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;border:0;background:transparent;padding:0}
+#panel-admin .admin-stats>div{
+  display:flex;flex-direction:column-reverse;gap:5px;padding:17px 18px!important;border:2.5px solid var(--border-dark)!important;border-radius:18px!important;
+  background:var(--sheet)!important;box-shadow:var(--shadow-sketch-sm)!important;
+}
+#panel-admin .admin-stats strong{font-size:30px;font-weight:950;letter-spacing:-.04em;color:var(--ink);font-variant-numeric:tabular-nums}
+#panel-admin .admin-stats span{font-size:12px;font-weight:850;color:var(--muted)}
+#panel-admin .settings-card{
+  position:relative;padding:22px!important;border:2.5px solid var(--border-dark)!important;border-radius:21px!important;background:var(--sheet)!important;box-shadow:var(--shadow-sketch)!important;
+}
+#panel-admin .card-title{font-size:21px;font-weight:950;letter-spacing:-.035em;margin:0 0 16px}
+#panel-admin .admin-search{width:100%;min-height:48px;margin-bottom:14px;border:2px solid var(--border-dark);border-radius:15px;background:var(--surface-2);box-shadow:inset 2px 2px 0 var(--screen-tone)}
+#panel-admin .admin-users{display:grid;gap:10px}
+#panel-admin .admin-user-row{
+  width:100%;min-height:72px;padding:13px 14px!important;border:2px solid var(--border-dark)!important;border-radius:16px!important;background:var(--surface-2)!important;
+  box-shadow:2px 3px 0 var(--sk-soft)!important;transition:transform var(--motion-fast) var(--motion-curve),box-shadow var(--motion-fast) ease,background-color var(--motion-fast) ease;
+}
+#panel-admin .admin-user-row:hover{background:var(--sheet)!important;transform:translateY(-1px);box-shadow:3px 4px 0 var(--sk-soft)!important}
+#panel-admin .admin-user-row:active{transform:scale(.985);box-shadow:1px 1px 0 var(--sk-soft)!important}
+#panel-admin .admin-user-who strong{font-size:15px;font-weight:900;color:var(--ink)}
+#panel-admin .admin-user-who small{font-size:12px;color:var(--muted)}
+#panel-admin .admin-badge{min-height:26px;padding:3px 9px;border:2px solid var(--border-dark);border-radius:999px;background:var(--sheet);box-shadow:2px 2px 0 var(--sk-soft);font-weight:850}
+#panel-admin .admin-badge-on{background:color-mix(in srgb,var(--ok) 15%,var(--sheet));color:var(--ok)}
+#panel-admin .admin-user-metrics{display:flex;align-items:center;gap:8px;color:var(--pencil);font-size:12px;font-variant-numeric:tabular-nums}
+#panel-admin .admin-pager{display:flex;align-items:center;justify-content:center;gap:18px;margin-top:16px}
+#panel-admin .admin-pager span{color:var(--muted);font-size:13px;font-weight:800;font-variant-numeric:tabular-nums}
+#panel-admin .admin-pager button{min-width:92px;justify-content:center}
+#panel-admin .admin-activity{min-width:0}
+#panel-admin #admin-top{display:grid;gap:2px}
+#panel-admin #admin-top p{padding:11px 0;border-bottom:1px dashed var(--line);font-size:14px}
+#panel-admin #admin-top p:last-child{border-bottom:0}
+#panel-admin #admin-top b{color:var(--accent);font-weight:900}
+#panel-admin .admin-danger{justify-content:center}
+
+/* Admin dialog uses the same inked hierarchy. */
+.admin-user-dialog .admin-user-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.admin-user-dialog .admin-user-stats>div{padding:12px;border:2px solid var(--line);border-radius:13px;background:var(--surface-2)}
+.admin-user-dialog dt{font-size:12px;color:var(--muted);font-weight:800}
+.admin-user-dialog dd{font-size:15px;color:var(--ink);font-weight:900;overflow-wrap:anywhere}
+.admin-user-dialog .admin-level-form,.admin-user-dialog .admin-role-row{border:2px dashed var(--line);border-radius:14px;padding:12px;background:var(--sheet)}
+.admin-user-dialog .admin-user-actions{display:flex;flex-wrap:wrap;justify-content:center;gap:9px}
+.admin-user-dialog .admin-user-actions button{justify-content:center;flex:1 1 170px}
+
+/* Dark-mode craft repairs for shared surfaces owned by this chrome pass. */
+:root[data-theme=dark] .chrome-scene-wipe{opacity:0}
+:root[data-theme=dark] #panel-settings .settings-card,
+:root[data-theme=dark] #panel-admin .settings-card,
+:root[data-theme=dark] #panel-admin .admin-stats>div{
+  background:
+    radial-gradient(var(--screen-tone) 1px,transparent 1.2px) 0 0/22px 22px,
+    linear-gradient(180deg,var(--sheet),var(--paper-card))!important;
+}
+:root[data-theme=dark] #panel-settings .settings-nav button[aria-current=true]{background:var(--sheet);color:var(--ink);box-shadow:3px 3px 0 var(--sk-soft)}
+:root[data-theme=dark] .mobile-bottom-item.active{background:var(--surface-2)!important}
+
+@media(max-width:900px){
+  #panel-settings .settings-layout,#panel-admin .admin-layout{gap:18px}
+  #panel-settings .settings-nav{
+    position:static;display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;padding:8px;border-radius:18px;
+  }
+  #panel-settings .settings-nav button{min-height:42px;padding:8px 6px;font-size:13px;white-space:normal;line-height:1.15}
+  #panel-settings .settings-card,#panel-admin .settings-card{padding:18px!important;border-radius:19px!important}
+  #panel-settings .ai-connect-options{grid-template-columns:1fr}
+  #panel-settings .card-actions>:is(button,a),#panel-settings .ai-actions>:is(button,a){width:100%;min-width:0}
+  #panel-settings .account-row{align-items:flex-start}
+  #panel-settings .setting-toggle-row{align-items:flex-start;flex-direction:column}
+  #panel-settings .setting-toggle-row button{width:100%;justify-content:center}
+  #panel-admin .admin-stats{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+  #panel-admin .admin-stats>div{padding:14px!important}
+  #panel-admin .admin-stats strong{font-size:25px}
+  #panel-admin .admin-user-row{gap:8px;padding:12px!important}
+  #panel-admin .admin-user-metrics{flex-wrap:wrap;justify-content:flex-end}
+}
+@media(max-width:560px){
+  #panel-admin .admin-layout{display:flex;flex-direction:column}
+  #panel-admin .workspace-heading{display:flex;align-items:flex-start;flex-direction:column}
+  #panel-admin .workspace-heading .stage-btn{width:100%;justify-content:center}
+  #panel-admin .admin-user-row{grid-template-columns:minmax(0,1fr)!important}
+  #panel-admin .admin-user-metrics{justify-content:flex-start}
+}
+@media(prefers-reduced-motion:reduce){
+  .chrome-scene-wipe.run,.tab-panel.chrome-scene-in,.tab-panel.chrome-panel-out{animation:none!important}
+  .mobile-bottom-item,.mobile-bottom-item .m-icon,#panel-admin .admin-user-row{transition:none!important}
+}
