@@ -35,3 +35,6 @@
   .guide-actions button{min-height:40px;padding:7px 10px;font-size:13px}
 }
 @media(prefers-reduced-motion:reduce){.guide-spotlight,.guide-mascot{animation:none!important}.guide-card,.guide-spotlight{transition:none!important}}
+
+/* Responsive audit: the guide has no unread state, so a permanent dot reads as a stuck notification. */
+#btn-app-guide::after{content:none}

@@ -104,9 +104,9 @@
     document.body.classList.remove('guide-step-in');
     const mobileTour = matchMedia('(max-width: 739px)').matches;
     const sidebar = document.getElementById('app-sidebar');
-    if (index === 0 && mobileTour && sidebar && !sidebar.classList.contains('open')) document.getElementById('btn-mobile-sidebar')?.click();
     if (index > 0) globalThis.closeAppSidebar?.();
     switchTab(step.tab);
+    if (index === 0 && mobileTour) setTimeout(() => { if (!sidebar.classList.contains('open')) document.getElementById('btn-mobile-sidebar')?.click(); position(step); }, 80);
     await new Promise(resolve => setTimeout(resolve, 300));
     title.textContent = step.title;
     text.textContent = step.text;
