@@ -141,6 +141,8 @@ function renderPracticeSession(container,item,level,skill){
         <p>${round.indices.length-round.blocked-round.unassessed>0?'Các câu được kiểm tra bằng đáp án hoặc mẫu có sẵn. ':''}${round.unassessed?`${round.unassessed} câu tự viết đã lưu, chưa chấm đúng/sai. `:''}Lượt luyện này chưa xác nhận mức thành thạo. Nhận xét AI chỉ để tham khảo.</p>
         ${round.blocked?`<p>${round.blocked} câu đang tạm ngừng, chưa tính vào kết quả.</p>`:''}
         <div class="practice-result-actions"></div></div>`;
+      const practiceResult=section.querySelector('.practice-result');
+      if(practiceResult)globalThis.setTimeout?.(() => window.SakugaUI?.celebrate?.(practiceResult), 0);
       const actions=section.querySelector('.practice-result-actions');
       if(round.missed.length){
         const retry=document.createElement('button');retry.type='button';retry.textContent=`Ôn ${round.missed.length} câu chưa khớp`;
