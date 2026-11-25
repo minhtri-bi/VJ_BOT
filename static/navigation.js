@@ -94,7 +94,7 @@ async function renderLevelCards(){
       const [title,description]=descriptions[index];
       const chapters=courseChapters.chapters.filter(c=>c.level===level).length;
       const units=practicalCourse.units.filter(u=>u.level===level).length;
-      const card=document.createElement('a');card.className='level-course-card';card.href=appRouteHash('curriculum',{level});
+      const card=document.createElement('a');card.className='level-course-card';card.dataset.level=level;card.href=appRouteHash('curriculum',{level});
       card.innerHTML=`<div class="level-cover" data-level="${level}" aria-hidden="true"><img src="assets/courses/${level.toLowerCase()}.svg" alt="" width="300" height="168"></div><div class="level-card-content"><h2>${level} <span>${title}</span></h2><p>${description}</p><div class="level-card-footer"><span>${chapters} chương · ${units} bài tình huống</span><span aria-hidden="true">↗</span></div></div>`;
       card.onclick=event=>{if(event.button===0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey){event.preventDefault();openLevelCourse(level);}};host.append(card);
     }

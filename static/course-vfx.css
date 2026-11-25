@@ -1,0 +1,138 @@
+/* Course scope: manga journey map, chapter units, crafted lesson reading. */
+#panel-curriculum{--course-accent:var(--sk-acc);--course-shadow:var(--shadow-sketch)}
+#panel-curriculum button,#panel-lesson button,.level-course-card{transition:transform var(--motion-fast) var(--motion-curve),box-shadow var(--motion-fast) var(--motion-curve),background-color var(--motion-fast) var(--motion-curve),border-color var(--motion-fast) var(--motion-curve)}
+#panel-curriculum button:not(:disabled):hover,#panel-lesson button:not(:disabled):hover,.level-course-card:hover{transform:translateY(-1px)}
+#panel-curriculum button:not(:disabled):active,#panel-lesson button:not(:disabled):active,.level-course-card:active{transform:scale(.975)}
+.level-hub-heading{position:relative;margin-bottom:22px;padding:22px 0 4px}
+.level-hub-heading h1{font-size:clamp(30px,4vw,48px);letter-spacing:-.045em;line-height:1.05}
+.level-hub-heading:after{content:"";position:absolute;left:0;right:0;bottom:-8px;height:5px;background:repeating-linear-gradient(90deg,var(--ink) 0 30px,transparent 30px 40px);opacity:.18}
+.level-cards{display:grid;grid-template-columns:repeat(5,minmax(180px,1fr));gap:16px;align-items:stretch}
+.level-course-card{position:relative;display:grid;grid-template-rows:auto 1fr;min-height:230px;padding:16px;border:2px solid var(--border-dark);border-radius:var(--radius-card);background:var(--sheet);color:var(--ink);text-decoration:none;box-shadow:var(--shadow-sketch);overflow:hidden;isolation:isolate}
+.level-course-card:before{content:"";position:absolute;inset:0;background-image:radial-gradient(var(--screen-tone) 1px,transparent 1.2px);background-size:9px 9px;opacity:.12;z-index:-1}
+.level-course-card:after{content:attr(data-level);position:absolute;right:10px;bottom:-18px;font-weight:900;font-size:82px;line-height:1;color:var(--sk-acc);opacity:.07;letter-spacing:-.08em}
+.level-course-card:nth-child(1){--sk-acc:var(--ok)}.level-course-card:nth-child(2){--sk-acc:var(--accent)}.level-course-card:nth-child(3){--sk-acc:var(--warn)}.level-course-card:nth-child(4){--sk-acc:var(--sk-ink)}.level-course-card:nth-child(5){--sk-acc:var(--accent-hover)}
+.level-course-card:hover{box-shadow:var(--shadow-sketch-lg);border-color:var(--ink)}
+.level-cover{display:grid;place-items:center;width:74px;height:60px;border:2px solid var(--border-dark);border-radius:16px;background:var(--surface-2);box-shadow:3px 3px 0 var(--sk-soft);overflow:hidden}
+.level-cover img{width:100%;height:100%;object-fit:cover;mix-blend-mode:multiply}
+.level-card-content{display:flex!important;flex-direction:column;min-width:0}
+.level-card-content h2{margin:14px 0 6px;font-size:24px;font-weight:900;letter-spacing:-.035em;line-height:1.1;color:var(--ink)}
+.level-card-content h2>span{display:inline-block;margin-left:6px;font-size:13px;font-weight:700;color:var(--sk-acc);letter-spacing:.02em}
+.level-card-content p{margin:0;color:var(--pencil);font-size:13px;line-height:1.55}
+.level-card-footer{display:flex!important;align-items:end;justify-content:space-between;gap:10px;margin-top:auto;padding-top:18px;color:var(--muted);font-size:12px;font-weight:700}
+.level-card-footer>span:last-child{display:grid;place-items:center;width:34px;height:34px;border:2px solid var(--border-dark);border-radius:50%;background:var(--sk-acc);color:var(--on-accent);box-shadow:2px 2px 0 var(--sk-soft)}
+.curriculum-breadcrumb-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin-bottom:14px;color:var(--muted)}
+.curriculum-header-card{margin-bottom:22px;padding:18px;border:2px solid var(--border-dark);border-radius:var(--radius-card);background:var(--sheet);box-shadow:var(--shadow-sketch-sm)}
+.curriculum-title-row{display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.curriculum-title{font-size:clamp(28px,3.2vw,42px);letter-spacing:-.04em;line-height:1.1}
+.curriculum-view-switch{display:flex;justify-content:center;gap:8px;margin-top:16px;padding:5px;border:2px solid var(--border-dark);border-radius:999px;background:var(--surface-2);width:fit-content;max-width:100%}
+.curriculum-view-switch button,.skill-tab-btn{min-height:38px;padding:8px 16px;border:0;border-radius:999px;background:transparent;color:var(--pencil);font-weight:800;cursor:pointer}
+.curriculum-view-switch button[aria-pressed=true],.skill-tab-btn.active{background:var(--ink);color:var(--paper);box-shadow:2px 2px 0 var(--sk-soft)}
+.skill-tabs-row{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:12px}
+.skill-tab-btn{border:1px solid var(--line);background:var(--sheet)}
+.plan-overview{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:14px 18px;align-items:center;border:2px solid var(--border-dark)!important;border-radius:var(--radius-card)!important;background:var(--sheet)!important;box-shadow:var(--shadow-sketch);padding:20px!important}
+.plan-overview h3{font-size:24px;letter-spacing:-.03em}.plan-overview p{margin:4px 0 0;color:var(--pencil)}
+.plan-overview progress{grid-column:1/-1;width:100%;height:12px;appearance:none}.plan-overview progress::-webkit-progress-bar{background:var(--surface-2);border-radius:99px}.plan-overview progress::-webkit-progress-value{background:var(--sk-acc);border-radius:99px}
+.plan-continue,.stage-btn,.practice-primary,.production-save{display:inline-flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;min-height:42px;padding:10px 18px!important;border:2px solid var(--border-dark)!important;border-radius:var(--radius-control)!important;background:var(--accent)!important;color:var(--on-accent)!important;font-weight:900!important;box-shadow:var(--shadow-sketch-sm)!important;cursor:pointer}
+.lesson-toolbar{display:flex;justify-content:center;align-items:end;gap:14px;flex-wrap:wrap;margin:20px 0 10px}
+.lesson-toolbar label{display:grid;gap:6px;font-size:12px;font-weight:800;color:var(--muted)}
+.lesson-toolbar input,.lesson-toolbar select{min-height:42px;border:2px solid var(--border-dark);border-radius:var(--radius-control);background:var(--sheet);padding:8px 12px;box-shadow:2px 2px 0 var(--sk-soft)}
+.plan-units{display:grid;gap:14px}.plan-unit{border:2px solid var(--border-dark);border-radius:var(--radius-card);background:var(--sheet);box-shadow:var(--shadow-sketch-sm);overflow:hidden}
+.plan-unit>summary{display:grid;grid-template-columns:48px minmax(0,1fr) auto;gap:12px;align-items:center;min-height:64px;padding:14px 18px;cursor:pointer;font-size:16px}
+.plan-unit>summary::-webkit-details-marker{display:none}
+.plan-number{display:grid;place-items:center;width:42px;height:42px;border:2px solid var(--border-dark);border-radius:50%;background:var(--surface-2);font-weight:900;box-shadow:2px 2px 0 var(--sk-soft)}
+.plan-unit[data-done=true] .plan-number{background:var(--ok);color:var(--on-accent);transform:rotate(-8deg)}
+.plan-unit[data-current=true]{outline:3px solid var(--sk-acc);outline-offset:-5px}
+.plan-steps{padding:0 18px 18px 78px}.unit-goal{margin:0 0 10px;color:var(--pencil);line-height:1.6}.unit-info{margin-bottom:10px;color:var(--muted)}
+.plan-step{display:grid;grid-template-columns:minmax(88px,auto) minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;min-height:48px;margin-top:8px;padding:10px 12px;border:1px solid var(--line);border-radius:12px;background:var(--surface-2);color:var(--ink);text-align:center;font:inherit;cursor:pointer}
+.plan-step:hover{border-color:var(--ink);box-shadow:2px 2px 0 var(--sk-soft)}
+.plan-step[data-done=true]{border-color:var(--ok)}
+.plan-step[data-done=true] .plan-step-status{color:var(--ok);font-weight:900}
+.plan-step-status{font-size:12px;color:var(--muted)}
+#panel-lesson{background:var(--paper)}
+.learning-breadcrumb{display:flex;justify-content:center;align-items:center;gap:8px;margin:4px auto 18px;max-width:1080px;color:var(--muted)}
+.learning-breadcrumb button{border:0;background:transparent;color:var(--sk-acc);font-weight:800;cursor:pointer}
+.lesson-layout{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:24px;max-width:1120px;margin:0 auto}
+#lesson-page{min-width:0;padding:26px clamp(18px,4vw,44px);border:2px solid var(--border-dark);border-radius:var(--radius-card);background:var(--sheet);box-shadow:var(--shadow-sketch)}
+.lesson-page-header{text-align:center;margin-bottom:24px;padding-bottom:18px;border-bottom:2px solid var(--line)}
+.modal-lesson-badge{display:inline-block;margin-bottom:10px;padding:5px 12px;border:2px solid var(--border-dark);border-radius:999px;background:var(--surface-2);font-size:12px;font-weight:900}
+#modal-lesson-title{font-size:clamp(28px,4vw,44px);letter-spacing:-.045em;line-height:1.15}
+#modal-lesson-body{max-width:760px;margin:0 auto;font-size:16px}
+.lesson-formula{border-width:2px!important;border-color:var(--border-dark)!important;box-shadow:var(--shadow-sketch-sm);background:var(--surface-2)!important}
+.lesson-outline{position:sticky;top:18px;align-self:start;padding:16px;border:2px solid var(--border-dark);border-radius:var(--radius-card);background:var(--sheet);box-shadow:var(--shadow-sketch-sm)}
+.lesson-exercise,.production-task,.practice-session,.task-reference-list>li{border:2px solid var(--border-dark)!important;border-radius:var(--radius-card)!important;background:var(--sheet)!important;box-shadow:var(--shadow-sketch-sm)}
+.practice-actions,.practice-result-actions,.lesson-footer{display:flex!important;justify-content:center!important;align-items:center!important}
+.practice-option{border-width:2px!important;border-radius:14px!important;background:var(--surface-2)!important}
+.practice-option[data-state=correct]{animation:course-correct-flash 520ms var(--motion-curve)}
+.practice-option[data-state=incorrect]{animation:course-wrong-shake 260ms ease-out}
+@keyframes course-correct-flash{0%{box-shadow:0 0 0 0 var(--ok)}55%{box-shadow:0 0 0 7px transparent}100%{box-shadow:var(--shadow-sketch-sm)}}
+@keyframes course-wrong-shake{0%,100%{transform:translateX(0)}30%{transform:translateX(-4px)}65%{transform:translateX(4px)}}
+.curriculum-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}.curriculum-grid>*{min-width:0}
+@media(max-width:1100px){.level-cards{grid-template-columns:repeat(3,minmax(0,1fr))}.lesson-layout{grid-template-columns:1fr}.lesson-outline{position:static}}
+@media(max-width:640px){#panel-curriculum{padding-inline:4px}.level-cards{grid-template-columns:1fr;gap:12px}.level-course-card{min-height:150px}.level-cover{width:62px;height:52px}.level-card-content h2{font-size:23px}.curriculum-header-card{padding:14px}.curriculum-view-switch{width:100%;display:grid;grid-template-columns:1fr 1fr;border-radius:18px}.curriculum-view-switch button{border-radius:14px}.plan-overview{grid-template-columns:1fr}.plan-unit>summary{grid-template-columns:38px minmax(0,1fr);gap:10px;padding:12px}.plan-unit>summary>span:last-child{grid-column:2}.plan-number{width:34px;height:34px}.plan-steps{padding:0 12px 14px}.plan-step{grid-template-columns:1fr;text-align:center;gap:4px}.lesson-layout{display:block}#lesson-page{padding:20px 14px;border-radius:16px}#modal-lesson-title{font-size:29px}.learning-breadcrumb{justify-content:flex-start;padding-inline:6px}.lesson-toolbar{display:grid;grid-template-columns:1fr;justify-items:stretch}.lesson-toolbar input,.lesson-toolbar select{width:100%;box-sizing:border-box}.practice-actions button{width:100%}}
+@media(prefers-reduced-motion:reduce){#panel-curriculum button,#panel-lesson button,.level-course-card,.practice-option{transition:none!important;animation:none!important}}
+
+/* Round 2 polish: readable journey cards and crafted study items. */
+.level-cards{grid-template-columns:repeat(auto-fit,minmax(190px,1fr))}
+.level-course-card{min-height:214px;padding:15px}
+.level-card-footer{position:relative;display:block!important;margin-top:auto;padding:14px 44px 0 0}
+.level-card-footer>span:first-child{display:inline-flex;max-width:100%;padding:5px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);font-size:10.5px;line-height:1.25}
+.level-card-footer>span:last-child{position:absolute;right:0;bottom:0}
+.lesson-mode-switch{display:flex!important;justify-content:center;gap:8px;width:fit-content;max-width:100%;margin:0 auto 24px;padding:5px!important;border:2px solid var(--border-dark)!important;border-radius:999px;background:var(--surface-2)}
+.lesson-mode-switch button{border-radius:999px!important;min-height:38px;text-align:center}
+.lesson-mode-switch button[aria-pressed=true]{background:var(--ink)!important;color:var(--paper)!important;box-shadow:2px 2px 0 var(--sk-soft)}
+.lesson-intro{margin-bottom:22px;padding:18px;border:2px dashed var(--line);border-radius:var(--radius-card);background:var(--surface-2)}
+.lesson-vocabulary-list{display:grid;gap:12px}
+.word-detail{border:2px solid var(--border-dark);border-radius:16px;background:var(--sheet);box-shadow:var(--shadow-sketch-sm);overflow:hidden}
+.word-detail>summary{display:grid;grid-template-columns:minmax(54px,auto) minmax(0,1fr) auto;gap:14px;align-items:center;min-height:62px;padding:10px 14px;cursor:pointer;list-style:none}
+.word-detail>summary::-webkit-details-marker{display:none}
+.word-detail>summary strong{font-size:28px;line-height:1;color:var(--sk-acc)}
+.word-reveal-label{justify-self:end;font-size:12px;font-weight:800;color:var(--muted)}
+.word-detail>summary:after{content:"+";display:grid;place-items:center;width:26px;height:26px;border:2px solid var(--border-dark);border-radius:50%;background:var(--surface-2);font-weight:900}
+.word-detail[open]>summary:after{content:"−"}
+.word-detail[open]>summary{border-bottom:1px solid var(--line);background:var(--surface-2)}
+.word-detail-body{padding:14px}
+.card-audio-btn,.study-teacher-button{display:inline-flex!important;align-items:center!important;justify-content:center!important;text-align:center!important;border:2px solid var(--border-dark)!important;border-radius:var(--radius-control)!important;box-shadow:var(--shadow-sketch-sm)!important;font-weight:800!important}
+.plan-unit>summary strong{line-height:1.35}.plan-unit>summary>span:last-child{font-size:12px;font-weight:800;color:var(--muted)}
+.plan-step .plan-skill{position:static;width:auto;height:auto;padding:3px 8px;margin:0;overflow:visible;clip:none;white-space:nowrap;border:1px solid var(--line);border-radius:999px;font-size:10px;font-weight:900;color:var(--sk-acc);background:var(--sheet)}
+@media(max-width:640px){.lesson-mode-switch{display:grid!important;grid-template-columns:1fr;width:100%;border-radius:18px!important}.lesson-mode-switch button{border-radius:14px!important}.word-detail>summary{grid-template-columns:minmax(38px,auto) minmax(0,1fr) auto;padding:10px}.word-detail>summary strong{font-size:24px}.word-reveal-label{font-size:10px}}
+
+/* Round 3: two-column manga chapter covers instead of cramped five-across cards. */
+.level-cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;max-width:930px}
+.level-course-card{display:grid;grid-template-columns:82px minmax(0,1fr);column-gap:15px;align-items:start;min-height:168px;padding:17px}
+.level-course-card:nth-child(odd){transform:rotate(-.25deg)}.level-course-card:nth-child(even){transform:rotate(.3deg)}
+.level-course-card:after{right:8px;bottom:-10px;font-size:64px;opacity:.045;z-index:0;pointer-events:none}
+.level-cover,.level-card-content{position:relative;z-index:1}
+.level-cover{grid-column:1;grid-row:1/span 2;width:76px;height:64px;margin-top:4px}
+.level-card-content{grid-column:2;min-height:128px}
+.level-card-content h2{margin-top:0;font-size:26px}
+.level-card-content h2>span{display:block;margin:3px 0 0;font-size:12px;text-transform:none}
+.level-card-content p{font-size:13.5px}
+.level-card-footer{padding-top:13px}
+.level-card-footer>span:first-child{font-size:10px}
+@media(max-width:900px){.level-cards{grid-template-columns:1fr;max-width:none}.level-course-card{min-height:150px}}
+@media(max-width:640px){.level-course-card{grid-template-columns:66px minmax(0,1fr);padding:14px}.level-cover{width:58px;height:50px}.level-card-content{min-height:110px}.level-card-content h2{font-size:23px}.level-card-content p{font-size:12.5px}}
+
+/* Round 4: override the legacy grid-area card contract inside the owned level hub. */
+#level-cards .level-course-card{grid-template-columns:78px minmax(0,1fr)!important;grid-template-areas:"cover content"!important;align-items:start}
+#level-cards .level-cover{grid-area:cover;width:72px!important;height:60px!important;margin-top:3px}
+#level-cards .level-cover img{width:100%!important;height:100%!important;object-fit:cover}
+#level-cards .level-card-content{grid-area:content;display:flex!important;flex-direction:column;align-items:stretch;min-width:0;min-height:116px;text-align:left}
+#level-cards .level-card-content h2{grid-area:auto;grid-column:auto;grid-row:auto;width:100%;text-align:left}
+#level-cards .level-card-content p{grid-area:auto;width:100%;text-align:left}
+#level-cards .level-card-footer{position:static;display:flex!important;flex-direction:row;align-items:center;justify-content:space-between;width:100%;height:auto;margin-top:auto;padding:13px 0 0;border:0;background:transparent;box-shadow:none;color:var(--muted)}
+#level-cards .level-card-footer>span:first-child:not(:only-child){display:inline-flex!important;max-width:calc(100% - 46px);padding:5px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface-2);text-align:left;color:var(--muted)}
+#level-cards .level-card-footer>span:last-child{flex:0 0 auto;width:34px;height:34px;border-radius:50%;background:var(--sk-acc);color:var(--on-accent)}
+@media(max-width:739px){
+  #level-cards .level-course-card{grid-template-columns:64px minmax(0,1fr)!important;min-height:142px}
+  #level-cards .level-cover{width:56px!important;height:48px!important}
+  #level-cards .level-card-content{min-height:104px}
+  #level-cards .level-card-footer>span:first-child:not(:only-child){display:inline-flex!important;font-size:9.5px;padding:4px 7px}
+}
+
+/* Round 5: keep checkpoint cards inside their ink frame on every width. */
+.lesson-page .practice-session{box-sizing:border-box;padding:20px 18px 16px!important}
+.lesson-page .practice-meter{margin-bottom:22px}
+.lesson-page .practice-session legend{padding-right:2px}
+.lesson-page .practice-actions{padding:18px 0 4px;background:transparent}
+@media(max-width:600px){.lesson-page .practice-session{padding:16px 12px 14px!important}}
+.plan-unit[data-done=true] .plan-number{border-radius:8px;background:var(--accent);color:var(--on-accent);transform:rotate(-8deg);box-shadow:2px 2px 0 var(--sk-soft)}
