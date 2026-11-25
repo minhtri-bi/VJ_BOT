@@ -6,7 +6,7 @@
   const BASES = {openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com'};
   const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/};
   const BLOCKED = /(^|\.)(localhost|local|internal|localdomain|home|lan|workers\.dev|dangphuc\.me)$/i;
-  const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test'];
+  const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test', '/api/live/translate'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal: true});
   const unavailable = () => problem('Kết nối API trên thiết bị không dùng được. Mở cài đặt API để lưu lại hoặc chọn kết nối khác.', 'unavailable');
   const storageError = () => problem('Trình duyệt chưa lưu được kết nối. Em cho phép trang lưu dữ liệu rồi thử lại nhé. Chi tiết lưu trữ: cần IndexedDB và Web Crypto.', 'storage');
