@@ -1024,6 +1024,8 @@ test('Mistral Live creates and closes LiveKit sessions billed to the caller\'s o
     assert.equal(url,'https://api.mistral.ai/v1/audio/sessions');
     const body=JSON.parse(options.body);
     assert.equal(body.llm.model,'m1');assert.equal(body.stt.model,'voxtral-mini-transcribe-realtime-3');
+    assert.equal(body.stt.target_streaming_delay_ms,480);
+    assert.ok(Array.isArray(body.stt.context_bias)&&body.stt.context_bias.includes('こんにちは')&&body.stt.context_bias.includes('thầy Lâm'));
     assert.equal(body.tts.model,'voxtral-mini-tts-3');assert.equal(body.tts.voice_id,'voice_3133');
     assert.ok(body.instructions&&body.welcome_message);
     assert.ok(body.welcome_message.includes('thầy Lâm')&&!body.welcome_message.includes('Dừng lại'),'welcome_message is spoken aloud, not an instruction');
@@ -1099,6 +1101,28 @@ test('Mistral Live falls back to a supported agent model only when Mistral rejec
     assert.equal((await send({level:'N5',api_connection})).status,503);
     assert.deepEqual(models,['magistral-small-latest']);
   } finally {globalThis.fetch=original;}
+});
+
+test('Mistral Live biases transcription toward unrestricted lesson vocabulary only',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  await withApi(env,request,{base_url:'https://api.mistral.ai/v1'});
+  const lesson={id:'bias-lesson',level:'N5',title:'Bias',overview:{},examples:[],questions:[],
+    words:[{jp:'先生',vi:'teacher'},{jp:'秘密語',vi:'restricted',processing_allowed:false}]};
+  env.ASSETS={fetch:async()=>Response.json({lessons:{[lesson.id]:lesson},items:{},scenarios:{}})};
+  const make=data=>{const r=request('/api/live/mistral',data);r.headers.set('X-VJBot-Account','google:qa');return r;};
+  let sent=null;
+  globalThis.fetch=async(_url,options)=>{sent=JSON.parse(options.body);
+    return Response.json({id:'sess_bias',participant_token:'pt-b',server_url:'https://lk.test'});};
+  try{
+    assert.equal((await worker.fetch(make({level:'N5',lesson:{id:lesson.id,level:'N5'}}),env)).status,201);
+    assert.ok(sent.stt.context_bias.includes('先生'),'lesson vocabulary biases the transcript');
+    assert.ok(!sent.stt.context_bias.includes('秘密語'),'restricted words never leave the server');
+    assert.ok(sent.stt.context_bias.includes('こんにちは')&&sent.stt.context_bias.includes('thầy Lâm'),'classroom staples always bias');
+    assert.ok(sent.stt.context_bias.length<=40);
+    sent=null;
+    assert.equal((await worker.fetch(make({level:'N5'}),env)).status,201);
+    assert.ok(sent.stt.context_bias.includes('こんにちは')&&!sent.stt.context_bias.includes('先生'),'no lesson: staples only');
+  }finally{globalThis.fetch=original;}
 });
 
 test('practice hints omit the authored key and feedback resolves the exact canonical selected option without changing progress',async()=>{
@@ -1240,6 +1264,37 @@ test('learner transcription requires an explicit owned official OpenAI chat conn
     await env.DB.prepare('INSERT OR REPLACE INTO ai_usage(user_id,bucket,count) VALUES(?,?,20)').bind('google:qa',Math.floor(Date.now()/60000)).run();
     assert.equal((await worker.fetch(make({...body,api_connection:{protocol:'openai',base_url:'https://api.openai.com/v1',model:'m1',api_key:'sk-test-12345678'}}),env)).status,429);
     assert.equal(calls,2);
+  }finally{globalThis.fetch=original;}
+});
+
+test('learner transcription transcribes through an owned official Mistral chat connection',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  await withApi(env,request,{base_url:'https://api.mistral.ai/v1'});
+  const chatId=(await (await worker.fetch(request('/api/ai/profiles'),env)).json()).active_id;
+  const body={audio:btoa('RIFF0000WAVEaudio'),mime_type:'audio/wav'};
+  const make=(data=body,profileId)=>{const r=request('/api/stt',data);r.headers.set('X-VJBot-Account','google:qa');if(profileId!==undefined)r.headers.set('X-VJBot-Profile',profileId);return r;};
+  let calls=0;
+  globalThis.fetch=async(url,options)=>{
+    calls++;
+    assert.equal(url,'https://api.mistral.ai/v1/audio/transcriptions');assert.equal(options.redirect,'manual');
+    assert.equal(options.headers.Authorization,'Bearer sk-test-12345678');
+    assert.equal(options.body.get('model'),'voxtral-mini-transcribe-3');assert.equal(options.body.get('file').type,'audio/wav');
+    return Response.json({text:' こんにちは。 '});
+  };
+  try{
+    assert.equal((await (await worker.fetch(make({action:'capabilities'},chatId),env)).json()).model,'voxtral-mini-transcribe-3');
+    assert.equal((await (await worker.fetch(make({action:'capabilities'},chatId),env)).json()).supported,true);
+    let response=await worker.fetch(make(body,chatId),env);assert.equal(response.status,200);assert.equal((await response.json()).text,'こんにちは。');
+    const device={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'mistral-small-latest',api_key:'sk-test-12345678'};
+    response=await worker.fetch(make({...body,api_connection:device}),env);assert.equal(response.status,200);
+    assert.equal(calls,2);
+    globalThis.fetch=async()=>{calls++;return new Response('echo sk-test-12345678',{status:429});};
+    const limited=await worker.fetch(make(body,chatId),env);assert.equal(limited.status,429);
+    const detail=(await limited.json()).detail;
+    assert.ok(detail.includes('Mistral')&&!detail.includes('sk-test-12345678'));
+    await withApi(env,request);
+    assert.equal((await worker.fetch(make(body,chatId),env)).status,403);
+    assert.equal((await (await worker.fetch(make({action:'capabilities'},chatId),env)).json()).supported,false);
   }finally{globalThis.fetch=original;}
 });
 
