@@ -1164,6 +1164,7 @@ function finishExam() {
 
   if (quizCard) quizCard.hidden = true;
   if (resultCard) resultCard.hidden = false;
+  if (resultCard) globalThis.setTimeout?.(() => window.SakugaUI?.celebrate?.(resultCard), 0);
   globalThis.setTeacherFocus?.(null);
   globalThis.invalidateTeacherQuery?.();
 

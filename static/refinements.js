@@ -9,6 +9,7 @@
     const feedback = document.getElementById('demo-feedback');
     feedback.dataset.correct = String(correct);
     feedback.textContent = correct ? 'Đúng rồi! Trợ từ は đọc là「わ」. 私は学生です: Tôi là học sinh.' : 'Khi là trợ từ, は đọc là「わ」. Em chọn lại nhé.';
+    if (correct) window.SakugaUI?.sparkle?.(feedback, 5);
   }));
   document.getElementById('speech-stop').addEventListener('click', () => stopSpeech());
   // Main content remains visible on first paint; only the mascot and panels have entrances.
