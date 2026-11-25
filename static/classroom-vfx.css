@@ -1,0 +1,241 @@
+/* Classroom stage: manga paper, inked bubbles and Lâm's pixel entrance. */
+#panel-classroom .classroom-chat-window{
+  position:relative;
+  border:3px solid var(--border-dark);
+  border-radius:24px;
+  background:var(--sheet);
+  box-shadow:var(--shadow-sketch-lg)!important;
+}
+#panel-classroom .chat-header{
+  position:relative;z-index:3;align-items:center;min-height:68px;padding:10px 18px!important;
+  border-bottom:3px solid var(--border-dark);
+  background:linear-gradient(180deg,var(--sheet),var(--surface-2));
+}
+#panel-classroom .chat-header::after{
+  content:"";position:absolute;inset:auto 18px -3px;height:3px;pointer-events:none;
+  background:repeating-linear-gradient(90deg,var(--border-dark) 0 18px,transparent 18px 28px);opacity:.18;
+}
+#panel-classroom .chat-header-left{position:relative;z-index:1}
+#panel-classroom .chat-teacher-avatar{
+  display:block!important;width:34px!important;height:60px!important;object-fit:contain;image-rendering:pixelated;
+  filter:drop-shadow(2px 2px 0 var(--sk-soft));
+}
+#panel-classroom .chat-title{font-size:20px!important;font-weight:900;letter-spacing:-.035em}
+#panel-classroom #chat-connection-status{display:inline-block;margin-top:1px;font-size:12px;font-weight:800;color:var(--accent)}
+#panel-classroom .chat-header-actions{position:relative;z-index:1;gap:8px}
+#panel-classroom .chat-header-actions .sketch-icon-btn{min-height:38px;font-size:13px}
+#panel-classroom #btn-clear-chat-history{color:var(--warn)!important}
+
+#panel-classroom .chat-messages-stage{
+  position:relative;display:flex;flex-direction:column;padding:24px clamp(18px,4vw,46px)!important;
+  background:
+    linear-gradient(var(--screen-tone) 1px,transparent 1px) 0 0/100% 34px,
+    radial-gradient(var(--screen-tone) 1px,transparent 1.2px) 0 0/24px 24px,
+    linear-gradient(180deg,var(--paper),var(--surface-2));
+}
+
+/* Empty state: one centred manga panel, not a tiny sprite lost in the page. */
+#panel-classroom .chat-welcome-state{
+  position:relative;width:min(100%,680px);min-height:100%;margin:auto;padding:6px 10px 22px;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;text-align:center;
+}
+#panel-classroom .welcome-stage{
+  position:relative;isolation:isolate;width:min(100%,360px);height:224px;display:grid;place-items:center;margin-bottom:2px;
+  animation:classroom-stage-in 420ms var(--motion-curve) both;
+}
+#panel-classroom .welcome-speedlines{
+  position:absolute;inset:-20px -54px;z-index:0;opacity:.24;pointer-events:none;
+  background:repeating-conic-gradient(from -8deg at 50% 56%,color-mix(in srgb,var(--ink) 26%,transparent) 0deg 1.2deg,transparent 1.2deg 8deg);
+  -webkit-mask-image:radial-gradient(ellipse at center,black 0 48%,transparent 72%);
+  mask-image:radial-gradient(ellipse at center,black 0 48%,transparent 72%);
+}
+#panel-classroom .welcome-stage::before{
+  content:"";position:absolute;z-index:1;bottom:10px;width:204px;height:164px;border:3px solid var(--border-dark);
+  border-radius:48% 52% 46% 54%/58% 47% 53% 42%;background:var(--sheet);box-shadow:5px 6px 0 var(--sk-soft);
+}
+#panel-classroom .welcome-shadow{
+  position:absolute;z-index:2;bottom:14px;width:112px;height:16px;border-radius:50%;background:color-mix(in srgb,var(--ink) 18%,transparent);
+}
+#panel-classroom .welcome-mascot{
+  position:relative;z-index:3;width:116px;height:211px;object-fit:contain;align-self:end;image-rendering:pixelated;
+  filter:drop-shadow(3px 4px 0 var(--sk-soft));transform-origin:50% 100%;
+  animation:classroom-idle-bob 2.9s var(--motion-curve) infinite;
+}
+#panel-classroom .welcome-impact{
+  position:absolute;z-index:4;right:22px;top:22px;color:var(--accent);font:900 34px/1 var(--font-jp);rotate:8deg;
+  text-shadow:2px 2px 0 var(--sheet);animation:classroom-impact 520ms var(--motion-curve) both;
+}
+#panel-classroom .welcome-title{
+  max-width:560px;margin:0;color:var(--ink);font-size:clamp(26px,4vw,38px);font-weight:950;line-height:1.15;letter-spacing:-.055em;text-wrap:balance;
+}
+#panel-classroom .welcome-chips-row{
+  width:min(100%,430px);display:flex!important;flex-direction:column;align-items:center;justify-content:center;gap:12px;margin-top:4px;
+}
+#panel-classroom .welcome-chip-btn{
+  position:relative;width:min(100%,420px);min-height:54px;display:inline-flex;align-items:center;justify-content:center;
+  padding:12px 44px!important;border:2.5px solid var(--border-dark)!important;border-radius:16px!important;background:var(--sheet)!important;color:var(--ink);
+  box-shadow:4px 5px 0 var(--sk-soft)!important;font-size:16px;font-weight:850;line-height:1.2;text-align:center;white-space:normal;
+  transition:transform var(--motion-fast) var(--motion-curve),box-shadow var(--motion-fast) ease,background-color var(--motion-fast) ease;
+  animation:classroom-chip-in 300ms var(--motion-curve) both;
+}
+#panel-classroom .welcome-chip-btn:nth-child(2){animation-delay:55ms}
+#panel-classroom .welcome-chip-btn:nth-child(3){animation-delay:110ms}
+#panel-classroom .welcome-chip-btn::after{content:"↗";position:absolute;right:18px;color:var(--accent);font-weight:950}
+#panel-classroom .welcome-chip-btn:first-child{background:var(--accent)!important;color:var(--on-accent)}
+#panel-classroom .welcome-chip-btn:first-child::after{color:var(--on-accent)}
+#panel-classroom .welcome-chip-btn:hover:not(:disabled){transform:translateY(-2px);box-shadow:5px 7px 0 var(--sk-soft)!important;background:var(--surface-2)}
+#panel-classroom .welcome-chip-btn:first-child:hover:not(:disabled){background:var(--accent-hover)!important}
+#panel-classroom .welcome-chip-btn:active:not(:disabled){transform:translateY(2px) scale(.97);box-shadow:2px 2px 0 var(--sk-soft)!important}
+
+/* Conversation bubbles: inked manga balloons with readable ownership and tails. */
+#panel-classroom .chat-bubble-row{
+  display:flex;align-items:flex-end;gap:10px;width:100%;margin:0 0 18px!important;
+  animation:classroom-bubble-in 280ms var(--motion-curve) both;transform-origin:20% 100%;
+}
+#panel-classroom .chat-bubble-row.user-row{justify-content:flex-end;transform-origin:80% 100%}
+#panel-classroom .chat-bubble-row.bot-row{justify-content:flex-start}
+#panel-classroom .bubble-avatar-box{display:block!important;flex:none;width:34px;height:34px;margin:0 0 3px;border:2px solid var(--border-dark);border-radius:50%;background:var(--sheet);box-shadow:2px 2px 0 var(--sk-soft);overflow:hidden}
+#panel-classroom .user-row .bubble-avatar-box{display:none!important}
+#panel-classroom .bubble-avatar-img{width:25px!important;height:44px!important;margin:-9px auto 0;object-fit:contain;object-position:top;image-rendering:pixelated}
+#panel-classroom .bubble-speech-card{
+  position:relative;display:block;min-width:0;max-width:min(78%,640px)!important;padding:13px 16px!important;
+  border:2.5px solid var(--border-dark)!important;border-radius:18px 18px 18px 6px!important;background:var(--sheet)!important;color:var(--ink);
+  box-shadow:3px 4px 0 var(--sk-soft)!important;
+}
+#panel-classroom .bubble-speech-card.user{
+  border-radius:18px 18px 6px 18px!important;background:var(--accent)!important;color:var(--on-accent);
+}
+#panel-classroom .bubble-speech-card::before{
+  content:"";display:block;position:absolute;left:-8px;bottom:10px;width:13px;height:13px;background:inherit;
+  border-left:2.5px solid var(--border-dark);border-bottom:2.5px solid var(--border-dark);border-radius:2px;transform:rotate(45deg);
+}
+#panel-classroom .bubble-speech-card.user::before{
+  left:auto;right:-8px;border:0;border-right:2.5px solid var(--border-dark);border-bottom:2.5px solid var(--border-dark);transform:rotate(-45deg);
+}
+#panel-classroom .bubble-body-text{font-size:15px!important;line-height:1.75!important;color:inherit}
+#panel-classroom .bubble-body-text>p{margin:0}
+#panel-classroom .bubble-body-text>p+p{margin-top:9px}
+#panel-classroom .bubble-header-meta{margin-bottom:7px}
+#panel-classroom .bubble-name{font-weight:900;color:inherit}
+#panel-classroom .bubble-tts-btn{color:inherit;opacity:.78}
+
+/* Typing indicator injected only while the tutor is answering. */
+#panel-classroom .classroom-typing-row{margin-bottom:18px}
+#panel-classroom .classroom-typing-bubble{display:inline-flex;align-items:center;gap:6px;min-width:66px;min-height:38px;justify-content:center}
+#panel-classroom .classroom-typing-bubble i{width:7px;height:7px;border-radius:50%;background:var(--pencil);animation:classroom-typing 950ms ease-in-out infinite}
+#panel-classroom .classroom-typing-bubble i:nth-child(2){animation-delay:130ms}
+#panel-classroom .classroom-typing-bubble i:nth-child(3){animation-delay:260ms}
+
+/* Prompt chips form a compact inked command strip; phones use a real grid instead of page overflow. */
+#panel-classroom .chat-chips-bar{
+  display:flex!important;flex-wrap:wrap!important;justify-content:center;align-items:center;gap:8px!important;padding:9px 18px!important;
+  overflow:visible!important;border-top:2px dashed var(--line);background:var(--sheet);
+}
+#panel-classroom .chat-chips-bar .prompt-chip{
+  min-height:38px;padding:7px 13px!important;border:2px solid var(--border-dark)!important;border-radius:999px!important;background:var(--sheet)!important;color:var(--ink);
+  box-shadow:2px 3px 0 var(--sk-soft)!important;font-size:13px;font-weight:800;white-space:nowrap;
+  transition:transform var(--motion-fast) var(--motion-curve),box-shadow var(--motion-fast) ease,background-color var(--motion-fast) ease;
+}
+#panel-classroom .chat-chips-bar .prompt-chip:hover:not(:disabled){transform:translateY(-1px);background:var(--surface-2);box-shadow:3px 4px 0 var(--sk-soft)!important}
+#panel-classroom .chat-chips-bar .prompt-chip:active:not(:disabled){transform:translateY(1px) scale(.96);box-shadow:1px 1px 0 var(--sk-soft)!important}
+
+/* Composer: thick ink rim, clear focus ring, round squashy send. */
+#panel-classroom .chat-input-bar{
+  position:relative;z-index:3;display:flex!important;align-items:flex-end!important;gap:8px!important;margin:0 20px 18px!important;padding:8px!important;
+  border:3px solid var(--border-dark)!important;border-radius:22px!important;background:var(--sheet)!important;box-shadow:var(--shadow-sketch)!important;
+}
+#panel-classroom .chat-input-bar:focus-within{
+  border-color:var(--accent)!important;
+  box-shadow:4px 5px 0 var(--sk-soft),0 0 0 3px color-mix(in srgb,var(--sk-acc) 28%,transparent)!important;
+}
+#panel-classroom .chat-audio-btn{
+  flex:none;min-width:92px;min-height:46px;height:46px;padding:8px 12px!important;border:2px solid var(--border-dark)!important;border-radius:16px!important;
+  background:var(--surface-2)!important;color:var(--ink);box-shadow:2px 3px 0 var(--sk-soft)!important;font-weight:850;
+}
+#panel-classroom .chat-audio-btn svg{width:18px;height:18px}
+#panel-classroom .chat-text-input{
+  flex:1;min-width:0;min-height:46px!important;max-height:126px;height:46px;padding:11px 6px!important;border:0!important;border-radius:0!important;
+  background:transparent!important;box-shadow:none!important;color:var(--ink);font-size:16px;line-height:1.45;
+}
+#panel-classroom .chat-text-input:focus{outline:none;box-shadow:none!important}
+#panel-classroom .chat-send-btn{
+  flex:none;width:46px!important;min-width:46px!important;height:46px!important;min-height:46px!important;aspect-ratio:1;padding:0!important;border-radius:50%!important;
+  display:grid!important;place-items:center;border:2.5px solid var(--border-dark)!important;background:var(--accent)!important;color:var(--on-accent)!important;
+  box-shadow:3px 4px 0 var(--sk-soft)!important;transition:transform var(--motion-fast) var(--motion-curve),box-shadow var(--motion-fast) ease,background-color var(--motion-fast) ease;
+}
+#panel-classroom .chat-send-btn:hover:not(:disabled){transform:translateY(-1px);background:var(--accent-hover)!important;box-shadow:4px 5px 0 var(--sk-soft)!important}
+#panel-classroom .chat-send-btn:active:not(:disabled){transform:scale(.93);box-shadow:1px 1px 0 var(--sk-soft)!important}
+#panel-classroom .chat-send-btn span{display:none}
+#panel-classroom .chat-send-btn svg{display:block!important;width:18px;height:18px;margin-left:-1px}
+
+/* Voice: same inked stage language, with the orb reacting to the live level. */
+#panel-classroom .classroom-voice{background:var(--sheet)}
+#panel-classroom .live-heading{align-items:center;font-weight:800;color:var(--pencil)}
+#panel-classroom .live-stage{
+  position:relative;overflow:hidden;color:var(--accent);border:3px solid var(--border-dark)!important;border-radius:22px;background:var(--surface-2)!important;
+  box-shadow:var(--shadow-sketch)!important;
+}
+#panel-classroom .live-stage::before{
+  content:"";position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background:radial-gradient(var(--screen-tone) 1px,transparent 1.2px) 0 0/18px 18px;
+}
+#panel-classroom .live-stage>*{position:relative}
+#panel-classroom .live-orb{
+  border:3px solid var(--border-dark);background:var(--sheet);
+  box-shadow:4px 5px 0 var(--sk-soft),0 0 0 calc(3px + var(--level) * 16px) color-mix(in srgb,currentColor calc(9% + var(--level) * 28%),transparent);
+}
+#panel-classroom .live-id h2{font-weight:900;letter-spacing:-.025em;color:var(--ink)}
+#panel-classroom .live-id p{color:var(--pencil);font-weight:700}
+#panel-classroom #live-wave{color:var(--accent)}
+#panel-classroom .live-controls{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+#panel-classroom .live-commands{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
+#panel-classroom .live-commands button{border:2px solid var(--border-dark);border-radius:999px;background:var(--sheet);box-shadow:2px 2px 0 var(--sk-soft);font-weight:800}
+#live-status{color:var(--pencil);font-weight:700}
+
+@keyframes classroom-stage-in{0%{opacity:0;transform:translateY(18px) scale(.88)}62%{opacity:1;transform:translateY(-3px) scale(1.04)}100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes classroom-impact{0%{opacity:0;transform:scale(.3) rotate(-10deg)}52%{opacity:1;transform:scale(1.22) rotate(7deg)}100%{opacity:1;transform:scale(1) rotate(0)}}
+@keyframes classroom-idle-bob{0%,100%{transform:translateY(0) scaleX(1)}50%{transform:translateY(-3px) scaleX(1.012)}}
+@keyframes classroom-chip-in{from{opacity:0;transform:translateY(12px) scale(.96)}to{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes classroom-bubble-in{0%{opacity:0;transform:translateY(12px) scale(.92,.82)}62%{opacity:1;transform:translateY(-2px) scale(1.025,.98)}100%{opacity:1;transform:translateY(0) scale(1)}}
+@keyframes classroom-typing{0%,100%{transform:translateY(0);opacity:.38}42%{transform:translateY(-4px);opacity:1}}
+
+@media(max-width:739px){
+  #panel-classroom .classroom-chat-window{border-width:0;border-radius:0;box-shadow:none!important}
+  #panel-classroom .chat-header{min-height:60px;padding:8px 14px!important;border-bottom-width:2px}
+  #panel-classroom .chat-teacher-avatar{width:28px!important;height:50px!important}
+  #panel-classroom .chat-title{font-size:18px!important}
+  #panel-classroom .chat-header-actions{gap:4px}
+  #panel-classroom .chat-header-actions .sketch-icon-btn{min-height:36px;padding:6px 9px!important;font-size:12px}
+  #panel-classroom .chat-messages-stage{padding:14px 14px 18px!important}
+  #panel-classroom .chat-welcome-state{padding:0 4px 14px;gap:10px}
+  #panel-classroom .welcome-stage{height:178px;width:min(100%,300px)}
+  #panel-classroom .welcome-stage::before{width:166px;height:132px;bottom:8px;border-width:2.5px}
+  #panel-classroom .welcome-speedlines{inset:-10px -36px}
+  #panel-classroom .welcome-mascot{width:88px;height:160px}
+  #panel-classroom .welcome-shadow{width:86px;height:12px;bottom:10px}
+  #panel-classroom .welcome-impact{right:22px;top:16px;font-size:27px}
+  #panel-classroom .welcome-title{font-size:clamp(24px,8vw,31px);letter-spacing:-.045em}
+  #panel-classroom .welcome-chips-row{width:min(100%,340px);gap:10px}
+  #panel-classroom .welcome-chip-btn{min-height:50px;font-size:15px;border-radius:15px!important;padding:10px 38px!important}
+  #panel-classroom .chat-bubble-row{gap:7px;margin-bottom:14px!important}
+  #panel-classroom .bubble-avatar-box{display:none!important}
+  #panel-classroom .bubble-speech-card{max-width:94%!important;padding:11px 13px!important;border-width:2px!important;font-size:15px}
+  #panel-classroom .bubble-body-text{font-size:15px!important;line-height:1.62!important}
+  #panel-classroom .chat-chips-bar{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px!important;padding:8px 12px!important;overflow:visible!important}
+  #panel-classroom .chat-chips-bar .prompt-chip{width:100%;min-height:42px;padding:6px 4px!important;font-size:12px;line-height:1.15;white-space:normal;text-align:center}
+  #panel-classroom .chat-input-bar{margin:0 10px 10px!important;padding:6px!important;gap:6px!important;border-width:2.5px!important;border-radius:20px!important}
+  #panel-classroom .chat-audio-btn{min-width:44px;width:44px;height:44px;min-height:44px;padding:8px!important;border-radius:15px!important}
+  #panel-classroom .chat-audio-btn span{display:none}
+  #panel-classroom .chat-text-input{min-height:42px!important;height:42px;font-size:16px;padding:9px 4px!important}
+  #panel-classroom .chat-send-btn{width:42px!important;min-width:42px!important;height:42px!important;min-height:42px!important}
+  #panel-classroom .classroom-voice{padding:10px 12px 14px!important}
+  #panel-classroom .live-controls{display:grid;grid-template-columns:1fr 1fr;align-items:stretch}
+  #panel-classroom .live-controls #live-start{grid-column:1/-1}
+}
+
+@media(prefers-reduced-motion:reduce){
+  #panel-classroom .welcome-stage,#panel-classroom .welcome-mascot,#panel-classroom .welcome-impact,
+  #panel-classroom .welcome-chip-btn,#panel-classroom .chat-bubble-row,#panel-classroom .classroom-typing-bubble i{
+    animation:none!important;transition:none!important;
+  }
+}
