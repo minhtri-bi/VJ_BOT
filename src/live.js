@@ -158,8 +158,9 @@ export async function mistralLiveRoute(request,env) {
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),headers,
       body:JSON.stringify({
         llm:{model},
-        // 480 ms is Mistral's recommended accuracy/latency balance; lesson terms bias the transcript.
-        stt:tuned?{model:'voxtral-mini-transcribe-realtime-3',target_streaming_delay_ms:480,context_bias:bias}
+        // 1200 ms is the maximum streaming delay: mixed Japanese/Vietnamese/English speech
+        // needs the extra context before Voxtral commits to a transcript; lesson terms bias it further.
+        stt:tuned?{model:'voxtral-mini-transcribe-realtime-3',target_streaming_delay_ms:1200,context_bias:bias}
           :{model:'voxtral-mini-transcribe-realtime-3'},
         // Haruto is the male Japanese preset, so the teacher keeps one male voice.
         tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3133'},

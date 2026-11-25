@@ -1024,7 +1024,7 @@ test('Mistral Live creates and closes LiveKit sessions billed to the caller\'s o
     assert.equal(url,'https://api.mistral.ai/v1/audio/sessions');
     const body=JSON.parse(options.body);
     assert.equal(body.llm.model,'m1');assert.equal(body.stt.model,'voxtral-mini-transcribe-realtime-3');
-    assert.equal(body.stt.target_streaming_delay_ms,480);
+    assert.equal(body.stt.target_streaming_delay_ms,1200);
     assert.ok(Array.isArray(body.stt.context_bias)&&body.stt.context_bias.includes('こんにちは')&&body.stt.context_bias.includes('thầy Lâm'));
     assert.equal(body.tts.model,'voxtral-mini-tts-3');assert.equal(body.tts.voice_id,'voice_3133');
     assert.ok(body.instructions&&body.welcome_message);
@@ -1138,7 +1138,7 @@ test('Mistral Live retries with bare STT when Mistral rejects the tuning, keepin
   try{
     assert.equal((await send({level:'N5',api_connection})).status,201);
     assert.equal(bodies.length,2);
-    assert.equal(bodies[0].stt.target_streaming_delay_ms,480);
+    assert.equal(bodies[0].stt.target_streaming_delay_ms,1200);
     assert.deepEqual(bodies[1].stt,{model:'voxtral-mini-transcribe-realtime-3'},'bare STT keeps the session working');
   }finally{globalThis.fetch=original;}
 });
