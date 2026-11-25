@@ -49,6 +49,7 @@
   <link rel="stylesheet" href="loading.css">
   <link rel="stylesheet" href="sakuga.css">
   <link rel="stylesheet" href="guide.css">
+  <script defer src="landing.js"></script>
 </head>
 <body data-page="landing">
   <div id="app-loading-screen" class="retro-loading-overlay" role="status" aria-live="polite" aria-label="Đang tải VJBot">
@@ -137,10 +138,11 @@
       <!-- WHITEBOARD CANVAS CONTAINER -->
       <div class="sketch-canvas" data-od-id="whiteboard-canvas">
 
-        <!-- TAB 0: LANDING PAGE (APPLE RETRO MACINTOSH 1984 PC + TYPEWRITER + SHOWCASE) -->
+        <!-- TAB 0: LANDING PAGE (SAKUGA EDITORIAL COVER + LIVE QUIZ) -->
         <section class="tab-panel active" id="panel-landing">
           <nav class="public-nav" aria-label="Trang chủ">
             <a href="#landing" class="public-brand"><img src="favicon.svg?v=3" width="40" height="40" alt="">VJBot</a>
+            <div class="public-nav-links" aria-label="Mục trang"><a href="#landing-method">Cách học</a><a href="#landing-features">Trong lớp</a></div>
             <div class="public-nav-actions"><button class="public-login" data-enter="dashboard">Đăng nhập</button><button class="public-cta" data-register>Bắt đầu</button></div>
           </nav>
           <div class="landing-scroll">
@@ -150,11 +152,12 @@
                   <h1 id="landing-title">Tiếng Nhật,<br>từng ngày.</h1>
                   <p class="public-intro">Học N5–N1, luyện nói và hội thoại cùng thầy Lâm.</p>
                   <div class="public-levels" role="group" aria-label="Chọn cấp độ"><button type="button" data-level="N5">N5</button><button type="button" data-level="N4">N4</button><button type="button" data-level="N3">N3</button><button type="button" data-level="N2">N2</button><button type="button" data-level="N1">N1</button></div>
-                  <div class="public-account-actions"><button class="public-cta" data-register>Tạo tài khoản <span aria-hidden="true">↗</span></button><button class="public-signin" data-enter="dashboard">Đăng nhập</button></div>
+                  <div class="public-account-actions"><button class="public-cta" data-register>Tạo tài khoản</button><button class="public-signin" data-enter="dashboard">Đăng nhập</button></div>
                 </div>
                 <div class="public-demo" data-reveal>
                   <span class="landing-orbit landing-orbit-one" aria-hidden="true"></span>
                   <span class="landing-orbit landing-orbit-two" aria-hidden="true"></span>
+                  <div class="demo-panel-tag" aria-hidden="true"><span lang="ja">もんだい</span><span>Hôm nay</span></div>
                   <div class="demo-teacher-heading"><img src="assets/lam/pixel/south.png" alt="Thầy Lâm" width="184" height="184"><div><h2>Thử cùng thầy nhé.</h2><p lang="ja">こんにちは！</p></div></div>
                   <div class="demo-chat">
                     <p class="demo-question">Trong câu「私は学生です」,<br>trợ từ「は」được đọc là gì?</p>
@@ -164,46 +167,46 @@
                 </div>
               </div>
             </section>
-            <section class="landing-section landing-method" aria-labelledby="landing-method-title" data-parallax-speed="0.22">
+            <section class="landing-section landing-method" id="landing-method" aria-labelledby="landing-method-title" data-parallax-speed="0.22">
               <div class="landing-section-head" data-reveal>
                 <span class="landing-kicker">Cách học</span>
-                <h2 id="landing-method-title">Một vòng học, ba bước.</h2>
+                <h2 id="landing-method-title">Một vòng học, ba nhịp.</h2>
               </div>
               <ol class="public-steps">
-                <li data-reveal><button type="button" data-enter="curriculum"><span class="step-index" aria-hidden="true">01</span><span class="step-title">Đọc bài học</span><span class="step-arrow" aria-hidden="true">↗</span></button></li>
-                <li data-reveal><button type="button" data-enter="classroom"><span class="step-index" aria-hidden="true">02</span><span class="step-title">Thầy hỏi, em trả lời</span><span class="step-arrow" aria-hidden="true">↗</span></button></li>
-                <li data-reveal><button type="button" data-enter="kaiwa"><span class="step-index" aria-hidden="true">03</span><span class="step-title">Nhận xét rồi thử lại</span><span class="step-arrow" aria-hidden="true">↗</span></button></li>
+                <li data-reveal><button type="button" data-enter="curriculum"><span class="step-kana" lang="ja" aria-hidden="true">よむ</span><span class="step-title">Đọc bài học</span><span class="step-copy">Mở đúng bài theo lộ trình của em.</span></button></li>
+                <li data-reveal><button type="button" data-enter="classroom"><span class="step-kana" lang="ja" aria-hidden="true">こたえる</span><span class="step-title">Thầy hỏi, em trả lời</span><span class="step-copy">Tự nghĩ trước, không nhìn câu mẫu.</span></button></li>
+                <li data-reveal><button type="button" data-enter="kaiwa"><span class="step-kana" lang="ja" aria-hidden="true">なおす</span><span class="step-title">Nhận xét rồi thử lại</span><span class="step-copy">Sửa đúng chỗ còn vấp trong ngày.</span></button></li>
               </ol>
             </section>
-            <section class="landing-section landing-features" aria-labelledby="landing-features-title" data-parallax-speed="0.16">
+            <section class="landing-section landing-features" id="landing-features" aria-labelledby="landing-features-title" data-parallax-speed="0.16">
               <div class="landing-section-head" data-reveal>
                 <span class="landing-kicker">Trong lớp</span>
                 <h2 id="landing-features-title">Đủ bài học, luyện tập và phản hồi.</h2>
               </div>
               <div class="landing-feature-grid">
                 <article class="landing-feature-card" data-reveal>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16"/></svg>
+                  <div class="feature-art feature-art-road" aria-hidden="true"><span class="feature-glyph" lang="ja">道</span><svg class="feature-lines" viewBox="0 0 320 120" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 98 C88 92 122 72 150 42 C176 14 220 18 300 20"/><path d="M145 42 l16 2 M153 30 l3 16"/><path d="M58 86 l22 2 M92 76 l18 1"/></svg></div>
                   <h3>Lộ trình N5–N1</h3>
                   <p>Bài học theo chương, mở đúng lúc.</p>
-                  <button type="button" data-enter="curriculum">Xem lộ trình <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-enter="curriculum">Xem lộ trình</button>
                 </article>
                 <article class="landing-feature-card" data-reveal>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H9l-5 5zM8 8h8M8 12h5"/></svg>
+                  <div class="feature-art feature-art-class" aria-hidden="true"><span class="feature-glyph" lang="ja">問</span><svg class="feature-lines" viewBox="0 0 320 120" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M40 28h112v48H86l-24 22V76H40z"/><path d="M188 48h92v42h-20v18l-28-18h-44z"/><path d="M70 46h54 M70 61h36 M213 65h42"/></svg></div>
                   <h3>Lớp học đảo ngược</h3>
                   <p>Thầy hỏi, em tự trả lời từng câu.</p>
-                  <button type="button" data-enter="classroom">Vào lớp <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-enter="classroom">Vào lớp</button>
                 </article>
                 <article class="landing-feature-card" data-reveal>
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h10v9H8l-4 4zM20 3v10h-4M8 19h7l5 4v-9"/></svg>
+                  <div class="feature-art feature-art-voice" aria-hidden="true"><span class="feature-glyph" lang="ja">話</span><svg class="feature-lines" viewBox="0 0 320 120" fill="none" stroke="currentColor" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"><path d="M24 60h28l18-28 20 56 18-42 16 28 22-52 22 66 18-38 16 24 24-14 18 20 42 1"/><path d="M52 28l28 10 M246 91l32 11"/></svg></div>
                   <h3>Hội thoại Kaiwa</h3>
                   <p>Nói theo tình huống, nhận xét rõ ràng.</p>
-                  <button type="button" data-enter="kaiwa">Luyện nói <span aria-hidden="true">↗</span></button>
+                  <button type="button" data-enter="kaiwa">Luyện nói</button>
                 </article>
               </div>
               <div class="landing-cta-panel" data-reveal>
-                <span class="landing-kicker">Hôm nay</span>
-                <h2>Vào lớp cùng thầy Lâm.</h2>
-                <div class="landing-cta-actions"><button class="public-cta" type="button" data-register>Tạo tài khoản <span aria-hidden="true">↗</span></button><button class="public-signin" type="button" data-enter="dashboard">Đăng nhập</button></div>
+                <img class="landing-cta-mascot" src="assets/lam/pixel/display/south.png" alt="" width="52" height="94">
+                <div class="landing-cta-copy"><span class="landing-kicker">Hôm nay</span><h2>Vào lớp cùng thầy Lâm.</h2></div>
+                <div class="landing-cta-actions"><button class="public-cta" type="button" data-register>Tạo tài khoản</button><button class="public-signin" type="button" data-enter="dashboard">Đăng nhập</button></div>
               </div>
             </section>
           </div>
@@ -1037,7 +1040,7 @@
     <p id="admin-user-status" role="status"></p>
   </dialog>
   <dialog id="auth-dialog" aria-labelledby="auth-user">
-    <aside class="auth-aside" aria-hidden="true"><img src="assets/landing-sun.svg" alt="" width="120" height="120"><img src="assets/lam/teacher.svg" alt="" width="132" height="132"></aside>
+    <aside class="auth-aside" aria-hidden="true"><img src="assets/landing-sun.svg" alt="" width="120" height="120"><img src="assets/lam/pixel/display/south.png" alt="" width="88" height="160"></aside>
     <div class="auth-main">
       <button type="button" id="auth-close" class="modal-close-btn" aria-label="Đóng">×</button>
       <h2 id="auth-user">Đăng nhập</h2>
