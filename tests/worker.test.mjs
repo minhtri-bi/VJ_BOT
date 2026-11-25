@@ -1339,9 +1339,11 @@ test('live translation requires a matching account and bounded caption data befo
 test('live translation uses only the server key, checks exact returned IDs and never stores transcript text',async()=>{
   const {env,request}=await authenticated(),original=globalThis.fetch;await asAdmin(env);env.OPENAI_API_KEY='server-translation-key';
   const segments=[{id:'caption_1',role:'user',text:'私は学生です。'},{id:'caption_2',role:'assistant',text:'こんにちは。'}];
-  const make=()=>{const r=request('/api/live/translate',{segments,api_connection:{api_key:'do-not-forward'}});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  const make=()=>{const r=request('/api/live/translate',{segments});r.headers.set('X-VJBot-Account','google:qa');return r;};
   let output={translations:[{id:'caption_2',text_vi:'Xin chào.'},{id:'caption_1',text_vi:'Tôi là học sinh.'}]};
+  let fetches=0;
   globalThis.fetch=async(url,options)=>{
+    fetches++;
     assert.equal(url,'https://api.openai.com/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer '+env.OPENAI_API_KEY);
     const body=JSON.parse(options.body);assert.equal(body.model,'gpt-5.4-mini');assert.equal(body.reasoning_effort,'none');
     assert.deepEqual(JSON.parse(body.messages[1].content),segments);assert.equal(body.response_format.json_schema.strict,true);assert.equal(body.response_format.json_schema.name,'voice_translation');
@@ -1349,6 +1351,9 @@ test('live translation uses only the server key, checks exact returned IDs and n
     return Response.json({choices:[{message:{content:JSON.stringify(output)}}]});
   };
   try{
+    const probe=request('/api/live/translate',{segments,api_connection:{protocol:'openai',base_url:'https://api.openai.com/v1',model:'gpt-5.4-mini',api_key:'do-not-forward'}});
+    probe.headers.set('X-VJBot-Account','google:qa');
+    assert.equal((await worker.fetch(probe,env)).status,400);assert.equal(fetches,0);
     let response=await worker.fetch(make(),env);assert.equal(response.status,200);assert.deepEqual((await response.json()).translations,output.translations);
     assert.equal((await env.DB.prepare('SELECT count(*) n FROM conversations').first()).n,0);
     for(const invalid of [{translations:[{id:'other',text_vi:'x'}]}, {translations:[{id:'caption_1',text_vi:'a'},{id:'caption_1',text_vi:'b'}]},
@@ -1359,6 +1364,24 @@ test('live translation uses only the server key, checks exact returned IDs and n
     response=await worker.fetch(make(),env);assert.equal(response.status,503);assert.ok(!(await response.text()).includes(env.OPENAI_API_KEY));
     await env.DB.prepare('INSERT OR REPLACE INTO ai_usage(user_id,bucket,count) VALUES(?,?,20)').bind('google:qa',Math.floor(Date.now()/60000)).run();
     assert.equal((await worker.fetch(make(),env)).status,429);
+  }finally{globalThis.fetch=original;}
+});
+
+test('live translation follows device-stored chat connections such as Mistral',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  const segments=[{id:'caption_1',role:'user',text:'私は学生です。'}];
+  const device={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'mistral-small-latest',api_key:'sk-test-12345678'};
+  const make=connection=>{const r=request('/api/live/translate',{segments,...(connection?{api_connection:connection}:{})});r.headers.set('X-VJBot-Account','google:qa');return r;};
+  globalThis.fetch=async(url,options)=>{
+    assert.equal(url,'https://api.mistral.ai/v1/chat/completions');assert.equal(options.headers.Authorization,'Bearer sk-test-12345678');
+    const body=JSON.parse(options.body);assert.equal(body.model,'mistral-small-latest');assert.equal(body.response_format.json_schema.name,'voice_translation');
+    return Response.json({choices:[{message:{content:JSON.stringify({translations:[{id:'caption_1',text_vi:'Tôi là học sinh.'}]})}}]});
+  };
+  try{
+    const response=await worker.fetch(make(device),env);
+    assert.equal(response.status,200);assert.deepEqual((await response.json()).translations,[{id:'caption_1',text_vi:'Tôi là học sinh.'}]);
+    globalThis.fetch=async()=>{throw new Error('must not fetch');};
+    assert.equal((await worker.fetch(make(),env)).status,403);
   }finally{globalThis.fetch=original;}
 });
 
