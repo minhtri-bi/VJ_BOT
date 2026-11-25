@@ -108,8 +108,20 @@ function setupSidebar(){
   const mobile=matchMedia('(max-width: 739px)');
   const wide=matchMedia('(min-width: 1100px)');
   let expanded=localStorage.getItem('vjbot_sidebar_expanded')===null?wide.matches:localStorage.getItem('vjbot_sidebar_expanded')==='true';
-  const paths={admin:'M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z',dashboard:'M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9',kanji:'M4 4h16M12 2v6M6 9h12M12 9v12M4 20l8-8 8 8',landing:'M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9',classroom:'M4 4h16v12H4zM8 21l4-5 4 5M8 8h8M8 12h4',curriculum:'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3zM12 6v16',flashcards:'M7 3h14v15H7zM3 7v14h14',kaiwa:'M4 4h16v12H9l-5 5zM8 8h8M8 12h5',quiz:'M6 3h12v18H6zM9 7h6M9 11h6M9 15h4',mastery:'M4 20V10M10 20V4M16 20v-7M22 20H2',settings:'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2'};
-  const iconSvg=(tab,cls)=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${paths[tab]}"/></svg>`;
+  const paths={
+    admin:'<path d="M12 3l7 3v5.5c0 4.5-3 7.3-7 8.5-4-1.2-7-4-7-8.5V6z"/><path d="M10.5 12l1.2 1.2 2.8-3"/>',
+    dashboard:'<path d="M4 5.5h7v13H4zM13 5.5h7v13h-7z"/><path d="M6.5 9h2M6.5 12h2M15.5 9h2M15.5 12h2"/>',
+    landing:'<path d="M4 5.5h7v13H4zM13 5.5h7v13h-7z"/><path d="M6.5 9h2M6.5 12h2M15.5 9h2M15.5 12h2"/>',
+    curriculum:'<path d="M5 4h6l2 2 2-2h5v16h-5l-2 2-2-2H5z"/><path d="M12 6v14M14.5 7h3M7.5 7v5l1.5-1 1.5 1V7"/>',
+    classroom:'<path d="M4 4h16v11H4z"/><path d="M7 8h6M7 11h3M11 15l-3 5M13 15l3 5"/><path d="M17 5.5l1.2-1.2M18.5 9h1.5"/>',
+    mastery:'<path d="M12 20v-8"/><path d="M12 12c-4 0-6-2-6-5 3.5 0 5.5 1.5 6 5zM12 9c0-3.5 2-5 5-5 0 3-2 5-5 5z"/><path d="M7 20h10"/>',
+    flashcards:'<path d="M7 3h12v14H7z"/><path d="M5 7v14h12"/><path d="M10.5 12h5M13 9.5v5"/>',
+    kanji:'<path d="M5 5h14M12 3v4"/><path d="M7 9c3 5 7 8 10 10M17 9c-3 5-7 8-10 10"/>',
+    kaiwa:'<path d="M4 4h11v9H8l-4 4z"/><path d="M15 7h5v9h-4l-2 2v-2"/><path d="M7 7.5h5M7 10h3"/>',
+    quiz:'<circle cx="12" cy="12" r="7.5"/><circle cx="12" cy="12" r="3.5"/><path d="M13.5 10.5L19 5M19 5h-3M19 5v3"/>',
+    settings:'<path d="M5 7h10M19 7h1M5 12h2M11 12h9M5 17h10M19 17h1"/><circle cx="17" cy="7" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="17" r="2"/>'
+  };
+  const iconSvg=(tab,cls)=>`<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[tab]}</svg>`;
   for(const button of sidebar.querySelectorAll('[data-tab]')){
     const label=button.textContent.trim();button.setAttribute('aria-label',label);button.title=label;
     if(!button.querySelector('.rail-icon'))button.insertAdjacentHTML('afterbegin',iconSvg(button.dataset.tab,'rail-icon'));

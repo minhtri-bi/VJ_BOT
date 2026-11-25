@@ -53,15 +53,18 @@
 <body data-page="landing">
   <div id="app-loading-screen" class="retro-loading-overlay" role="status" aria-live="polite" aria-label="Đang tải VJBot">
     <div class="loading-scene">
-      <div class="loading-book" aria-hidden="true">
-        <span class="book-spark spark-one"></span><span class="book-spark spark-two"></span><span class="book-spark spark-three"></span>
-        <div class="book-cover left"></div><div class="book-cover right"></div>
-        <div class="book-page page-left"><span></span><span></span><span></span></div>
-        <div class="book-page page-right"><span lang="ja">学</span><i></i><i></i><i></i></div>
-        <div class="book-flip-page"></div>
-        <div class="loading-pencil"></div>
-        <div class="book-shadow"></div>
-      </div>
+      <svg class="loading-book" viewBox="0 0 220 150" role="img" aria-label="Sổ bài đang mở">
+        <ellipse class="book-shadow" cx="110" cy="132" rx="72" ry="9"/>
+        <path class="book-cover-shape" d="M22 35q33-13 82 0v91q-49-13-82 0zM198 35q-33-13-82 0v91q49-13 82 0z"/>
+        <path class="book-page-shape" d="M31 40q30-10 73 1v79q-43-11-73-1zM189 40q-30-10-73 1v79q43-11 73-1z"/>
+        <path class="book-spine" d="M104 39v84"/>
+        <path class="page-lines" d="M45 57h40M45 70h34M45 83h43M45 96h31"/>
+        <path class="page-lines right" d="M135 57h39M135 70h31M135 83h39"/>
+        <text class="book-kana" x="150" y="111" text-anchor="middle" lang="ja">学</text>
+        <g class="loading-pencil"><path d="M107 89l47-27 9 15-47 27-13 5z"/><path class="pencil-tip" d="M107 89l9 15-13 5z"/><path class="pencil-band" d="M145 68l9-5 9 15-9 5z"/></g>
+        <path class="book-spark spark-one" d="M39 15l4 9 9 4-9 4-4 9-4-9-9-4 9-4z"/>
+        <path class="book-spark spark-two" d="M184 12l3 7 7 3-7 3-3 7-3-7-7-3 7-3z"/>
+      </svg>
       <div class="loading-copy"><strong>VJBot</strong><span>Thầy Lâm đang mở sổ bài…</span></div>
     </div>
   </div>

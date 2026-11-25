@@ -1,8 +1,8 @@
-#app-guide-overlay{position:fixed;inset:0;z-index:12000;background:rgba(19,31,24,.28);backdrop-filter:blur(2px)}
+#app-guide-overlay{position:fixed;inset:0;z-index:12000;background:rgba(19,31,24,.08)}
 #app-guide-overlay[hidden]{display:none!important}
 .guide-spotlight{
   position:fixed;border:3px solid var(--sk-acc,#55a861);border-radius:18px;pointer-events:none;
-  box-shadow:0 0 0 9999px rgba(19,31,24,.45),0 0 0 6px rgba(255,255,255,.24),5px 7px 0 rgba(28,42,34,.2);
+  box-shadow:0 0 0 9999px rgba(19,31,24,.18),0 0 0 6px rgba(255,255,255,.24),5px 7px 0 rgba(28,42,34,.2);
   transition:left .24s ease,top .24s ease,width .24s ease,height .24s ease;
   animation:guide-pulse 1.35s ease-in-out infinite;
 }
