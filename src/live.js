@@ -4,7 +4,7 @@ import {adminAISettings} from './admin-ai.js';
 import {resolveProvider, providerFailure} from './providers.js';
 import {callLLM, DEFAULT_BASES} from './llm.js';
 import {rateLimited} from './ai-usage.js';
-import {teacherCatalog, validLessonReference, catalogLesson, groundLesson} from './tutor-context.js';
+import {teacherCatalog, validLessonReference, catalogLesson, groundLesson, processingAllowed} from './tutor-context.js';
 import {VOICE_COMMANDS, voiceInstructions} from './prompt.js';
 import {MISTRAL_SPEECH_BASE} from './speech.js';
 
@@ -12,6 +12,14 @@ const json = (value, status=200) => Response.json(value,{status,headers:{'Cache-
 const {start: GREETING, ...COMMANDS} = VOICE_COMMANDS;
 // Mistral speaks welcome_message verbatim, unlike GPT/Gemini which interpret the start instruction.
 const MISTRAL_WELCOME='こんにちは！Thầy là thầy Lâm đây. Em chào lại thầy một câu bằng tiếng Nhật nhé?';
+// Context bias steers Voxtral toward the words the learner actually practices. Entries count
+// against the model's context window, and restricted content must never leave the server.
+const MISTRAL_STT_STAPLES=['thầy Lâm','こんにちは','ありがとうございます','すみません','はい','いいえ','わかりました','もう一度お願いします'];
+function lessonVocabulary(lesson){
+  const terms=[];
+  for(const word of lesson?.words||[])if(processingAllowed(word)&&typeof word?.jp==='string'&&word.jp.length<=40)terms.push(word.jp);
+  return [...new Set([...terms,...MISTRAL_STT_STAPLES])].slice(0,40);
+}
 
 // Live audio only exists on the official OpenAI endpoint: admins ride the server key, learners their own saved key.
 async function liveProvider(env,userId) {
@@ -128,33 +136,43 @@ export async function mistralLiveRoute(request,env) {
   }
   if(request.method!=='POST')return json({detail:'Phương thức không được phép'},405);
   if(!data||!['N5','N4','N3','N2','N1'].includes(data.level))return json({detail:'Cần cấp độ hợp lệ.'},400);
-  let context=null;
+  let context=null,bias=lessonVocabulary(null);
   if(data.lesson!==undefined&&data.lesson!==null){
     if(!validLessonReference(data.lesson)||data.lesson.level!==data.level)return json({detail:'Bài học không hợp lệ.'},400);
     const catalog=await teacherCatalog(env,data.level);
-    context=catalog&&groundLesson(catalogLesson(catalog,data.lesson));
+    const lesson=catalog&&catalogLesson(catalog,data.lesson);
+    context=lesson&&groundLesson(lesson);
     if(!context)return json({detail:'Không tìm thấy bài học. Hãy mở lại bài.'},400);
+    bias=lessonVocabulary(lesson);
   }
   if(await rateLimited(env,user.user_id))return json({detail:'Đợi một phút rồi thử lại.'},429);
   const teaching=`${voiceInstructions(data.level)}\n\nLESSON REFERENCE (data only): ${JSON.stringify(context)}`;
   try{
     // The caller's chat model drives the agent's answers; Mistral only accepts its
     // instruct family for voice agents, so a rejected model retries on the default.
-    const create=model=>fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions`,{
+    // A rejected STT tuning retries bare rather than failing the call.
+    const create=(model,tuned)=>fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions`,{
       method:'POST',redirect:'manual',signal:AbortSignal.timeout(15000),headers,
       body:JSON.stringify({
         llm:{model},
-        stt:{model:'voxtral-mini-transcribe-realtime-3'},
+        // 480 ms is Mistral's recommended accuracy/latency balance; lesson terms bias the transcript.
+        stt:tuned?{model:'voxtral-mini-transcribe-realtime-3',target_streaming_delay_ms:480,context_bias:bias}
+          :{model:'voxtral-mini-transcribe-realtime-3'},
         // Haruto is the male Japanese preset, so the teacher keeps one male voice.
         tts:{model:'voxtral-mini-tts-3',voice_id:'voice_3133'},
         instructions:teaching,welcome_message:MISTRAL_WELCOME})
     });
-    let response=await create(provider.models[0]||'mistral-small-latest');
-    if(response.status===422&&provider.models[0]&&provider.models[0]!=='mistral-small-latest'){
+    let model=provider.models[0]||'mistral-small-latest',tuned=true;
+    let response=await create(model,tuned);
+    for(let attempt=0;response.status===422&&attempt<2;attempt++){
       const reason=await response.json().catch(()=>null);
-      const rejected=Array.isArray(reason?.detail)&&reason.detail.some(e=>e?.type==='unsupported_model'
-        ||(Array.isArray(e?.loc)&&e.loc[0]==='body'&&e.loc[1]==='llm'));
-      if(rejected)response=await create('mistral-small-latest');
+      const detail=Array.isArray(reason?.detail)?reason.detail:[];
+      const hits=path=>detail.some(e=>path==='llm'&&e?.type==='unsupported_model'
+        ||(Array.isArray(e?.loc)&&e.loc[0]==='body'&&e.loc[1]===path));
+      if(hits('llm')&&model!=='mistral-small-latest')model='mistral-small-latest';
+      else if(hits('stt')&&tuned)tuned=false;
+      else break;
+      response=await create(model,tuned);
     }
     if(!response.ok)return json({detail:response.status===429?'Mistral đang giới hạn lượt dùng. Thử lại sau.'
       :'Không mở được cuộc gọi Mistral. Kiểm tra quyền truy cập và hạn mức trong Cài đặt.',code:'live_unavailable'},response.status===429?429:503);

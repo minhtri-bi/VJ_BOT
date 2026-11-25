@@ -29,19 +29,22 @@ export async function transcriptionRoute(request,env) {
   const provider=await resolveProvider(env,user.user_id,data.api_connection,profileId);
   // STT follows the explicit chat connection, never the independent Sound selection.
   const selected=provider?.source==='platform' || profileId!==undefined || data.api_connection!==undefined;
-  const supported=selected && provider?.protocol==='openai' && provider.baseUrl==='https://api.openai.com/v1' && !provider.error;
-  if(data.action==='capabilities')return json({supported,model:supported?'gpt-transcribe':null});
-  if(!supported)return json({detail:'Kết nối OpenAI chính thức để chép lời, hoặc nhập câu trả lời.',code:'no_transcription'},403);
+  const engine=selected && provider?.protocol==='openai' && !provider.error
+    ? [{baseUrl:'https://api.openai.com/v1',model:'gpt-transcribe',label:'OpenAI'},
+      {baseUrl:'https://api.mistral.ai/v1',model:'voxtral-mini-transcribe-3',label:'Mistral'}]
+      .find(candidate=>candidate.baseUrl===provider.baseUrl) : undefined;
+  if(data.action==='capabilities')return json({supported:!!engine,model:engine?.model ?? null});
+  if(!engine)return json({detail:'Kết nối OpenAI hoặc Mistral chính thức để chép lời, hoặc nhập câu trả lời.',code:'no_transcription'},403);
   const mime=typeof data.mime_type==='string'?data.mime_type.split(';')[0].toLowerCase():'';
   if(!Object.hasOwn(formats,mime))return json({detail:'Định dạng âm thanh không được hỗ trợ.'},400);
   const bytes=audioBytes(data.audio,mime);
   if(!bytes)return json({detail:'Bản ghi không hợp lệ hoặc quá lớn.'},400);
   if(await rateLimited(env,user.user_id))return json({detail:'Đợi một phút rồi thử lại.'},429);
-  const form=new FormData();form.set('file',new Blob([bytes],{type:mime}),'recording.'+formats[mime]);form.set('model','gpt-transcribe');
+  const form=new FormData();form.set('file',new Blob([bytes],{type:mime}),'recording.'+formats[mime]);form.set('model',engine.model);
   try {
-    const response=await fetch('https://api.openai.com/v1/audio/transcriptions',{method:'POST',redirect:'manual',
+    const response=await fetch(`${engine.baseUrl}/audio/transcriptions`,{method:'POST',redirect:'manual',
       signal:AbortSignal.any([request.signal,AbortSignal.timeout(25000)]),headers:{Authorization:`Bearer ${provider.apiKey}`},body:form});
-    if(!response.ok)return json({detail:response.status===429?'OpenAI đang giới hạn lượt dùng. Hãy thử lại sau.':'Chưa chép được bản ghi. Thử lại hoặc nhập câu trả lời.'},response.status===429?429:503);
+    if(!response.ok)return json({detail:response.status===429?`${engine.label} đang giới hạn lượt dùng. Hãy thử lại sau.`:'Chưa chép được bản ghi. Thử lại hoặc nhập câu trả lời.'},response.status===429?429:503);
     const result=await response.json();
     if(typeof result.text!=='string' || result.text.length>6000)return json({detail:'Bản chép lời không hợp lệ.'},502);
     return json({text:result.text.trim()});
