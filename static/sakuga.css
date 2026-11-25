@@ -546,3 +546,9 @@ body[data-page=landing] .sketch-canvas{padding:0!important}
   .kaiwa-interactive-stage{display:flex;flex-direction:column;gap:12px}
   .kaiwa-prompt-card,.kaiwa-response-card{padding:14px}
 }
+
+/* Responsive audit: error retry actions are real controls even when rendered without a button class. */
+#dashboard-content>button,#study-plan>button{min-height:38px;padding:8px 14px;border:2px solid var(--border-dark);border-radius:var(--radius-control);background:var(--sheet);color:var(--ink);box-shadow:var(--shadow-sketch-sm);font-weight:700;cursor:pointer}
+
+/* Mobile mascot collision guard: use the topbar/classroom entry instead of covering study controls. */
+@media(max-width:739px){#lam-float{display:none!important}.public-demo::before{right:8px;top:4px;font-size:17px;opacity:.55}}
