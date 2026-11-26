@@ -182,7 +182,8 @@ export async function liveTurnRoute(request, env) {
   let data;
   try {data = JSON.parse(raw);} catch {return invalid();}
   if (!data || typeof data !== 'object' || Array.isArray(data)) return invalid();
-  const {lesson = null, focus = null, view = 'checks', task, command = null, transcript = '', history = [], japanese_only = false} = data;
+  const {lesson = null, focus = null, view = 'checks', task, command = null, history = [], japanese_only = false} = data;
+  const transcript = data.transcript ?? '';
   const level = data.level === undefined ? lesson?.level ?? 'N5' : data.level;
   const message = typeof transcript === 'string' ? transcript.replace(tags, ' ').trim() : '';
   if (!LEVELS.includes(level) || typeof transcript !== 'string' || transcript.trim().length > 1500

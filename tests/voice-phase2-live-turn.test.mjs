@@ -47,10 +47,21 @@ for (const [protocol, payload, stop] of [
   });
 }
 
+test('OpenAI-compatible empty refusal markers preserve visible text', async t => {
+  const content = '<ja>はい。</ja>';
+  let refusal;
+  t.mock.method(globalThis, 'fetch', async () => sse(event({choices:[{delta:{role:'assistant', content, refusal}}]}) + event('[DONE]')));
+  for (refusal of ['', ' \t ']) {
+    const chunks = [];
+    assert.deepEqual(await requestLLM('openai', text => chunks.push(text)), {ok:true,text:content,finishReason:null});
+    assert.deepEqual(chunks,[content]);
+  }
+});
+
 test('streams reject blocked or truncated provider completions, even with readable text', async t => {
   const cases = [
     ['openai', {choices:[{finish_reason:'content_filter',delta:{content:'blocked'}}]}],
-    ['openai', {choices:[{delta:{refusal:'refused',content:'blocked'}}]}],
+    ['openai', {choices:[{delta:{refusal:'I cannot help',content:'blocked'}}]}],
     ['anthropic', {type:'message_delta',delta:{stop_reason:'max_tokens'}}],
     ['anthropic', {type:'message_delta',delta:{stop_reason:'refusal'}}],
     ['gemini', {candidates:[{finishReason:'SAFETY',content:{parts:[{text:'blocked'}]}}]}]
@@ -186,6 +197,27 @@ test('live turn validates session, owner, body, references and quota before infe
   for (const minute of [bucket,bucket+1]) db.prepare('INSERT INTO ai_usage VALUES(?,?,20)').run(user,minute);
   assert.equal((await send(body)).status,429);
   assert.equal(fetch.mock.callCount(),0);
+});
+
+test('command-only live turns accept a null transcript but empty turns and invalid transcript types do not', async t => {
+  const {send} = await fixture(t);
+  const fetch = t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    const payload = JSON.parse(JSON.parse(init.body).messages.at(-1).content);
+    assert.equal(payload.message,null);
+    assert.equal(payload.command.key,'start');
+    return openAIReply('<ja>こんにちは。</ja>');
+  });
+  const body = {level:'N5',api_connection:connection,transcript:null};
+  for (const invalid of [{...body,command:null}, {...body,command:'start',transcript:0}]) {
+    const response = await send(invalid);
+    assert.equal(response.status,400);
+    assert.equal((await response.json()).code,'live_invalid_request');
+  }
+  const response = await send({...body,command:'start'});
+  assert.equal(response.status,200);
+  assert.match(response.headers.get('Content-Type'),/^text\/event-stream\b/);
+  assert.deepEqual(events(await response.text()).map(([kind]) => kind),['segment','done']);
+  assert.equal(fetch.mock.callCount(),1);
 });
 
 test('canonical task grounding does not pass answers, move learner history into system instructions, or persist the turn', async t => {

@@ -171,7 +171,7 @@ function streamFinish(protocol, data, streaming) {
     reason = choice?.finish_reason;
     if (!Array.isArray(choices) || (choices.length && (!streamRecord(choice)
       || (message == null ? !reason : !streamRecord(message))))
-      || reason === 'refusal' || typeof message?.refusal === 'string'
+      || reason === 'refusal' || (typeof message?.refusal === 'string' && message.refusal.trim() !== '')
       || (Array.isArray(message?.content) && message.content.some(part => part?.type === 'refusal'))) {
       throw new Error('Invalid provider response');
     }
