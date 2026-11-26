@@ -191,10 +191,11 @@ sequenceDiagram
     U->>App: Bấm "Nghe"
     App->>Player: VJVoice.speak(text, { mode: 'bilingual' | 'ja', reading, lesson, focus, task })
     Player->>Player: Dừng audio cũ + hủy mic đang thu
-    Player->>Cache: Tra cứu SHA256(voiceConfig + normalizedText)
+    Player->>Cache: SHA-256 of routing identity, NFC input, mode, reading, source reference and applicable synthesis revision
     alt Cache HIT
-        Cache-->>Stitch: Trả sẵn AudioBuffers
-        Stitch->>U: Phát ngay (0ms · 0 API call · 0 tốn credit ElevenLabs/Mistral)
+        Cache-->>Player: Encoded segment records (audioBase64, MIME type, language, speed, boundary)
+        Player->>Stitch: Decode records to AudioBuffers and schedule playback
+        Stitch->>U: Play without a provider call
     else Cache MISS
         Player->>BE: POST /api/tts (chỉ tính 1 lượt rate limit ai_usage)
         BE->>BE: Auth + processingAllowed + Normalize + Segment (<= 8 đoạn)
@@ -202,9 +203,12 @@ sequenceDiagram
             BE-->>Player: NDJSON chunk { index, lang, boundary, mimeType, audioBase64 }
             Player->>Stitch: Decode & xếp lịch phát ngay từ segment #0
         end
-        Player->>Cache: Lưu cache cho lần nghe sau
+        BE-->>Player: NDJSON terminal record { type: "done", count }
+        Player->>Cache: Store only after ordered segments, matching count and clean EOF
     end
 ```
+
+IndexedDB stores encoded segment records, not `AudioBuffer` objects. The player must never cache a stream that ends early, returns an error record, or has a mismatched count.
 
 *Các điểm phát được nối thống nhất:* Bài học, Từ vựng, Flashcard, Bài tập/Thi thử, Kaiwa (prompt + câu mẫu), Popover hỏi nhanh, và **mới: nút Nghe song ngữ ngay trên từng tin nhắn của Thầy Lâm trong Classroom Chat**.
 
@@ -224,6 +228,8 @@ sequenceDiagram
     opt Barge-in (ngắt lời khi Thầy đang nói)
         Core->>Stitch: interrupt() (< 5ms)
         Core->>Turn: AbortController.abort()
+        Core->>TTS: Abort pending synthesis requests owned by the interrupted turn
+        Note over Core,Stitch: Invalidate the turn ID before aborting. Check it after every async boundary and before scheduling decoded audio.
     end
     Core->>STT: POST /api/stt { audio, mime_type, context_bias: lessonVocab }
     STT-->>Core: { text: "こんにちは、昨日映画を見ました。" }

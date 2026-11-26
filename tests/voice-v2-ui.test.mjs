@@ -40,6 +40,17 @@ test('fragmented NDJSON plays in order, even on replay, without a second API cal
   assert.deepEqual(history.filter(([event])=>event==='cache'),[['cache',false]]);
 });
 
+test('cache separates bilingual and Japanese-only readings of the same text',async()=>{
+  const {voice,history}=browser(()=>response({...ja,index:0,boundary:'start'},{type:'done',count:1}));
+  const text='DVDを見ます。';
+  await voice.speak(text);
+  await voice.speak(text,{mode:'ja',reading:'みます'});
+  await voice.speak(text,{mode:'ja',reading:'みる'});
+  await voice.speak(text,{mode:'ja',reading:'みます'});
+  assert.deepEqual(history.filter(([event])=>event==='request').map(([,request])=>[request.mode,request.reading]),[
+    ['bilingual',undefined],['ja','みます'],['ja','みる']]);
+});
+
 test('partial streams play only available segments, signal failure and do not poison replay',async()=>{
   let count=0;
   const {voice,history}=browser(()=>++count===1?response(vi):response(vi,ja,done));
@@ -49,4 +60,80 @@ test('partial streams play only available segments, signal failure and do not po
   await voice.speak('Xin chào. こんにちは。');
   assert.equal(count,2);
   assert.deepEqual(history.filter(([event])=>event==='audio').map(([,lang])=>lang),['vi','vi','ja']);
+});
+
+function settingsFixture(apiFetch) {
+  const nodes = new Map(), storage = new Map();
+  function node(tag) {
+    return {tag, value:'', children:[], events:{},
+      set id(id) {nodes.set(id,id.startsWith('voice-v2-') ? this : undefined);},
+      append(...children) {for (const child of children) child.parentElement=this; this.children.push(...children);},
+      replaceChildren(...children) {this.children=[];this.append(...children);},
+      setAttribute(){}, addEventListener(event,handler){this.events[event]=handler;}};
+  }
+  const el=id=>nodes.get('voice-v2-'+id);
+  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','remove','routing','preview','settings','key'])
+    node('fixture').id='voice-v2-'+id;
+  el('storage').options=[{},{}];
+  const owner='learner';
+  const window = new EventTarget();
+  const profiles = [
+    {id:'a',scope:'local',name:'ElevenLabs',protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',revision:'1'},
+    {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',revision:'1'}
+  ];
+  const context = vm.createContext({window, signedInUser:{user_id:owner}, Event, CustomEvent, AbortSignal, apiFetch,
+    VJProfiles:{load:async (_owner,id)=>({...profiles.find(profile=>profile.id===id),api_key:'synthetic-fixture-key'})},
+    document:{getElementById:id=>nodes.get(id), createElement:node},
+    localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}});
+  vm.runInContext(readFileSync('static/voice/voice-settings.js','utf8'),context);
+  const refresh=()=>window.renderVoiceProfiles(owner,profiles,false);
+  refresh();
+  function change(id,value) {el(id).value=value;el(id).events.change();}
+  return {el,profiles,refresh,change,
+    saved:()=>JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),
+    save:()=>el('routing').events.submit({preventDefault(){}}),
+    catalog:()=>el('slots').children[0].children.find(child=>child.tag==='button').events.click()};
+}
+
+test('switches only the affected voice overrides and uses valid speeds for blank inputs',()=>{
+  const {el,profiles,refresh,change,save,saved}=settingsFixture();
+  change('mode','dual_same_api');change('primary-profile','local:a');
+  el('ja-voice').value='old_ja';el('vi-voice').value='old_vi';
+  change('primary-profile','local:b');
+  el('ja-speed').value=el('vi-speed').value='';
+  save();
+  assert.deepEqual([saved().ja.speed,saved().vi.speed,saved().ja.voice_id,saved().vi.voice_id],[0.9,1,undefined,undefined]);
+  change('mode','dual_split_api');change('ja-profile','local:a');
+  el('ja-voice').value='keep_ja';el('vi-voice').value='old_gemini';
+  profiles[1]={...profiles[1],protocol:'openai',base_url:'https://api.openai.com/v1',revision:'2'};
+  refresh();
+  save();
+  assert.deepEqual([saved().primary.provider,saved().ja.voice_id,saved().vi.voice_id],['openai','keep_ja',undefined]);
+});
+
+test('hiding split settings in single-voice mode preserves the draft for both languages',()=>{
+  const {el,change,save,saved}=settingsFixture();
+  change('primary-profile','local:b');
+  change('mode','dual_split_api');
+  change('ja-profile','local:a');change('vi-profile','local:a');
+  el('ja-voice').value='ja_clone';el('vi-voice').value='vi_clone';
+  change('mode','single');change('mode','dual_split_api');
+  save();
+  assert.deepEqual([saved().ja.voice_id,saved().vi.voice_id],['ja_clone','vi_clone']);
+});
+
+test('catalog keeps paging after model selection but starts fresh after a profile switch',async()=>{
+  const cursors=[];
+  const {el,change,catalog}=settingsFixture(async (_path,request)=>{
+    const {cursor}=JSON.parse(request.body);cursors.push(cursor);
+    return Response.json({models:[{id:'model'}],voices:[{id:cursor?'second':'first',name:'Voice'}],next_cursor:cursor?null:'next'});
+  });
+  change('primary-profile','local:a');
+  await catalog();
+  el('primary-model').value='model';
+  await catalog();
+  change('primary-profile','local:b');change('primary-profile','local:a');
+  await catalog();
+  assert.deepEqual(cursors,[undefined,'next',undefined]);
+  assert.deepEqual(el('voices-primary').children.map(option=>option.value),['first']);
 });

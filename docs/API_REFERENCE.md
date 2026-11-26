@@ -223,6 +223,8 @@ Settings supports named profiles with two explicit save locations. **This device
 
 Device profiles store keys encrypted with AES-GCM in IndexedDB, using a per-account non-extractable WebCrypto key and fresh IVs. Raw keys are not stored in localStorage. The active profile reference and historical model IDs/timestamps are non-secret metadata. This protects against casual plaintext storage inspection, not malicious same-origin scripts, browser compromise or access to an unlocked browser profile. It is not an OS credential vault.
 
+Voice v2 follows the same explicit storage choice for user-supplied provider keys. On shared or untrusted devices, do not choose device storage. Server-managed credentials, including the platform OpenAI key and Antigravity gateway keys, never enter device profiles.
+
 Server profiles retain encrypted keys under `AI_KEY_SECRET`, scoped to the signed-in account. Public responses include `{id, name, protocol, base_url, model, key_last4, connection_id, models, checked_at}` but never raw keys or ciphertext. The opaque connection identity binds the account, protocol, normalized URL and key. Existing single saved connections migrate into an active named profile without replacing their encrypted key.
 
 | Route | Behavior |

@@ -43,6 +43,16 @@ test('bilingual stream binds each segment to its selected provider and preserves
     ['api.mistral.ai','「学校に行きます」.',undefined], ['api.elevenlabs.io','Thử nói nhé.','vi']]);
 });
 
+test('Japanese-only listening preserves acronyms in Japanese context and skips Vietnamese', async t => {
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const response = await tts({text:'DVDを見ます。 Em xem DVD. 映画は4Kです。 Em xem NASA\nＪＬＰＴの試験。 USB HDMI対応。 <vi>VI</vi>',mode:'ja',stream:true,
+    routing:{version:2,mode:'single',primary:slot('openai','alloy')}});
+  assert.equal(response.status,200);
+  assert.equal((await lines(response)).at(-1).type,'done');
+  assert.deepEqual(inputs,['DVDを見ます。 映画は4Kです。 ＪＬＰＴの試験。 USB HDMI対応。']);
+});
+
 test('one ElevenLabs clone receives both language codes; multilingual v2 rejects VI before provider calls', async t => {
   const requests = [];
   intercept(t, async (url, init) => {requests.push([url,JSON.parse(init.body)]);return mp3();});
