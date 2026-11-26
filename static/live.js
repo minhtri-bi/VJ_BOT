@@ -346,15 +346,17 @@
     room.on(RoomEvent.DataReceived,(payload,participant,_kind,topic)=>{
       if(run!==version || topic!=='voice_agent.events')return;
       let event;try{event=JSON.parse(new TextDecoder().decode(payload));}catch{return;}
+      if(event?.type==='error'){
+        const detail=(typeof event.source==='string'?event.source.slice(0,40):'agent')+': '+(typeof event.message==='string'?event.message.slice(0,200):'');
+        console.warn('Mistral live error',event.source,event.code,event.message);
+        if(event.fatal===true)cleanup('Cuộc gọi gặp lỗi ('+detail+'). Hãy thử lại.');
+        else status('Mistral báo lỗi ('+detail+')');
+        return;
+      }
       if(event?.type!=='transcription.segment' || !['user','assistant'].includes(event.role) || typeof event.content!=='string' || typeof event.id!=='string')return;
-      const previous=mistralSegments[event.id]||'';
-      if(event.final && event.content===previous)return;
-      if(!event.content.startsWith(previous))return;
-      mistralSegments[event.id]=event.content;
-      const delta=event.content.slice(previous.length);if(!delta)return;
       const now=Date.now()-startedAt;
-      timeline.add({type:event.role==='user'?'session.input_transcript.delta':'session.output_transcript.delta',
-        delta,start_ms:Math.max(0,now-2000),end_ms:now});
+      mistralSegments[event.id]??=Math.max(0,now-2000);
+      timeline.upsert({role:event.role,key:event.id,text:event.content,start_ms:mistralSegments[event.id],end_ms:now});
       if(event.role==='assistant')teacherHeardAt=Date.now();
     });
     room.on(RoomEvent.Disconnected,()=>{if(run===version)cleanup('Kết nối đã đóng.');});

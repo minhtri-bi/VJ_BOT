@@ -1,7 +1,7 @@
 // GPT-Live deltas carry approximate session offsets, not completed-turn events.
 (function(){
   window.createLiveTranscript=host=>{
-    let segments=[],last={user:null,assistant:null},seen=new Set(),owner=null,sequence=0,accepting=false;
+    let segments=[],last={user:null,assistant:null},seen=new Set(),byKey=new Map(),owner=null,sequence=0,accepting=false;
     const clock=ms=>{const s=Math.floor(ms/1000);return String(Math.floor(s/60)).padStart(2,'0')+':'+String(s%60).padStart(2,'0');};
     function render(segment){
       const follow=host.scrollHeight-host.scrollTop-host.clientHeight<60;
@@ -34,7 +34,7 @@
     }
     function stop(){accepting=false;}
     return {
-      reset(){stop();owner=signedInUser?.user_id;segments=[];sequence=0;last={user:null,assistant:null};seen=new Set();accepting=true;host.replaceChildren();host.dataset.empty='true';},
+      reset(){stop();owner=signedInUser?.user_id;segments=[];sequence=0;last={user:null,assistant:null};seen=new Set();byKey=new Map();accepting=true;host.replaceChildren();host.dataset.empty='true';},
       add(event){
         if(!accepting || owner!==signedInUser?.user_id || !['session.input_transcript.delta','session.output_transcript.delta'].includes(event.type)
           || typeof event.delta!=='string' || !event.delta || event.delta.length>1200
@@ -47,14 +47,30 @@
         if(!segment || sentence || event.start_ms-segment.end>1200 || event.start_ms-segment.start>=8000 || event.start_ms<segment.start || segment.text.length+event.delta.length>1200){
           segment={id:'caption_'+sequence++,role,start:event.start_ms,end:event.end_ms,text:''};
           segments.push(segment);segments.sort((a,b)=>a.start-b.start);last[role]=segment;
-          if(segments.length>300){const removed=segments.shift();removed.row?.remove();}
+          if(segments.length>300){const removed=segments.shift();removed.row?.remove();if(removed.key)byKey.delete(removed.key);}
         }
         segment.text+=event.delta;segment.end=Math.max(segment.end,event.end_ms);
         render(segment);
       },
+      // Mistral Live resends the full current text of each segment; the key replaces, never appends.
+      upsert({role,key,text,start_ms,end_ms}){
+        if(!accepting || owner!==signedInUser?.user_id || !['user','assistant'].includes(role)
+          || typeof key!=='string' || !key || key.length>128
+          || typeof text!=='string' || text.length>4000
+          || !Number.isFinite(start_ms) || !Number.isFinite(end_ms) || start_ms<0 || end_ms<start_ms || end_ms>660000)return;
+        let segment=byKey.get(key);
+        if(segment){segment.text=text;segment.end=Math.max(segment.end,end_ms);}
+        else{
+          if(!text.trim())return;
+          segment={id:'caption_'+sequence++,role,key,start:start_ms,end:end_ms,text};
+          segments.push(segment);segments.sort((a,b)=>a.start-b.start);byKey.set(key,segment);
+          if(segments.length>300){const removed=segments.shift();removed.row?.remove();if(removed.key)byKey.delete(removed.key);}
+        }
+        render(segment);
+      },
       finish(){accepting=false;},
       stop,
-      accountChanged(){if(owner!==signedInUser?.user_id || !signedInUser){stop();owner=null;segments=[];host.replaceChildren();host.dataset.empty='true';}}
+      accountChanged(){if(owner!==signedInUser?.user_id || !signedInUser){stop();owner=null;segments=[];byKey=new Map();host.replaceChildren();host.dataset.empty='true';}}
     };
   };
 })();

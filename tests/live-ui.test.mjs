@@ -125,11 +125,27 @@ test('learners with a Mistral key open a LiveKit room with cumulative captions a
     const segment=content=>({type:'transcription.segment',id:'s1',role:'assistant',content,final:true});
     room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは'))),null,null,'voice_agent.events');
     room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは！'))),null,null,'voice_agent.events');
+    room.emit('dr',new TextEncoder().encode(JSON.stringify(segment('こんにちは、ラム先生です'))),null,null,'voice_agent.events');
     room.emit('dr',new TextEncoder().encode(JSON.stringify({type:'transcription.segment',id:'u1',role:'user',content:'はい',final:true})),null,null,'voice_agent.events');
-    assert.equal(captions(ui,'assistant'),'こんにちは！');assert.equal(captions(ui,'user'),'はい');
+    assert.equal(captions(ui,'assistant'),'こんにちは、ラム先生です');assert.equal(captions(ui,'user'),'はい');
     ui.element('live-end').events.click();
     assert.equal(room.closed,true);assert.equal(ui.tracks[0].stopped,true);assert.equal(ui.element('live-start').disabled,false);
     assert.equal(ui.requests.at(-1).path,'/api/live/mistral');assert.deepEqual(ui.requests.at(-1).body,{id:'sess_test1'});
+  } finally {ui.windowEvents.pagehide();}
+});
+
+test('Mistral Live surfaces non-fatal agent errors and ends the call on fatal ones',async()=>{
+  const ui=liveUI({settings:{is_admin:false,source:'own',own:{protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'m'}}});
+  try {
+    await ui.element('live-start').events.click();
+    const room=ui.room(),data=event=>new TextEncoder().encode(JSON.stringify(event));
+    room.emit('dr',data({type:'error',source:'tts',code:'x',message:'voice not supported',fatal:false}),null,null,'voice_agent.events');
+    assert.match(ui.element('live-status').textContent,/tts: voice not supported/);
+    assert.equal(ui.element('live-stage').dataset.active,'true');assert.equal(ui.tracks[0].stopped,false);
+    room.emit('dr',data({type:'error',source:'llm',code:'y',message:'model crashed',fatal:true}),null,null,'voice_agent.events');
+    assert.equal(ui.element('live-stage').dataset.active,'false');
+    assert.match(ui.element('live-status').textContent,/llm: model crashed/);
+    assert.equal(ui.element('live-start').disabled,false);assert.equal(ui.tracks[0].stopped,true);
   } finally {ui.windowEvents.pagehide();}
 });
 
