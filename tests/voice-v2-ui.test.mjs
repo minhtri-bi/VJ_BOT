@@ -125,9 +125,11 @@ test('saved dual routing preserves single speed across reload without changing e
   first.save();
   first.change('mode','dual_same_api');
   first.el('ja-speed').value='1.1';
+  first.el('vi-speed').value='0.9';
   first.save();
   const reloaded=settingsFixture(undefined,[],storage);
-  assert.deepEqual([reloaded.saved().ja.speed,reloaded.saved().vi.speed],[1.1,1]);
+  reloaded.save();
+  assert.deepEqual([reloaded.saved().ja.speed,reloaded.saved().vi.speed],[1.1,0.9]);
   reloaded.change('mode','single');
   reloaded.save();
   assert.equal(reloaded.saved().primary.speed,0.8);
