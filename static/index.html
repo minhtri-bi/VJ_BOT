@@ -907,7 +907,7 @@
                     <label for="voice-v2-source">Nguồn giọng đọc<select id="voice-v2-source"><option value="legacy">Giữ cài đặt hiện tại</option><option value="personal">Cấu hình song ngữ riêng</option></select></label>
                     <div id="voice-v2-personal" hidden>
                       <form id="voice-v2-account" autocomplete="off">
-                        <label for="voice-v2-kind">Nhà cung cấp<select id="voice-v2-kind"><option value="elevenlabs">ElevenLabs</option><option value="mistral">Mistral</option><option value="openai_compatible">Custom OpenAI-compatible</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label>
+                        <label for="voice-v2-kind">Nhà cung cấp<select id="voice-v2-kind"><option value="elevenlabs">ElevenLabs</option><option value="mistral">Mistral</option><option value="openai_compatible">URL tùy chỉnh tương thích OpenAI</option><option value="openai">OpenAI</option><option value="gemini">Gemini</option></select></label>
                         <label for="voice-v2-url">URL API<input id="voice-v2-url" type="url" maxlength="200" placeholder="https://api.elevenlabs.io"></label>
                         <label for="voice-v2-name">Tên kết nối<input id="voice-v2-name" required maxlength="80"></label>
                         <label for="voice-v2-key">Khóa API<input id="voice-v2-key" type="password" required minlength="8" maxlength="512" autocomplete="off" spellcheck="false"></label>
@@ -915,6 +915,7 @@
                         <button type="submit" class="stage-btn">Thêm kết nối giọng nói</button>
                       </form>
                       <p class="ai-field-hint">URL tùy chỉnh phải được người vận hành duyệt. Văn bản và khóa sẽ được gửi đến nhà cung cấp đã chọn. Chỉ chọn giọng clone mà bạn có quyền sử dụng.</p>
+                      <p class="ai-field-hint">Lưu trên thiết bị: mã hóa trong trình duyệt, không chống được mã độc chạy trên cùng trang hoặc trình duyệt bị xâm nhập.</p>
                       <form id="voice-v2-routing">
                         <label for="voice-v2-mode">Cách chia giọng<select id="voice-v2-mode"><option value="single">Một giọng cho hai ngôn ngữ</option><option value="dual_same_api">Hai giọng · một kết nối</option><option value="dual_split_api">Hai giọng · hai kết nối</option></select></label>
                         <div id="voice-v2-slots"></div>

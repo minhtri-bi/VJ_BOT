@@ -197,12 +197,13 @@ test('owner changes clear visible metadata and other-tab model changes emit voic
   assert.equal(calls,0);
 });
 
-test('saving a voice key selects only the saved voice reference, clears raw input and sends no generation', async () => {
+test('saving a first voice key selects it even when Voice v2 refreshes during the save', async () => {
   let requests = 0, saved;
-  const f = fixture(async () => {requests++;return catalog([defaultModel]);});
+  const f = fixture(async () => {requests++;return catalog([defaultModel]);},{voices:new Map()});
   f.window.saveVoiceProfile = async (owner, input, scope) => {
     saved = {owner,input,scope};
     f.window.renderVoiceProfiles(owner,[...f.rows,profileRow('new-voice')]);
+    f.window.dispatchEvent(new CustomEvent('vjbot-voice-changed',{detail:{source:'routing-v2'}}));
     return {scope:'local',id:'new-voice',name:input.name};
   };
   f.nodes.get('speech-key-add').events.click();

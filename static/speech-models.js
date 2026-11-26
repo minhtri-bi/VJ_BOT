@@ -237,7 +237,9 @@
     return window.playGeminiTTS('こんにちは。日本語をいっしょに練習しましょう。', {japaneseOnly:true,legacyVoice:true});
   });
   window.addEventListener('pagehide', closeKeyForm);
-  window.addEventListener('vjbot-voice-changed', () => { formRevision++; sync(); });
+  window.addEventListener('vjbot-voice-changed', event => {
+    if (event.detail?.source !== 'routing-v2') {formRevision++;sync();}
+  });
   window.addEventListener('storage', event => {
     if (managed()) return;
     if (identity() && event.key === preference(identity())) window.dispatchEvent(new Event('vjbot-voice-changed'));

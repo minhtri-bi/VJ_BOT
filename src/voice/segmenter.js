@@ -6,6 +6,9 @@ const letter = /\p{L}/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
 const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
 const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
+const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
+const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
+const clauseEnd = /[\r\n。！？.!?…]/u;
 
 export function segmentVoiceText(text, mode = 'bilingual') {
   const segments = [];
@@ -25,15 +28,35 @@ export function segmentVoiceText(text, mode = 'bilingual') {
   function plain(value, explicit) {
     if (explicit) return add(explicit, value);
     let lang, pending = '';
-    for (const character of value) {
-      const kind = japanese.test(character) ? 'ja' : letter.test(character) ? 'vi' : null;
+    const tokens = mode === 'ja' ? value.match(latinWord) ?? [] : value;
+    const following = mode === 'ja' ? new Set() : null;
+    if (following) {
+      let hasJapanese = false;
+      for (let i = tokens.length - 1; i >= 0; i--) {
+        const token = tokens[i];
+        if (acronym.test(token)) {
+          if (hasJapanese) following.add(i);
+        } else if (japanese.test(token)) hasJapanese = true;
+        else if (letter.test(token) || clauseEnd.test(token)) hasJapanese = false;
+      }
+    }
+    let index = 0, preceding = false;
+    for (const token of tokens) {
+      const isJapanese = japanese.test(token);
+      const attached = following && (following.has(index) || (preceding && acronym.test(token)));
+      const kind = isJapanese || attached ? 'ja' : letter.test(token) ? 'vi' : null;
+      if (following) {
+        index++;
+        if (isJapanese) preceding = true;
+        else if (kind === 'vi' || clauseEnd.test(token)) preceding = false;
+      }
       if (kind && lang && kind !== lang) {
         const prefix = pending.match(trailingPrefix)?.[1] ?? (kind === 'ja' ? pending.match(leadingNumber)?.[1] : '') ?? '';
         add(lang, prefix ? pending.slice(0, -prefix.length) : pending);
         pending = prefix;
       }
       if (kind) lang = kind;
-      pending += character;
+      pending += token;
     }
     if (lang) add(lang, pending);
   }
