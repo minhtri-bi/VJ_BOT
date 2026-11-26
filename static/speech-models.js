@@ -234,7 +234,7 @@
   test.addEventListener('click', () => {
     if (test.disabled) return;
     if (typeof window.playGeminiTTS !== 'function') { status.textContent = 'Điều khiển âm thanh chưa tải được. Hãy tải lại Cài đặt.'; return; }
-    return window.playGeminiTTS('こんにちは。日本語をいっしょに練習しましょう。', {japaneseOnly:true});
+    return window.playGeminiTTS('こんにちは。日本語をいっしょに練習しましょう。', {japaneseOnly:true,legacyVoice:true});
   });
   window.addEventListener('pagehide', closeKeyForm);
   window.addEventListener('vjbot-voice-changed', () => { formRevision++; sync(); });
