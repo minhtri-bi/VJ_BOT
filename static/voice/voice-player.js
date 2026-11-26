@@ -1,5 +1,7 @@
 (function () {
   const maxLine=7 * 1024 * 1024;
+  // Matches the Worker synthesis budget in src/voice/segmenter.js.
+  const maxSegments=16;
   async function consume(response, append, current) {
     if (!response.ok) {
       const problem=await response.json();
@@ -21,7 +23,7 @@
           const record=JSON.parse(pending.slice(0,position));pending=pending.slice(position+1);
           if (record.type==='error') throw new Error(record.detail || 'Không đọc được đoạn này.');
           if (record.type==='done' && segments.length && record.count===segments.length) {ended=true;continue;}
-          if (record.type!=='segment' || record.index!==segments.length || segments.length>=8
+          if (record.type!=='segment' || record.index!==segments.length || segments.length>=maxSegments
             || !['ja','vi'].includes(record.lang) || !['start','inline','sentence','arrow'].includes(record.boundary)
             || typeof record.speed!=='number' || record.speed<0.5 || record.speed>2
             || typeof record.audioBase64!=='string' || !record.audioBase64) throw new Error('Đoạn âm thanh không hợp lệ.');
@@ -75,11 +77,12 @@
         if (context.task) reference.task=await taskReference(context.task);
       }
       if (!current()) return;
-      const routing=await window.VJVoiceRouting.prepared(config,controller.signal);
-      if (!current()) return;
       const cache=window.VJVoiceCache, persist=options.cacheAudio===true && !options.privateAudio && !options.preview && !config.admin_override;
       const cacheKey=await cache.key(identity,text,reference).catch(()=>null);
       const hit=cacheKey ? await cache.get(cacheKey,persist) : null;
+      if (!current()) return;
+      // Keep profile revocation checks on replay; only a cache miss needs local key decryption.
+      const routing=await window.VJVoiceRouting.prepared(config,controller.signal,{replay:Boolean(hit)});
       if (!current()) return;
       async function append(segment) {
         await audio.append(segment);

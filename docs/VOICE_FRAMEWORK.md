@@ -132,9 +132,9 @@ Hiện tại VJ_BOT khóa cứng Admin vào `OPENAI_API_KEY` máy chủ ([`resol
 flowchart LR
     IN["Input hỗn hợp:\nTrong câu 「学校を行きます」→「学校に行きます」,\ntrợ từ は đọc là わ nhé!"]
     S1["1. Pre-TTS Normalizer\n- Chuẩn hóa NFC tiếng Việt\n- Trợ từ lẻ は -> わ, へ -> え\n- Xử lý furigana / bỏ romaji\n- Đổi → thành pause ngữ nghĩa"]
-    S2["2. Bilingual Segmenter\n- Ưu tiên tag <ja>/<vi> từ LLM\n- Hoặc Unicode script coalescing\n- Giới hạn <= 8 segments/lượt"]
+    S2["2. Bilingual Segmenter\n- Prefer explicit ja/vi tags\n- Otherwise group by Unicode script\n- Up to 16 segments per request"]
     S3["3. Multi-Provider Parallel TTS\n- Route [vi] -> Adapter VI (vd ElevenLabs/Huong)\n- Route [ja] -> Adapter JA (vd ElevenLabs/Haruto)\n- Gọi song song (max 4), stream NDJSON"]
-    S4["4. Web Audio Stitcher\n- Trim silence đầu/đuôi (-42 dBFS)\n- Cân bằng RMS giữa 2 voice/2 hãng\n- Micro-fade 12ms chống click/pop\n- Pause thích ứng (inline 55ms / câu 200ms)\n- Speed riêng (JA 0.9x / VI 1.0x)"]
+    S4["4. Web Audio Stitcher\n- Decode directly, then check duration and channels\n- Trim with up to 15ms/25ms padding; normalize RMS and fade edges\n- Adaptive pauses and per-language speed, 1x by default"]
 
     IN --> S1 --> S2 --> S3 --> S4
 ```
@@ -144,7 +144,7 @@ flowchart LR
 - **Furigana & Kanji:** Hỗ trợ 2 chế độ theo từng giọng: `kanji_native` (giữ Kanji, xóa furigana ngoặc để TTS Nhật không đọc lặp đôi) hoặc `kana_first` (chuyển sang kana cho model yếu Kanji / trình độ N5). Luôn bỏ romaji trong ngoặc và markdown.
 - **Unicode NFC cho tiếng Việt:** `text.normalize('NFC')` tránh lỗi nuốt dấu ở nhiều engine TTS.
 - **Dấu ngữ pháp:** Loại bỏ `〜`/`～` thừa, đổi mũi tên sửa câu `→` thành `boundary: 'arrow'` (nghỉ 260ms).
-- **Cân bằng âm thanh khi mix 2 hãng (ElevenLabs + Mistral):** `Web Audio Stitcher` chuẩn hóa **RMS loudness** về chung mục tiêu `-18 dBFS` (có soft limiter `0.98`) + trim silence đầu/đuôi + micro-fade 12ms → nghe chuyển giữa Mistral và ElevenLabs liền mạch, không bị bên to bên nhỏ hay hẫng nhịp.
+- **Audio stitching:** Decode once; reject decoded segments longer than 90 seconds or with more than two channels. Normalize loudness on the audible interval and retain up to 15 ms before it and 25 ms after it. Fades use the retained padding; when there is no padding, shorten the fade.
 
 ---
 
@@ -198,7 +198,7 @@ sequenceDiagram
         Stitch->>U: Play without a provider call
     else Cache MISS
         Player->>BE: POST /api/tts (chỉ tính 1 lượt rate limit ai_usage)
-        BE->>BE: Auth + processingAllowed + Normalize + Segment (<= 8 đoạn)
+        BE->>BE: Authenticate, check processingAllowed, normalize and segment (up to 16 parts)
         loop Stream từng segment theo thứ tự
             BE-->>Player: NDJSON chunk { index, lang, boundary, mimeType, audioBase64 }
             Player->>Stitch: Decode & xếp lịch phát ngay từ segment #0
@@ -271,7 +271,7 @@ sequenceDiagram
 src/
 ├── voice/
 │   ├── normalizer.js          # NFC, furigana, trợ từ は/へ, ký hiệu 〜 →
-│   ├── segmenter.js           # Tag <ja>/<vi> + Unicode script coalescer (<= 8 segments)
+│   ├── segmenter.js           # Explicit language tags, Unicode grouping, up to 16 segments
 │   ├── tts-adapters.js        # Registry: elevenlabs, mistral, openai_compatible, openai, gemini
 │   ├── tts-route.js           # POST /api/tts (catalog + single legacy + multi-segment NDJSON stream)
 │   ├── stt-route.js           # POST /api/stt (Mistral + ElevenLabs Scribe + OpenAI + context_bias)
@@ -337,7 +337,7 @@ static/
 - **Bảo vệ credit & Rate Limit:**
   - Read-aloud gom toàn bộ segment vào **1 request `/api/tts` (stream NDJSON)** → chỉ tính **1 slot** trong hạn mức 20 req/phút của `ai_usage`.
   - **Client Audio Cache** loại bỏ hoàn toàn chi phí lặp khi bấm nghe lại từ vựng/flashcard/ví dụ (rất có giá trị với ElevenLabs tính phí theo ký tự).
-  - Giới hạn `MAX_SEGMENTS = 8`, concurrency `4`, timeout `20s`/segment, tổng dung lượng audio trả về `<= 5 MiB`.
+  - At most 16 segments in one request, four concurrent syntheses (two per ElevenLabs connection), 20 seconds per provider request and 5 MiB total audio.
 - **Bản quyền dữ liệu học liệu:** Giữ nguyên kiểm tra [`processingAllowed()`](../src/worker.js#L430-L442) trước khi gửi text ra bất kỳ provider TTS/STT/Live nào.
 
 ---

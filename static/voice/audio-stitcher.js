@@ -12,19 +12,6 @@
       promise.then(value=>finish(resolve,value),error=>finish(reject,error));
     });
   }
-  async function readDuration(bytes,mime,signal) {
-    const url=URL.createObjectURL(new Blob([bytes],{type:mime})), media=new Audio();
-    try {
-      const loaded=new Promise((resolve,reject)=>{
-        media.onloadedmetadata=()=>resolve(media.duration);
-        media.onerror=()=>reject(new Error('Định dạng âm thanh không đọc được.'));
-        media.preload='metadata';media.src=url;
-      });
-      return await bounded(loaded,signal,5000,'Không đọc được thời lượng âm thanh.');
-    } finally {
-      media.onloadedmetadata=media.onerror=null;media.removeAttribute('src');media.load();URL.revokeObjectURL(url);
-    }
-  }
   function create() {
     const Context=window.AudioContext || window.webkitAudioContext;
     if (!Context) throw new Error('Trình duyệt không hỗ trợ ghép âm thanh.');
@@ -41,12 +28,9 @@
       if (closed) return;
       const uri=audioDataUrl(segment);
       const encoded=Uint8Array.from(atob(uri.slice(uri.indexOf(',')+1)),character=>character.charCodeAt(0));
-      const durationHint=await readDuration(encoded,uri.slice(5,uri.indexOf(';')),abort.signal);
-      if (!Number.isFinite(durationHint) || durationHint<=0 || durationHint>maxSeconds)
-        throw new Error('Đoạn âm thanh quá dài. Hãy chọn đoạn ngắn hơn.');
-      const buffer=await context.decodeAudioData(encoded.buffer);
+      const buffer=await bounded(context.decodeAudioData(encoded.buffer),abort.signal,5000,'Không giải mã được âm thanh.');
       if (closed) return;
-      if (buffer.duration>maxSeconds || ![1,2].includes(buffer.numberOfChannels))
+      if (!Number.isFinite(buffer.duration) || buffer.duration<=0 || buffer.duration>maxSeconds || ![1,2].includes(buffer.numberOfChannels))
         throw new Error('Định dạng hoặc thời lượng đoạn âm thanh không được hỗ trợ.');
       const channels=Array.from({length:buffer.numberOfChannels},(_,index)=>buffer.getChannelData(index));
       let first=buffer.length,last=-1;
@@ -61,13 +45,19 @@
         const sample=channel[i];squares+=sample*sample;peak=Math.max(peak,Math.abs(sample));
       }
       const gain=Math.min(rmsTarget/Math.sqrt(squares/(samples*channels.length)),peakLimit/peak,4);
+      const lead=Math.min(first,Math.round(buffer.sampleRate*0.015));
+      const trail=Math.min(buffer.length-1-last,Math.round(buffer.sampleRate*0.025));
+      first-=lead;last+=trail;
       const source=context.createBufferSource(), volume=context.createGain();
       source.buffer=buffer;source.playbackRate.value=segment.speed;
       source.connect(volume).connect(context.destination);
       const start=Math.max(context.currentTime+0.015,next+(pause[segment.boundary] || 0));
-      const seconds=samples/buffer.sampleRate, duration=seconds/segment.speed, fade=Math.min(0.012,duration/2);
-      volume.gain.setValueAtTime(0,start);volume.gain.linearRampToValueAtTime(gain,start+fade);
-      volume.gain.setValueAtTime(gain,start+duration-fade);volume.gain.linearRampToValueAtTime(0,start+duration);
+      const seconds=(last-first+1)/buffer.sampleRate, duration=seconds/segment.speed;
+      const sampleTime=1/(buffer.sampleRate*segment.speed);
+      const fadeIn=Math.min(0.012,lead*sampleTime+0.003,duration/2);
+      const fadeOut=Math.min(0.012,trail*sampleTime+0.003,duration/2);
+      volume.gain.setValueAtTime(0,start);volume.gain.linearRampToValueAtTime(gain,start+fadeIn);
+      volume.gain.setValueAtTime(gain,start+duration-fadeOut);volume.gain.linearRampToValueAtTime(0,start+duration);
       next=start+duration;
       let settle;
       const entry={source,done:new Promise(resolve=>{settle=resolve;}),finish(){

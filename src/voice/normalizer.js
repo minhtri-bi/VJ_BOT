@@ -1,11 +1,15 @@
 const kana = /^[\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+$/u;
+const kanaLetter = /[\p{Script=Hiragana}\p{Script=Katakana}]/u;
 const ruby = /([\p{Script=Han}々]+[\p{Script=Hiragana}ー]*)\s*[（(]([\p{Script=Hiragana}\p{Script=Katakana}ー・]+)[）)]/gu;
 
-export function normalizeVoiceText(text, {reading, kanjiMode = 'kanji_native'} = {}) {
-  const annotation = typeof reading === 'string' ? reading.normalize('NFC').trim() : '';
-  const source = kanjiMode === 'kana_first' && kana.test(annotation) ? annotation : text.normalize('NFC');
+export function authoredVoiceReading(reading) {
+  const value = typeof reading === 'string' ? reading.normalize('NFC').trim() : '';
+  return kana.test(value) && kanaLetter.test(value) ? value : '';
+}
+
+export function normalizeVoiceText(text, {kanjiMode = 'kanji_native'} = {}) {
   const group = kanjiMode === 'kana_first' ? '$2' : '$1';
-  return source
+  return text.normalize('NFC')
     .replace(/\{([^{}|]+)\|([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)\}/gu, group)
     .replace(ruby, group)
     .replace(/([\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}。！？])\s*[（(][a-zāīūēō0-9\s'.,!?-]+[）)]/giu, '$1')

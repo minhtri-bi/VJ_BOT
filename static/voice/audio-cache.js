@@ -76,10 +76,8 @@
     } catch { /* A full or disabled IndexedDB does not interrupt playback. */ }
   }
   async function key(identity,text,reference) {
-    const parts=[identity,text.normalize('NFC'),reference];
-    // Japanese-only synthesis now retains acronyms; do not replay earlier recordings.
-    if (reference?.mode==='ja') parts.push('ja-synthesis-2');
-    const bytes=new TextEncoder().encode(JSON.stringify(parts));
+    // Native speed and authored readings change synthesis output across both modes.
+    const bytes=new TextEncoder().encode(JSON.stringify(['synthesis-3',identity,text.normalize('NFC'),reference]));
     const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
     return Array.from(digest,byte=>byte.toString(16).padStart(2,'0')).join('');
   }

@@ -12,7 +12,6 @@
   const provider=row=>row.protocol==='openai' && row.base_url===bases.mistral ? 'mistral' : row.protocol;
   const roleKey=()=>JSON.stringify([owner(),admin()]);
   const modes=['single','dual_same_api','dual_split_api'];
-  const defaultSpeed=slot=>slot==='ja' ? 0.9 : 1;
   const voiceChanged=()=>window.dispatchEvent(new CustomEvent('vjbot-voice-changed',{detail:{source:'routing-v2'}}));
   const fingerprint=row=>[row.base_url,row.connection_id,row.key_last4,row.revision];
   const reloadProfiles=()=>window.loadVoiceProfiles?.({personalVoice:true});
@@ -24,7 +23,7 @@
     if (value?.version!==2 || !modes.includes(value.mode) || typeof value.admin_override!=='boolean') throw new Error('Cấu hình đã lưu không hợp lệ. Hãy lưu lại trong Âm thanh.');
     if (value.admin_override!==admin()) throw new Error('Quyền tài khoản đã thay đổi. Chọn lại nguồn giọng đọc.');
     // An empty speed input was previously saved as zero.
-    for (const slot of ['ja','vi']) if (value[slot]?.speed===0) value[slot].speed=defaultSpeed(slot);
+    for (const slot of ['ja','vi']) if (value[slot]?.speed===0) value[slot].speed=1;
     return value;
   }
   function save(value) {
@@ -69,11 +68,17 @@
       if (!reset && control.section.hidden) continue;
       const reference=effectiveAccount(slot);
       const previous=selectedAccounts.get(slot), row=rows.find(row=>ref(row)===reference);
+      const custom=row?.protocol==='openai_compatible' && !control.profile.disabled && Boolean(control.profile.value);
+      control.nativeSpeed.parentElement.hidden=!custom;
+      control.nativeSpeed.disabled=!custom || control.section.hidden;
       const endpoint=row ? JSON.stringify([provider(row),row.base_url]) : null;
       const revision=row ? JSON.stringify(fingerprint(row)) : null;
       const changed=reference!==previous?.reference || (endpoint && previous?.endpoint && endpoint!==previous.endpoint);
       if (reset || changed || revision!==previous?.revision) {
-        if (!reset && changed) control.model.value=control.voice.value='';
+        if (!reset && changed) {
+          control.model.value=control.voice.value='';
+          control.nativeSpeed.checked=false;
+        }
         control.modelList.replaceChildren();control.voiceList.replaceChildren();
         control.catalog.textContent='Tải giọng & model';
         catalogs.delete(slot);
@@ -91,11 +96,12 @@
     modelList.id='voice-v2-models-'+slot;voiceList.id='voice-v2-voices-'+slot;
     model.setAttribute('list',modelList.id);voice.setAttribute('list',voiceList.id);section.append(modelList,voiceList);
     const speed=slot!=='primary' ? input(section,'Tốc độ phát',slot+'-speed','number') : null;
-    if (speed) Object.assign(speed,{min:'0.5',max:'2',step:'0.01',value:slot==='ja'?'0.9':'1'});
+    if (speed) Object.assign(speed,{min:'0.5',max:'2',step:'0.01',value:'1'});
+    const nativeSpeed=input(section,'Máy chủ tùy chỉnh hỗ trợ chỉnh tốc độ',slot+'-native-speed','checkbox');
     const reading=slot!=='vi' ? input(section,'Cách đọc Kanji',slot+'-reading','select') : null;
     reading?.append(option('kanji_native','Giữ Kanji'),option('kana_first','Ưu tiên kana'));
     const catalog=document.createElement('button');catalog.type='button';catalog.className='stage-btn';catalog.textContent='Tải giọng & model';section.append(catalog);
-    controls.set(slot,{section,profile,model,voice,speed,reading,catalog,modelList,voiceList});
+    controls.set(slot,{section,profile,model,voice,speed,nativeSpeed,reading,catalog,modelList,voiceList});
     catalog.addEventListener('click',()=>loadCatalog(slot));
     profile.addEventListener('change',()=>updateAccounts());
   }
@@ -111,8 +117,9 @@
       const model=control.model.value.trim(), voice=control.voice.value.trim();
       if (model) settings.model=model;
       if (voice) settings.voice_id=voice;
+      if (!control.nativeSpeed.disabled && control.nativeSpeed.checked) settings.native_speed=true;
       if (control.speed) {
-        const speed=control.speed.value==='' ? defaultSpeed(slot) : Number(control.speed.value);
+        const speed=control.speed.value==='' ? 1 : Number(control.speed.value);
         if (!Number.isFinite(speed) || speed<0.5 || speed>2) throw new Error('Tốc độ phải từ 0.5 đến 2.');
         settings.speed=speed;
       }
@@ -145,14 +152,15 @@
         control.profile.value=key;
       } else control.profile.value='';
       control.model.value=value.model || '';control.voice.value=value.voice_id || '';
-      if (control.speed) control.speed.value=value.speed ?? defaultSpeed(slot);
+      if (control.speed) control.speed.value=value.speed ?? 1;
+      control.nativeSpeed.checked=value.native_speed===true;
       if (control.reading) control.reading.value=value.kanji_mode || 'kanji_native';
     }
     layout();
     catalogs.clear();updateAccounts(true);
   }
   const rowFor=slot=>rows.find(row=>ref(row)===ref(slot.profile) && provider(row)===slot.provider);
-  async function prepared(config,signal) {
+  async function prepared(config,signal,{replay=false}={}) {
     const identity=roleKey(), user=owner(), result={...config}, loaded=new Map();
     if (metadataOwner!==user) throw new Error('Chưa tải được danh sách kết nối giọng nói.');
     let server;
@@ -174,13 +182,14 @@
         void reloadProfiles()?.catch(()=>{});
         throw new Error('Kết nối giọng nói đã đổi hoặc đã bị xóa.');
       }
-      const profile=loaded.get(row.id) || await VJProfiles.load(user,row.id);
+      const profile=loaded.get(row.id) || await (replay ? VJProfiles.metadata(user,row.id) : VJProfiles.load(user,row.id));
       loaded.set(row.id,profile);
       if (roleKey()!==identity || signal?.aborted || provider(profile)!==slot.provider || profile.base_url!==row.base_url
         || profile.revision!==row.revision || !rowFor(slot)) {
         void reloadProfiles()?.catch(()=>{});
         throw new Error('Kết nối giọng nói đã đổi.');
       }
+      if (replay) continue;
       result[name]={...slot,profile:{scope:'local',connection:{base_url:profile.base_url,api_key:profile.api_key}}};
     }
     return result;

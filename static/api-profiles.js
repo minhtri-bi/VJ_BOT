@@ -6,7 +6,7 @@
   const BASES = {openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com',
     elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai_compatible:''};
   const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/,
-    mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
+    elevenlabs:/(?:\/v1)+$/,mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
   const BLOCKED = /(^|\.)(localhost|local|internal|localdomain|home|lan|workers\.dev|dangphuc\.me)$/i;
   const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal: true});
@@ -51,8 +51,9 @@
       || (checked !== null && (!Number.isFinite(checked) || checked <= 0 || checked > Date.now() + 60000))) throw problem('Lịch sử kiểm tra model không hợp lệ.');
     return {connection_id: identity, models: [...new Set(models)], checked_at: checked};
   }
+  const profileBase = row => row.protocol === 'elevenlabs' ? row.base_url.replace(SUFFIX.elevenlabs, '') : row.base_url;
   function publicProfile(row) {
-    return {id: row.id, name: row.name, protocol: row.protocol, base_url: row.base_url, model: row.model,
+    return {id: row.id, name: row.name, protocol: row.protocol, base_url: profileBase(row), model: row.model,
       key_last4: row.key_last4, connection_id: row.connection_id, revision: row.revision, models: [...row.models], checked_at: row.checked_at};
   }
   function record(row, owner, id) {
@@ -62,7 +63,8 @@
         || !(row.iv instanceof Uint8Array) || row.iv.length !== 12 || !(row.ciphertext instanceof ArrayBuffer)
         || row.ciphertext.byteLength < 24 || row.ciphertext.byteLength > 528) throw unavailable();
       const clean = fields(row), history = historyInput(row);
-      if (clean.name !== row.name || clean.base_url !== row.base_url || !Object.hasOwn(row, 'connection_id')
+      // Keep the legacy URL in the encrypted record: it is authenticated by AES-GCM.
+      if (clean.name !== row.name || clean.base_url !== profileBase(row) || !Object.hasOwn(row, 'connection_id')
         || !Object.hasOwn(row, 'checked_at') || !Array.isArray(row.models)
         || history.connection_id !== row.connection_id || history.checked_at !== row.checked_at
         || (row.models.length && (!history.connection_id || !history.checked_at))) throw unavailable();
@@ -157,6 +159,11 @@
     if (rows.length > 20) throw unavailable();
     return rows.map(row => publicProfile(record(row, owner, row.id)));
   }
+  async function metadata(owner,id) {
+    account(owner);identifier(id);
+    const row=await read(owner,id);
+    return {protocol:row.protocol,base_url:profileBase(row),revision:row.revision};
+  }
   async function load(owner, id) {
     account(owner); identifier(id);
     const row = await read(owner, id), key = await accountKey(owner, false);
@@ -174,7 +181,7 @@
     cryptoReady();
     const id = updating ? profile.id : crypto.randomUUID();
     const previous = updating ? await read(owner, id) : null;
-    const sameEndpoint = previous && previous.protocol === clean.protocol && previous.base_url === clean.base_url;
+    const sameEndpoint = previous && previous.protocol === clean.protocol && profileBase(previous) === clean.base_url;
     if (previous && !hasKey && !sameEndpoint) throw problem('Nhập API key cho địa chỉ và loại API mới.');
     const key = await accountKey(owner, !updating);
     const oldKey = previous ? await decrypt(previous, key) : null;
@@ -323,5 +330,5 @@
     const owner = typeof signedInUser === 'undefined' ? null : signedInUser?.user_id;
     if (event.key === null || (owner && event.key === VOICE + owner)) voiceChanged(owner);
   });
-  globalThis.VJProfiles = Object.freeze({list, load, save, remove, clear, active, setActive, voice, setVoice, prepareRequest});
+  globalThis.VJProfiles = Object.freeze({list, metadata, load, save, remove, clear, active, setActive, voice, setVoice, prepareRequest});
 })();

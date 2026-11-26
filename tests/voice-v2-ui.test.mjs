@@ -13,13 +13,13 @@ function response(...rows) {
   return new Response(new ReadableStream({start(controller){for (const part of parts)controller.enqueue(new TextEncoder().encode(part));controller.close();}}),
     {headers:{'Content-Type':'application/x-ndjson'}});
 }
-function browser(fetch) {
+function browser(fetch, prepare=async value=>value) {
   const configuration={version:2,mode:'single',admin_override:false};
   const history=[], slots=new Map();
   const context=vm.createContext({TextDecoder,AbortController,Response,
     apiFetch:async (_path,options)=>{history.push(['request',JSON.parse(options.body)]);return fetch(options);},
     speechStatus:message=>history.push(['status',message]), mascotMgr:{setState(){}},
-    window:{addEventListener(){},VJVoiceRouting:{stored:()=>configuration,identity:()=> 'account-routing-revision',prepared:async value=>value},
+    window:{addEventListener(){},VJVoiceRouting:{stored:()=>configuration,identity:()=> 'account-routing-revision',prepared:prepare},
       VJVoiceStitcher:{create:()=>({append:async part=>{history.push(['audio',part.lang]);},finish:async()=>{},stop(){}})},
       VJVoiceCache:{key:async (identity,text,ref)=>JSON.stringify([identity,text,ref]),get:async key=>slots.get(key),
         put:async (key,parts,persist)=>{history.push(['cache',persist]);slots.set(key,parts);},clearMemory:()=>slots.clear()}},
@@ -62,7 +62,26 @@ test('partial streams play only available segments, signal failure and do not po
   assert.deepEqual(history.filter(([event])=>event==='audio').map(([,lang])=>lang),['vi','vi','ja']);
 });
 
-function settingsFixture(apiFetch) {
+test('a long stream replays all parts only after a fresh profile check',async()=>{
+  const records=Array.from({length:16},(_,index)=>({...vi,index,lang:index%2?'ja':'vi'}));
+  const preparations=[];
+  let revoked=false;
+  const {voice,history}=browser(()=>response(...records,{type:'done',count:16}),async (config,_signal,{replay})=>{
+    preparations.push(replay);
+    if (revoked) throw new Error('Kết nối giọng nói đã bị xóa.');
+    return config;
+  });
+  await voice.speak('A bilingual explanation');
+  await voice.speak('A bilingual explanation');
+  revoked=true;
+  await voice.speak('A bilingual explanation');
+  assert.deepEqual(preparations,[false,true,true]);
+  assert.equal(history.filter(([event])=>event==='request').length,1);
+  assert.deepEqual(history.filter(([event])=>event==='audio').map(([,lang])=>lang),[...records,...records].map(row=>row.lang));
+  assert.match(history.at(-1)[1],/đã bị xóa/);
+});
+
+function settingsFixture(apiFetch, profileReads=[]) {
   const nodes = new Map(), storage = new Map();
   function node(tag) {
     return {tag, value:'', children:[], events:{},
@@ -79,10 +98,12 @@ function settingsFixture(apiFetch) {
   const window = new EventTarget();
   const profiles = [
     {id:'a',scope:'local',name:'ElevenLabs',protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',revision:'1'},
-    {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',revision:'1'}
+    {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',revision:'1'},
+    {id:'c',scope:'local',name:'Custom',protocol:'openai_compatible',base_url:'https://tts.example/v1',revision:'1'}
   ];
   const context = vm.createContext({window, signedInUser:{user_id:owner}, Event, CustomEvent, AbortSignal, apiFetch,
-    VJProfiles:{load:async (_owner,id)=>({...profiles.find(profile=>profile.id===id),api_key:'synthetic-fixture-key'})},
+    VJProfiles:{load:async (_owner,id)=>{profileReads.push('key');return {...profiles.find(profile=>profile.id===id),api_key:'synthetic-fixture-key'};},
+      metadata:async (_owner,id)=>{profileReads.push('metadata');return profiles.find(profile=>profile.id===id);}},
     document:{getElementById:id=>nodes.get(id), createElement:node},
     localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}});
   vm.runInContext(readFileSync('static/voice/voice-settings.js','utf8'),context);
@@ -91,6 +112,7 @@ function settingsFixture(apiFetch) {
   function change(id,value) {el(id).value=value;el(id).events.change();}
   return {el,profiles,refresh,change,
     saved:()=>JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),
+    prepare:options=>window.VJVoiceRouting.prepared(JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),undefined,options),
     save:()=>el('routing').events.submit({preventDefault(){}}),
     catalog:()=>el('slots').children[0].children.find(child=>child.tag==='button').events.click()};
 }
@@ -102,7 +124,7 @@ test('switches only the affected voice overrides and uses valid speeds for blank
   change('primary-profile','local:b');
   el('ja-speed').value=el('vi-speed').value='';
   save();
-  assert.deepEqual([saved().ja.speed,saved().vi.speed,saved().ja.voice_id,saved().vi.voice_id],[0.9,1,undefined,undefined]);
+  assert.deepEqual([saved().ja.speed,saved().vi.speed,saved().ja.voice_id,saved().vi.voice_id],[1,1,undefined,undefined]);
   change('mode','dual_split_api');change('ja-profile','local:a');
   el('ja-voice').value='keep_ja';el('vi-voice').value='old_gemini';
   profiles[1]={...profiles[1],protocol:'openai',base_url:'https://api.openai.com/v1',revision:'2'};
@@ -136,4 +158,37 @@ test('catalog keeps paging after model selection but starts fresh after a profil
   await catalog();
   assert.deepEqual(cursors,[undefined,'next',undefined]);
   assert.deepEqual(el('voices-primary').children.map(option=>option.value),['first']);
+});
+
+test('custom speed is opt-in and cannot follow a selected endpoint change',()=>{
+  const {el,change,save,saved,profiles,refresh}=settingsFixture();
+  change('primary-profile','local:c');
+  el('primary-model').value='custom_model';
+  el('primary-voice').value='custom_voice';
+  save();
+  assert.equal(saved().primary.native_speed,undefined);
+  el('primary-native-speed').checked=true;
+  save();
+  assert.equal(saved().primary.native_speed,true);
+  profiles[2]={...profiles[2],base_url:'https://second-tts.example/v1',revision:'2'};
+  refresh();
+  el('primary-model').value='new_model';
+  el('primary-voice').value='new_voice';
+  save();
+  assert.equal(saved().primary.native_speed,undefined);
+});
+
+test('prepared replay reads local metadata but not the key, and rejects a rotated profile',async()=>{
+  const reads=[];
+  const {change,save,prepare,profiles}=settingsFixture(undefined,reads);
+  change('primary-profile','local:b');
+  save();
+  const replay=await prepare({replay:true});
+  assert.deepEqual(reads,['metadata']);
+  assert.equal(replay.primary.profile.connection,undefined);
+  const synthesis=await prepare();
+  assert.equal(synthesis.primary.profile.connection.api_key,'synthetic-fixture-key');
+  profiles[1]={...profiles[1],revision:'2'};
+  await assert.rejects(prepare({replay:true}),/đã đổi/);
+  assert.deepEqual(reads,['metadata','key','metadata']);
 });
