@@ -11,3 +11,4 @@ Start with [Architecture](ARCHITECTURE.md) to understand the running system, the
 | [Contributing](CONTRIBUTING.md) | Local development, PR workflow and conventions |
 | [Roadmap](ROADMAP.md) | Prioritized improvements |
 | [Vietnamese learning sources](LEARNING_SOURCES.md) | Seven-source assessment, external-reference catalog, permission gates and N5 expansion acceptance |
+| [Voice Framework v2](VOICE_FRAMEWORK.md) | Multi-provider Voice & Live Voice framework (ElevenLabs, Mistral, Custom TTS URL), bilingual VI–JA pipeline and workflows |
