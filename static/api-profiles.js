@@ -6,7 +6,7 @@
   const BASES = {openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com',
     elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai_compatible:''};
   const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/,
-    elevenlabs:/(?:\/v1)+$/,mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
+    mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
   const BLOCKED = /(^|\.)(localhost|local|internal|localdomain|home|lan|workers\.dev|dangphuc\.me)$/i;
   const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal: true});
@@ -25,6 +25,8 @@
     return owner;
   }
   function identifier(id) { if (!idOk(id)) throw problem('Mã kết nối không hợp lệ.'); return id; }
+  const elevenOfficialVersion = /^https:\/\/api\.elevenlabs\.io(?:\/v1)+$/;
+  const profileBase = row => row.protocol==='elevenlabs' && elevenOfficialVersion.test(row.base_url) ? BASES.elevenlabs : row.base_url;
   function baseUrl(protocol, raw) {
     if (!Object.hasOwn(BASES, protocol)) throw problem('Loại API không hợp lệ.');
     if (raw !== undefined && typeof raw !== 'string') throw problem('URL API không hợp lệ.');
@@ -37,7 +39,8 @@
       || !host.includes('.') || host.includes(':') || /^[\d.]+$/.test(host) || BLOCKED.test(host.replace(/\.$/, ''))) {
       throw problem('Dùng địa chỉ API công khai bắt đầu bằng HTTPS, không kèm thông tin đăng nhập, địa chỉ IP hay phần sau dấu ? hoặc #.');
     }
-    return url.origin + url.pathname.replace(/\/+$/, '').replace(SUFFIX[protocol], '');
+    const path=url.pathname.replace(/\/+$/, '');
+    return profileBase({protocol,base_url:url.origin+(SUFFIX[protocol] ? path.replace(SUFFIX[protocol], '') : path)});
   }
   function fields(profile) {
     if (!object(profile)) throw problem('Kết nối không hợp lệ.');
@@ -51,7 +54,6 @@
       || (checked !== null && (!Number.isFinite(checked) || checked <= 0 || checked > Date.now() + 60000))) throw problem('Lịch sử kiểm tra model không hợp lệ.');
     return {connection_id: identity, models: [...new Set(models)], checked_at: checked};
   }
-  const profileBase = row => row.protocol === 'elevenlabs' ? row.base_url.replace(SUFFIX.elevenlabs, '') : row.base_url;
   function publicProfile(row) {
     return {id: row.id, name: row.name, protocol: row.protocol, base_url: profileBase(row), model: row.model,
       key_last4: row.key_last4, connection_id: row.connection_id, revision: row.revision, models: [...row.models], checked_at: row.checked_at};

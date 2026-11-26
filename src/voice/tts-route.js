@@ -30,12 +30,12 @@ export function voiceBase(kind, raw, env) {
   const input = raw?.trim();
   if (!input && !VOICE_BASES[kind]) throw bad();
   const protocol = kind === 'gemini' ? 'gemini' : 'openai';
-  const suffix = kind === 'elevenlabs' ? /(?:\/v1)+$/ : /\/audio\/speech$/;
-  const candidate = input?.replace(/\/+$/,'').replace(suffix,'') || VOICE_BASES[kind];
-  const result = cleanBaseUrl(protocol,candidate);
+  const base = input?.replace(/\/+$/,'') || VOICE_BASES[kind];
+  const result = cleanBaseUrl(protocol,kind==='elevenlabs' ? base : base?.replace(/\/audio\/speech$/,''));
   if (result.error) throw bad();
   const url = new URL(result.url);
   if (url.hostname.endsWith('.') || url.port) throw bad();
+  if (kind==='elevenlabs' && url.origin===VOICE_BASES.elevenlabs && /^(?:\/v1)+$/.test(url.pathname)) return url.origin;
   if (result.url === VOICE_BASES[kind]) return result.url;
   const approved = String(env.VOICE_ALLOWED_ORIGINS || '').split(',').some(origin => origin.trim() === url.origin);
   if (!['elevenlabs','mistral','openai_compatible'].includes(kind) || !approved) throw denied();

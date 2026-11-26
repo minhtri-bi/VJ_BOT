@@ -56,7 +56,9 @@
       control.section.hidden=slot!=='primary' && mode.value==='single';
       control.profile.parentElement.hidden=slot!=='primary' && mode.value!=='dual_split_api';
       control.profile.disabled=control.profile.parentElement.hidden || control.section.hidden;
-      for (const field of [control.model,control.voice,control.speed,control.reading]) if (field) field.disabled=control.section.hidden;
+      control.speed.disabled=slot==='primary' ? mode.value!=='single' : control.section.hidden;
+      control.speed.parentElement.hidden=control.speed.disabled;
+      for (const field of [control.model,control.voice,control.reading]) if (field) field.disabled=control.section.hidden;
     }
   }
   function effectiveAccount(slot) {
@@ -95,8 +97,8 @@
     const modelList=document.createElement('datalist'), voiceList=document.createElement('datalist');
     modelList.id='voice-v2-models-'+slot;voiceList.id='voice-v2-voices-'+slot;
     model.setAttribute('list',modelList.id);voice.setAttribute('list',voiceList.id);section.append(modelList,voiceList);
-    const speed=slot!=='primary' ? input(section,'Tốc độ phát',slot+'-speed','number') : null;
-    if (speed) Object.assign(speed,{min:'0.5',max:'2',step:'0.01',value:'1'});
+    const speed=input(section,'Tốc độ phát',slot+'-speed','number');
+    Object.assign(speed,{min:'0.5',max:'2',step:'0.01',value:'1'});
     const nativeSpeed=input(section,'Máy chủ tùy chỉnh hỗ trợ chỉnh tốc độ',slot+'-native-speed','checkbox');
     const reading=slot!=='vi' ? input(section,'Cách đọc Kanji',slot+'-reading','select') : null;
     reading?.append(option('kanji_native','Giữ Kanji'),option('kana_first','Ưu tiên kana'));
@@ -118,10 +120,10 @@
       if (model) settings.model=model;
       if (voice) settings.voice_id=voice;
       if (!control.nativeSpeed.disabled && control.nativeSpeed.checked) settings.native_speed=true;
-      if (control.speed) {
+      if (!control.speed.disabled) {
         const speed=control.speed.value==='' ? 1 : Number(control.speed.value);
         if (!Number.isFinite(speed) || speed<0.5 || speed>2) throw new Error('Tốc độ phải từ 0.5 đến 2.');
-        settings.speed=speed;
+        if (slot!=='primary' || speed!==1) settings.speed=speed;
       }
       if (control.reading) settings.kanji_mode=control.reading.value;
       config[slot]=settings;
@@ -152,7 +154,7 @@
         control.profile.value=key;
       } else control.profile.value='';
       control.model.value=value.model || '';control.voice.value=value.voice_id || '';
-      if (control.speed) control.speed.value=value.speed ?? 1;
+      control.speed.value=value.speed ?? 1;
       control.nativeSpeed.checked=value.native_speed===true;
       if (control.reading) control.reading.value=value.kanji_mode || 'kanji_native';
     }

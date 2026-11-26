@@ -221,6 +221,7 @@
   #panel-classroom .bubble-avatar-box{display:none!important}
   #panel-classroom .bubble-speech-card{max-width:94%!important;padding:11px 13px!important;border-width:2px!important;font-size:15px}
   #panel-classroom .bubble-body-text{font-size:15px!important;line-height:1.62!important}
+  #panel-classroom .bubble-tts-btn[data-message-listen]{min-width:44px;min-height:44px}
   #panel-classroom .chat-chips-bar{display:grid!important;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px!important;padding:8px 12px!important;overflow:visible!important}
   #panel-classroom .chat-chips-bar .prompt-chip{width:100%;min-height:42px;padding:6px 4px!important;font-size:12px;line-height:1.15;white-space:normal;text-align:center}
   #panel-classroom .chat-input-bar{margin:0 10px 10px!important;padding:6px!important;gap:6px!important;border-width:2.5px!important;border-radius:20px!important}

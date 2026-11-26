@@ -84,6 +84,8 @@ test('ElevenLabs device profiles canonicalize /v1 and expose no key in replay me
   oldRow.ciphertext=await webcrypto.subtle.encrypt({name:'AES-GCM',iv:oldRow.iv,additionalData:aad},key,new TextEncoder().encode(draft().api_key));
   assert.equal((await api.load(owner,saved.id)).api_key,draft().api_key);
   assert.equal((await api.metadata(owner,saved.id)).base_url,'https://api.elevenlabs.io');
+  const proxy=await api.save(owner,{...draft(),protocol:'elevenlabs',base_url:'https://voice.example/gateway/v1/',model:''});
+  assert.equal((await api.metadata(owner,proxy.id)).base_url,'https://voice.example/gateway/v1');
 });
 
 test('saves encrypted credentials, public metadata, and reloads the same account key', async () => {

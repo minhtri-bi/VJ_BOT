@@ -97,6 +97,20 @@ test('voice catalog discovers ElevenLabs models and voices without synthesis or 
   assert.equal(JSON.stringify(catalog).includes(key),false);
 });
 
+test('approved ElevenLabs proxies retain versioned mounts for catalog and speech',async t=>{
+  const calls=[];
+  intercept(t,async (url,init)=>{
+    calls.push(new URL(url).pathname);
+    if (init.method==='POST') return mp3();
+    return url.includes('/voices?') ? Response.json({voices:[]}) : Response.json([]);
+  });
+  const routing={version:2,mode:'single',primary:slot('elevenlabs','clone','https://voice.example/gateway/v1/')};
+  const context={env:{VOICE_ALLOWED_ORIGINS:'https://voice.example'}};
+  assert.equal((await tts({action:'catalog',routing},context)).status,200);
+  assert.equal((await lines(await tts({text:'こんにちは。',stream:true,routing},context))).at(-1).type,'done');
+  assert.deepEqual(calls,['/gateway/v1/v1/models','/gateway/v1/v2/voices','/gateway/v1/v1/text-to-speech/clone']);
+});
+
 test('more than sixteen segments and unauthorized managed routes fail before synthesis', async t => {
   let calls=0;
   intercept(t, async () => {calls++; return mp3();});
