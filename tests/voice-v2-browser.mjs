@@ -22,12 +22,23 @@ const mascotMgr = {setState:value=>states.push(value)};
 const createSource = AudioContext.prototype.createBufferSource;
 AudioContext.prototype.createBufferSource = function () {
   const source = createSource.call(this);
+  const start=source.start;
+  let scheduled;
+  source.start=(...args)=>{scheduled=args;return start.apply(source,args);};
   source.addEventListener('ended',()=>{
+    const [when,offset,duration]=scheduled || [];
+    const rate=source.playbackRate.value, length=source.buffer.duration;
+    // Fixture tones have no intentional silence. Allow trim and one render quantum.
+    if (![when,offset,duration].every(Number.isFinite) || offset>0.002 || duration<length-0.002
+      || this.currentTime+0.008<when+duration/rate) {
+      states.push('clipped:'+offset+'+'+duration);
+      return;
+    }
     const samples=source.buffer.getChannelData(0);
     let rising=0;
     for (let i=1;i<samples.length;i++) if (samples[i-1]<=0 && samples[i]>0) rising++;
     const frequency=Math.round(rising/source.buffer.duration);
-    states.push('ended:'+frequency+'@'+source.playbackRate.value.toFixed(1));
+    states.push('ended:'+frequency+'@'+rate.toFixed(1));
   },{once:true});
   return source;
 };
