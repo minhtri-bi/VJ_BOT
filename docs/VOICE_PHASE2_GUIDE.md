@@ -23,7 +23,7 @@ Tài liệu này là bản hướng dẫn kỹ thuật chi tiết để triển 
 
 ### Chiến lược tách PR khuyến nghị (tránh PR quá lớn, dễ review & test)
 
-- **PR 2A (Backend Core & Unified STT):** Tasks 1 → 4 (`streamLLM`, `voiceStreamingInstructions`, `POST /api/live/turn`, nâng cấp `POST /api/stt` + unit tests).
+- **PR 2A (Backend Core & Unified STT):** Tasks 1 → 4 (`streamLLM`, `voiceStreamingInstructions`, `POST /api/live/turn`, nâng cấp `POST /api/stt` + unit tests) — xem đặc tả thực thi chi tiết tại [VOICE_PHASE2A_SPEC.md](VOICE_PHASE2A_SPEC.md).
 - **PR 2B (Frontend Cascaded Live Engine & Settings):** Tasks 5 → 8 (`vad-worklet`, `live-core`, `live-cascaded`, nối Settings & UI Classroom Voice + unit & Chromium tests).
 
 ---
