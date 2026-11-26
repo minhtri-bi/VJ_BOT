@@ -8,10 +8,8 @@ const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
 const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
 const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
 const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
-const acronymOnly = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ\d０-９ -]*[。！？.!?]?$/u;
 const numeral = /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u;
 const clauseEnd = /[\r\n。！？.!?…]/u;
-const phraseEnd = /[\r\n。！？.!?…、，,;；:：–—]/u;
 
 export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
   const segments = [];
@@ -32,31 +30,36 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
     if (explicit) return add(explicit, value, true);
     const trimmed = hint ? value.trim() : '';
     if (hint && numeral.test(trimmed)) return add(hint, trimmed, true);
-    if (hint === 'ja' && acronymOnly.test(trimmed)) return add('ja', trimmed);
     let lang, pending = '';
     const attachAcronyms = mode === 'ja' || hint === 'ja';
     const tokens = attachAcronyms ? value.match(latinWord) ?? [] : value;
-    const following = attachAcronyms ? new Set() : null;
-    const boundary = hint === 'ja' ? phraseEnd : clauseEnd;
+    const following = attachAcronyms ? new Map() : null;
     if (following) {
-      let hasJapanese = false;
+      let next = null;
       for (let i = tokens.length - 1; i >= 0; i--) {
         const token = tokens[i];
         if (acronym.test(token)) {
-          if (hasJapanese) following.add(i);
-        } else if (japanese.test(token)) hasJapanese = true;
-        else if (letter.test(token) || boundary.test(token)) hasJapanese = false;
+          if (next) following.set(i, next);
+        } else if (japanese.test(token)) next = 'ja';
+        else if (letter.test(token)) next = 'vi';
+        else if (clauseEnd.test(token)) next = null;
       }
     }
-    let index = 0, preceding = false;
+    let index = 0, preceding = null;
     for (const token of tokens) {
       const isJapanese = japanese.test(token);
-      const attached = following && (following.has(index) || (preceding && acronym.test(token)));
+      const next = following?.get(index);
+      // Prefer the following text's language for a neutral abbreviation in hinted speech.
+      // A comma or colon alone is not a language switch.
+      const attached = following && acronym.test(token) && (hint === 'ja'
+        ? (next ?? preceding ?? hint) === 'ja'
+        : next === 'ja' || preceding === 'ja');
       const kind = isJapanese || attached ? 'ja' : letter.test(token) ? 'vi' : null;
       if (following) {
         index++;
-        if (isJapanese) preceding = true;
-        else if (kind === 'vi' || boundary.test(token)) preceding = false;
+        if (isJapanese) preceding = 'ja';
+        else if (kind === 'vi') preceding = 'vi';
+        else if (clauseEnd.test(token)) preceding = null;
       }
       if (kind && lang && kind !== lang) {
         const prefix = pending.match(trailingPrefix)?.[1] ?? (kind === 'ja' ? pending.match(leadingNumber)?.[1] : '') ?? '';

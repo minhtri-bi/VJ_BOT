@@ -335,6 +335,13 @@ test('a phrase separator detaches Vietnamese abbreviations from Japanese speech'
   assert.deepEqual(items.map(({lang,text}) => [lang,text]),[['ja','「犬」 —'],['vi','VD: con chó nhà em.']]);
 });
 
+test('Japanese acronym lists and headings survive list and label punctuation', () => {
+  const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+  chunker.push('<ja>レベルはN5、N4、N3です。 Em thử nhé.</ja><ja>JLPT：日本語能力試験</ja><ja>N5、N4、N3。</ja>');
+  assert.deepEqual(items.map(({lang,text}) => [lang,text]),[
+    ['ja','レベルはN5、N4、N3です。'],['vi','Em thử nhé.'],['ja','JLPT：日本語能力試験'],['ja','N5、N4、N3。']]);
+});
+
 test('a provider key reflected across two tagged segments is never emitted', async t => {
   const {send} = await fixture(t);
   t.mock.method(globalThis,'fetch', async () => sse(event(delta('<vi>synthetic-live</vi>'))
