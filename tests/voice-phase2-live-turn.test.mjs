@@ -319,6 +319,16 @@ test('plain sentences before a tag do not depend on how the provider packages de
   assert.deepEqual(chunk(parts),expected);
 });
 
+test('live keeps decimal tokens whole and routes Japanese acronyms without swallowing Vietnamese', () => {
+  const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+  chunker.push('Khoảng 3.');
+  assert.deepEqual(items,[]);
+  chunker.push('5 phút. <ja>今日はJLPT N5です。 Em thử nhé。</ja>');
+  assert.deepEqual(items.map(({lang,text}) => [lang,text]),[
+    ['vi','Khoảng 3.5 phút.'],['ja','今日はJLPT N5です。'],['vi','Em thử nhé。']]);
+  assert.equal(chunker.flush().fullText,'Khoảng 3.5 phút. 今日はJLPT N5です。 Em thử nhé。');
+});
+
 test('a provider key reflected across two tagged segments is never emitted', async t => {
   const {send} = await fixture(t);
   t.mock.method(globalThis,'fetch', async () => sse(event(delta('<vi>synthetic-live</vi>'))

@@ -8,14 +8,16 @@ const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
 const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
 const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
 const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
+const acronymOnly = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ\d０-９ -]*[。！？.!?]?$/u;
+const numeral = /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u;
 const clauseEnd = /[\r\n。！？.!?…]/u;
 
-export function segmentVoiceText(text, mode = 'bilingual') {
+export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
   const segments = [];
   let nextBoundary = 'start';
-  const add = (lang, raw) => {
+  const add = (lang, raw, labelled = false) => {
     const value = raw.trim();
-    if (!letter.test(value) || (mode === 'ja' && lang !== 'ja')) return;
+    if ((!letter.test(value) && !(labelled && numeral.test(value))) || (mode === 'ja' && lang !== 'ja')) return;
     const previous = segments.at(-1);
     if (previous?.lang === lang && nextBoundary !== 'arrow') {
       previous.text += ' ' + value;
@@ -26,10 +28,14 @@ export function segmentVoiceText(text, mode = 'bilingual') {
     nextBoundary = 'inline';
   };
   function plain(value, explicit) {
-    if (explicit) return add(explicit, value);
+    if (explicit) return add(explicit, value, true);
+    const trimmed = hint ? value.trim() : '';
+    if (hint && numeral.test(trimmed)) return add(hint, trimmed, true);
+    if (hint === 'ja' && acronymOnly.test(trimmed)) return add('ja', trimmed);
     let lang, pending = '';
-    const tokens = mode === 'ja' ? value.match(latinWord) ?? [] : value;
-    const following = mode === 'ja' ? new Set() : null;
+    const attachAcronyms = mode === 'ja' || hint === 'ja';
+    const tokens = attachAcronyms ? value.match(latinWord) ?? [] : value;
+    const following = attachAcronyms ? new Set() : null;
     if (following) {
       let hasJapanese = false;
       for (let i = tokens.length - 1; i >= 0; i--) {

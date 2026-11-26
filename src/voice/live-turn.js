@@ -12,7 +12,8 @@ const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const tag = /<(\/?)(ja|vi)>/i;
 const tags = /<\/?(?:ja|vi)>/gi;
 const tagPrefix = /<\/?(?:[jv][ai]?)?$/i;
-const sentence = /(?:[。！？!?…][」』”’"')）]*|\.[」』”’"')）]*(?=\s|$))/u;
+// Wait for lookahead after an ASCII period: the next delta may contain a fractional digit.
+const sentence = /(?:[。！？!?…][」』”’"')）]*|\.[」』”’"')）]*(?=\s))/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
 
 export function createSegmentChunker({maxSegments = 8, onSegment}) {
@@ -21,9 +22,7 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
   function emit(raw, hint) {
     const text = normalizeVoiceText(raw.replace(tags, ' '));
     // Tags are hints, not proof that upstream kept Japanese and Vietnamese separate.
-    const numeric = hint && /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u.test(text);
-    const acronym = hint === 'ja' && /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ\d０-９ -]*[。！？.!?]?$/u.test(text);
-    const parts = (numeric || acronym ? [{lang:hint, text}] : segmentVoiceText(text)) ?? [];
+    const parts = segmentVoiceText(text, 'bilingual', {hint}) ?? [];
     for (const part of parts) {
       if (segments.length >= maxSegments) break;
       const index = segments.length;

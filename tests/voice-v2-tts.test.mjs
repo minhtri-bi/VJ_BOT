@@ -53,6 +53,20 @@ test('Japanese-only listening preserves acronyms in Japanese context and skips V
   assert.deepEqual(inputs,['DVDを見ます。 映画は4Kです。 ＪＬＰＴの試験。 USB HDMI対応。']);
 });
 
+test('explicit numeric segments reach playback in the tagged language', async t => {
+  const inputs = [];
+  intercept(t, async (_url, init) => {
+    const {text,language_code} = JSON.parse(init.body);
+    inputs.push([language_code,text]);
+    return mp3();
+  });
+  const response = await tts({text:'<ja>３。</ja><vi>3.5</vi>',mode:'bilingual',stream:true,
+    routing:{version:2,mode:'single',primary:slot('elevenlabs','only_clone')}});
+  assert.equal(response.status,200);
+  assert.deepEqual((await lines(response)).at(-1),{type:'done',count:2});
+  assert.deepEqual(inputs,[['ja','３。'],['vi','3.5']]);
+});
+
 test('one ElevenLabs clone receives both language codes; multilingual v2 rejects VI before provider calls', async t => {
   const requests = [];
   intercept(t, async (url, init) => {requests.push([url,JSON.parse(init.body)]);return mp3();});
