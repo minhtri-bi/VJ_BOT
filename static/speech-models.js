@@ -238,7 +238,7 @@
   });
   window.addEventListener('pagehide', closeKeyForm);
   window.addEventListener('vjbot-voice-changed', event => {
-    if (event.detail?.source !== 'routing-v2') {formRevision++;sync();}
+    if (event?.detail?.source !== 'routing-v2') {formRevision++;sync();}
   });
   window.addEventListener('storage', event => {
     if (managed()) return;

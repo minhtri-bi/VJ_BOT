@@ -111,6 +111,8 @@ async function send(provider, path, signal, body) {
 
 const langModel = (model, lang) => !(lang === 'vi' && model === 'eleven_multilingual_v2') &&
   (!['eleven_flash_v2','eleven_turbo_v2'].includes(model) || !['ja','vi'].includes(lang));
+const elevenLanguageCode = /^eleven_(?:(?:flash|turbo)_v2_5$|v[34](?:_|$))/;
+const elevenTextContext = /^eleven_(?:(?:flash|turbo)_v2_5|multilingual_v2)$/;
 
 export function voiceSettings(kind, slot, lang, single) {
   const model = slot.model || ({elevenlabs:elevenModel,mistral:MISTRAL_SPEECH_MODEL,openai:openaiModel,gemini:DEFAULT_SPEECH_MODEL})[kind];
@@ -126,10 +128,11 @@ export function voiceSettings(kind, slot, lang, single) {
 
 const registry = {
   elevenlabs: {
-    async synthesize({text,lang,model,voice,format,prevText,nextText}, provider, signal) {
+    async synthesize({text,lang,model,voice,format,prevText,nextText,nativeSpeed}, provider, signal) {
       const response = await send(provider,`/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=${format}`,signal,{
-        text,model_id:model,...(model === 'eleven_multilingual_v2' ? {} : {language_code:lang}),
-        ...(prevText ? {previous_text:prevText} : {}),...(nextText ? {next_text:nextText} : {})
+        text,model_id:model,...(elevenLanguageCode.test(model) ? {language_code:lang} : {}),
+        ...(nativeSpeed!==1 ? {voice_settings:{speed:nativeSpeed}} : {}),
+        ...(elevenTextContext.test(model) ? {previous_text:prevText,next_text:nextText} : {})
       });
       return audioData(response,{mime:'audio/mpeg'});
     },
@@ -163,8 +166,9 @@ const registry = {
     }
   },
   openai_compatible: {
-    async synthesize({text,model,voice}, provider, signal) {
-      return audioData(await send(provider,'/audio/speech',signal,{model,voice,input:text,response_format:'mp3'}),{
+    async synthesize({text,model,voice,nativeSpeed}, provider, signal) {
+      return audioData(await send(provider,'/audio/speech',signal,{model,voice,input:text,response_format:'mp3',
+        ...(nativeSpeed!==1 ? {speed:nativeSpeed} : {})}),{
         mime:'audio/mpeg',jsonField:body => ({data:body?.audio_data ?? body?.audioBase64 ?? body?.audio,mimeType:body?.mime_type ?? body?.mimeType})});
     },
     async listCatalog(provider,signal) {
@@ -174,9 +178,10 @@ const registry = {
     }
   },
   openai: {
-    async synthesize({text,lang,model,voice}, provider, signal) {
+    async synthesize({text,lang,model,voice,nativeSpeed}, provider, signal) {
       const instructions = lang === 'ja' ? 'Read exactly as written with natural native Japanese pronunciation.' : 'Read exactly as written with native Vietnamese tones and pronunciation.';
-      return audioData(await send(provider,'/audio/speech',signal,{model,voice,input:text,response_format:'mp3',instructions}),{mime:'audio/mpeg'});
+      return audioData(await send(provider,'/audio/speech',signal,{model,voice,input:text,response_format:'mp3',instructions,
+        ...(nativeSpeed!==1 ? {speed:nativeSpeed} : {})}),{mime:'audio/mpeg'});
     },
     async listCatalog() {return {models:[{id:openaiModel}],voices:['alloy','marin','cedar'].map(id => ({id,name:id}))};}
   },
@@ -196,8 +201,13 @@ const registry = {
   }
 };
 
-export function synthesizeVoice(segment, provider, signal) {
-  return registry[provider.kind].synthesize(segment,provider,signal);
+export async function synthesizeVoice(segment, provider, signal) {
+  const {kind} = provider, {speed} = segment;
+  const nativeSpeed = kind === 'elevenlabs' && (elevenLanguageCode.test(segment.model) || elevenTextContext.test(segment.model))
+    ? Math.min(1.2,Math.max(0.7,speed))
+    : kind === 'openai' || kind === 'openai_compatible' && segment.native_speed ? speed : 1;
+  const audio = await registry[kind].synthesize({...segment,nativeSpeed},provider,signal);
+  return {...audio,speed:speed/nativeSpeed};
 }
 
 export async function voiceCatalog(provider, signal, cursor) {

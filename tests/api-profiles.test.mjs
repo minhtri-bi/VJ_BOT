@@ -71,6 +71,23 @@ function browser({idb = database(), storage = new Map(), brokenStorage = false} 
   return {api: context.VJProfiles, context, idb, storage};
 }
 
+test('ElevenLabs device profiles canonicalize /v1 and expose no key in replay metadata',async()=>{
+  const {api,idb}=browser();
+  const saved=await api.save(owner,{...draft(),protocol:'elevenlabs',base_url:'https://api.elevenlabs.io/v1/',model:''});
+  assert.deepEqual(plain(await api.metadata(owner,saved.id)),
+    {protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',revision:saved.revision});
+  await assert.rejects(api.metadata(other,saved.id));
+  const oldRow=[...idb.stores.get('profiles').values()][0];
+  oldRow.base_url='https://api.elevenlabs.io/v1';
+  const {key}=idb.stores.get('keys').get(JSON.stringify(owner));
+  const aad=new TextEncoder().encode(JSON.stringify(['vjbot-device-key-v1',owner,saved.id,'elevenlabs',oldRow.base_url,null]));
+  oldRow.ciphertext=await webcrypto.subtle.encrypt({name:'AES-GCM',iv:oldRow.iv,additionalData:aad},key,new TextEncoder().encode(draft().api_key));
+  assert.equal((await api.load(owner,saved.id)).api_key,draft().api_key);
+  assert.equal((await api.metadata(owner,saved.id)).base_url,'https://api.elevenlabs.io');
+  const proxy=await api.save(owner,{...draft(),protocol:'elevenlabs',base_url:'https://voice.example/gateway/v1/',model:''});
+  assert.equal((await api.metadata(owner,proxy.id)).base_url,'https://voice.example/gateway/v1');
+});
+
 test('saves encrypted credentials, public metadata, and reloads the same account key', async () => {
   const b = browser(), profile = await b.api.save(owner, draft());
   assert.equal(profile.api_key, undefined);

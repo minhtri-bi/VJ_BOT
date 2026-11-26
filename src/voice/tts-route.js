@@ -1,7 +1,7 @@
 import {cleanBaseUrl, DEFAULT_BASES} from '../llm.js';
 import {unseal} from '../ai-secrets.js';
-import {normalizeVoiceText} from './normalizer.js';
-import {segmentVoiceText} from './segmenter.js';
+import {authoredVoiceReading, normalizeVoiceText} from './normalizer.js';
+import {MAX_SEGMENTS, segmentVoiceText} from './segmenter.js';
 import {MAX_AUDIO, VOICE_BASES, VoiceError, synthesizeVoice, voiceCatalog, voiceSettings} from './tts-adapters.js';
 
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -30,11 +30,12 @@ export function voiceBase(kind, raw, env) {
   const input = raw?.trim();
   if (!input && !VOICE_BASES[kind]) throw bad();
   const protocol = kind === 'gemini' ? 'gemini' : 'openai';
-  const candidate = input?.replace(/\/+$/,'').replace(/\/audio\/speech$/,'') || VOICE_BASES[kind];
-  const result = cleanBaseUrl(protocol,candidate);
+  const base = input?.replace(/\/+$/,'') || VOICE_BASES[kind];
+  const result = cleanBaseUrl(protocol,kind==='elevenlabs' ? base : base?.replace(/\/audio\/speech$/,''));
   if (result.error) throw bad();
   const url = new URL(result.url);
   if (url.hostname.endsWith('.') || url.port) throw bad();
+  if (kind==='elevenlabs' && url.origin===VOICE_BASES.elevenlabs && /^(?:\/v1)+$/.test(url.pathname)) return url.origin;
   if (result.url === VOICE_BASES[kind]) return result.url;
   const approved = String(env.VOICE_ALLOWED_ORIGINS || '').split(',').some(origin => origin.trim() === url.origin);
   if (!['elevenlabs','mistral','openai_compatible'].includes(kind) || !approved) throw denied();
@@ -117,8 +118,8 @@ function streamAudio(segments, signal) {
         controller.close();
         return;
       }
-      const {lang,boundary,speed,voice,model} = segments[index];
-      const {audioBase64,mimeType} = result.audio;
+      const {lang,boundary,voice,model} = segments[index];
+      const {audioBase64,mimeType,speed} = result.audio;
       controller.enqueue(line({type:'segment',index:index++,lang,boundary,speed,voice,model,audioBase64,mimeType}));
     },
     cancel() {abort.abort();pending.clear();}
@@ -143,18 +144,22 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     const ja = routeSlot(routing,'ja');
     const kanjiMode = ja.kanji_mode ?? 'kanji_native';
     if (!['kanji_native','kana_first'].includes(kanjiMode)) throw bad();
-    const raw = normalizeVoiceText(body.text,{kanjiMode,reading:body.mode === 'ja' ? body.reading : undefined});
-    const chunks = segmentVoiceText(raw,body.mode);
-    if (!chunks) throw new VoiceError('tts_segment_limit',413,'Đoạn cần đọc có quá 8 phần. Hãy chọn đoạn ngắn hơn.');
+    const reading = body.mode === 'ja' ? authoredVoiceReading(body.reading) : '';
+    const chunks = reading ? [{lang:'ja',text:reading,boundary:'start'}]
+      : segmentVoiceText(normalizeVoiceText(body.text,{kanjiMode}),body.mode);
+    if (!chunks) throw new VoiceError('tts_segment_limit',413,`Đoạn cần đọc có quá ${MAX_SEGMENTS} phần. Hãy chọn đoạn ngắn hơn.`);
     if (!chunks.length) throw new VoiceError('tts_no_text',400,'Không có chữ để đọc.');
     const routes = new Map();
     for (const {lang} of chunks) {
       if (routes.has(lang)) continue;
-      const slot = routeSlot(routing,lang), speed = slot.speed ?? (lang === 'ja' ? 0.9 : 1);
+      const slot = routeSlot(routing,lang), speed = slot.speed ?? 1;
       if (typeof speed !== 'number' || !Number.isFinite(speed) || speed < 0.5 || speed > 2) throw bad();
+      if (slot.native_speed !== undefined && (slot.provider !== 'openai_compatible' || typeof slot.native_speed !== 'boolean')) throw bad();
       const settings = voiceSettings(slot.provider,slot,lang,routing.mode === 'single');
       const provider = await selectConnection(slot,env,userId,admin,override);
-      routes.set(lang,{provider,speed,...settings});
+      if (slot.profile.scope === 'platform' && chunks.length > 8)
+        throw new VoiceError('tts_segment_limit',413,'Giọng máy chủ hỗ trợ tối đa 8 phần. Hãy chọn đoạn ngắn hơn.');
+      routes.set(lang,{provider,speed,native_speed:slot.native_speed,...settings});
     }
     return streamAudio(chunks.map((chunk,index) => ({...chunk,...routes.get(chunk.lang),
       prevText:chunks[index-1]?.lang === chunk.lang ? chunks[index-1].text : undefined,

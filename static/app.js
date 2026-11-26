@@ -391,16 +391,21 @@ function renderBubble(role, content, voiceContext) {
     </div>
     <div class="bubble-speech-card ${role}">
       <div class="bubble-body-text">${formattedContent}</div>
-      ${role === 'user' ? '' : '<button type="button" class="chat-audio-btn" data-message-listen aria-label="Nghe tin nhắn song ngữ" title="Có thể bôi đen một đoạn để chỉ nghe đoạn đó">Nghe</button>'}
+      ${role === 'user' ? '' : '<button type="button" class="bubble-tts-btn" data-message-listen aria-label="Nghe tin nhắn song ngữ" title="Có thể bôi đen một đoạn để chỉ nghe đoạn đó">Nghe</button>'}
     </div>
   `;
   const listen = row.querySelector?.('[data-message-listen]');
-  if (listen) listen.onclick = () => {
-    const selection = window.getSelection?.();
+  if (listen) {
     const body = row.querySelector('.bubble-body-text');
-    const selected = selection && body.contains(selection.anchorNode) && body.contains(selection.focusNode) ? selection.toString().trim() : '';
-    playGeminiTTS(selected || content,{...voiceContext,mode:'bilingual',privateAudio:true});
-  };
+    const selectedText = () => {
+      const selection = window.getSelection?.();
+      return selection && body.contains(selection.anchorNode) && body.contains(selection.focusNode) ? selection.toString().trim() : '';
+    };
+    listen.onmousedown = event => {
+      if (event.button === 0 && selectedText()) event.preventDefault();
+    };
+    listen.onclick = () => playGeminiTTS(selectedText() || content,{...voiceContext,mode:'bilingual',privateAudio:true});
+  }
 
   container.appendChild(row);
   container.scrollTop = container.scrollHeight;

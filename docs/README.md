@@ -12,3 +12,4 @@ Start with [Architecture](ARCHITECTURE.md) to understand the running system, the
 | [Roadmap](ROADMAP.md) | Prioritized improvements |
 | [Vietnamese learning sources](LEARNING_SOURCES.md) | Seven-source assessment, external-reference catalog, permission gates and N5 expansion acceptance |
 | [Voice Framework v2](VOICE_FRAMEWORK.md) | Multi-provider Voice & Live Voice framework (ElevenLabs, Mistral, Custom TTS URL), bilingual VI–JA pipeline and workflows |
+| [Voice Phase 2 Guide](VOICE_PHASE2_GUIDE.md) | Step-by-step implementation guide for Cascaded Live Voice, streaming `/api/live/turn`, Unified STT and barge-in tests |

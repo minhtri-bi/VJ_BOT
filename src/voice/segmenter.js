@@ -1,6 +1,6 @@
 import {particleReading} from './normalizer.js';
 
-export const MAX_SEGMENTS = 8;
+export const MAX_SEGMENTS = 16;
 const japanese = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u;
 const letter = /\p{L}/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
