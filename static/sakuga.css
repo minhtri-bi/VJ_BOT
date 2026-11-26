@@ -115,7 +115,7 @@ button,.stage-btn,.public-cta,a.stage-btn{touch-action:manipulation}
 .curriculum-view-switch button[aria-pressed=true],.segmented button[aria-pressed=true],.auth-tabs button[aria-pressed=true]{
   background:var(--ink)!important;color:var(--sheet)!important;border-color:var(--border-dark)!important;box-shadow:3px 3px 0 var(--sk-acc)!important;
 }
-:is(.feature-back,.ai-quiet-button,.live-translation-retry,.cb-item,.learning-breadcrumb button,.course-supplements button){
+:is(.feature-back,.ai-quiet-button,.cb-item,.learning-breadcrumb button,.course-supplements button){
   border-color:transparent!important;box-shadow:none!important;background:transparent!important;color:var(--accent)!important;text-decoration:underline;text-underline-offset:4px;
 }
 :is(input,select,textarea){
