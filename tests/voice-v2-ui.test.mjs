@@ -91,26 +91,31 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map()) {
       setAttribute(){}, addEventListener(event,handler){this.events[event]=handler;}};
   }
   const el=id=>nodes.get('voice-v2-'+id);
-  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','remove','routing','preview','settings','key'])
+  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','remove','routing','preview','settings','key','confirm-title','confirm-description'])
     node('fixture').id='voice-v2-'+id;
+  const dialog=Object.assign(node('dialog'),{open:false,returnValue:'',
+    showModal(){this.open=true;},
+    close(value=''){this.open=false;this.returnValue=value;const handler=this.events.close;delete this.events.close;handler?.();}});
+  dialog.id='voice-v2-confirm-dialog';
   el('storage').options=[{},{}];
-  const owner='learner';
+  const owner='learner', removed=[];
   const window = new EventTarget();
+  window.removeVoiceProfile=async (...args)=>{removed.push(args);};
   const profiles = [
     {id:'a',scope:'local',name:'ElevenLabs',protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',revision:'1'},
     {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',revision:'1'},
     {id:'c',scope:'local',name:'Custom',protocol:'openai_compatible',base_url:'https://tts.example/v1',revision:'1'}
   ];
-  const context = vm.createContext({window, signedInUser:{user_id:owner}, Event, CustomEvent, AbortSignal, apiFetch,
+  const context = vm.createContext({window, signedInUser:{user_id:owner}, Event, CustomEvent, AbortController, AbortSignal, apiFetch,
     VJProfiles:{load:async (_owner,id)=>{profileReads.push('key');return {...profiles.find(profile=>profile.id===id),api_key:'synthetic-fixture-key'};},
       metadata:async (_owner,id)=>{profileReads.push('metadata');return profiles.find(profile=>profile.id===id);}},
     document:{getElementById:id=>nodes.get(id), createElement:node},
-    localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}});
+    localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)}});
   vm.runInContext(readFileSync('static/voice/voice-settings.js','utf8'),context);
   const refresh=()=>window.renderVoiceProfiles(owner,profiles,false);
   refresh();
   function change(id,value) {el(id).value=value;el(id).events.change();}
-  return {el,profiles,refresh,change,
+  return {el,dialog,context,window,profiles,removed,refresh,change,
     saved:()=>JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),
     prepare:options=>window.VJVoiceRouting.prepared(JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),undefined,options),
     save:()=>el('routing').events.submit({preventDefault(){}}),
@@ -219,4 +224,28 @@ test('prepared replay reads local metadata but not the key, and rejects a rotate
   profiles[1]={...profiles[1],revision:'2'};
   await assert.rejects(prepare({replay:true}),/đã đổi/);
   assert.deepEqual(reads,['metadata','key','metadata']);
+});
+
+test('removing a voice profile uses the native dialog and cancels on dismiss or account switch',async()=>{
+  const {el,dialog,context,window,removed,change}=settingsFixture();
+  change('primary-profile','local:a');
+  const first=el('remove').events.click();
+  assert.equal(dialog.open,true);
+  assert.match(el('confirm-title').textContent,/ElevenLabs/);
+  dialog.close('cancel');
+  await first;
+  assert.deepEqual(removed,[]);
+  const confirmed=el('remove').events.click();
+  assert.equal(dialog.open,true);
+  dialog.close('delete');
+  await confirmed;
+  assert.deepEqual(removed,[['learner','local','a']]);
+  assert.match(el('status').textContent,/Đã xóa kết nối giọng nói/);
+  const switched=el('remove').events.click();
+  assert.equal(dialog.open,true);
+  context.signedInUser={user_id:'other-learner'};
+  window.dispatchEvent(new Event('vjbot-account-ready'));
+  await switched;
+  assert.equal(dialog.open,false);
+  assert.equal(removed.length,1);
 });

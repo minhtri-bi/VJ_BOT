@@ -5,7 +5,7 @@
   const titles={primary:'Kết nối chính',ja:'Tiếng Nhật',vi:'Tiếng Việt'};
   const source=el('source'), mode=el('mode'), slots=el('slots'), status=el('status'), kind=el('kind'), url=el('url');
   const controls=new Map(), catalogs=new Map(), selectedAccounts=new Map();
-  let rows=[], metadataOwner, drawnIdentity, busy=false;
+  let rows=[], metadataOwner, drawnIdentity, busy=false, pendingRemoval=null;
   const owner=()=>signedInUser?.user_id;
   const admin=()=>signedInUser?.is_admin===true;
   const ref=row=>`${row.scope}:${row.id}`;
@@ -253,9 +253,27 @@
     if (drawnIdentity!==roleKey()) {drawnIdentity=roleKey();restore();} else {redrawAccounts();updateAccounts();}
     if (previous!==activeIdentity()) voiceChanged();
   };
+  function cancelRemoval() {pendingRemoval?.abort();pendingRemoval=null;}
+  function confirmRemoval(row, signal) {
+    const dialog=el('confirm-dialog');
+    if (!dialog?.showModal || signal.aborted) return Promise.resolve(false);
+    const title=el('confirm-title'), description=el('confirm-description');
+    if (title) title.textContent=`Xóa kết nối ${row.name}?`;
+    if (description) description.textContent=`Xóa ${row.name} khỏi ${row.scope==='local'?'thiết bị này':'máy chủ'}? Các cấu hình đang dùng kết nối này sẽ ngừng phát cho đến khi chọn lại.`;
+    dialog.returnValue='';
+    return new Promise(resolve=>{
+      const cancel=()=>{if (dialog.open) dialog.close('cancel');};
+      dialog.addEventListener('close',()=>{
+        signal.removeEventListener('abort',cancel);
+        resolve(!signal.aborted && dialog.returnValue==='delete');
+      },{once:true});
+      signal.addEventListener('abort',cancel,{once:true});
+      dialog.showModal();
+    });
+  }
   source.addEventListener('change',()=>{
     try {
-      if (source.value==='legacy') {save(null);el('personal').hidden=true;status.textContent='Đã chọn nguồn giọng mặc định.';}
+      if (source.value==='legacy') {cancelRemoval();save(null);el('personal').hidden=true;status.textContent='Đã chọn nguồn giọng mặc định.';}
       else {el('personal').hidden=false;status.textContent='Chọn kết nối, rồi lưu cấu hình trước khi phát.';reloadProfiles();}
     } catch (error) {status.textContent=error.message;}
   });
@@ -279,14 +297,15 @@
     if (busy) return;
     const row=rows.find(row=>ref(row)===controls.get('primary').profile.value);
     if (!row || row.model) {status.textContent='Chọn một kết nối giọng nói riêng để xóa.';return;}
-    if (!window.confirm(`Xóa kết nối ${row.name}? Các cấu hình dùng kết nối này sẽ ngừng phát cho đến khi chọn lại.`)) return;
-    const user=owner(), role=roleKey();
+    const user=owner(), role=roleKey(), abort=pendingRemoval=new AbortController();
     busy=true;
     try {
+      if (!(await confirmRemoval(row,abort.signal))) return;
+      if (role!==roleKey() || abort.signal.aborted || !rows.some(item=>ref(item)===ref(row))) return;
       await window.removeVoiceProfile(user,row.scope,row.id);
       if (role===roleKey()) status.textContent='Đã xóa kết nối giọng nói. Chọn lại nếu cấu hình đang dùng kết nối này.';
     } catch (error) {if (role===roleKey()) status.textContent=error.message;}
-    finally {busy=false;}
+    finally {if (pendingRemoval===abort) pendingRemoval=null;busy=false;}
   });
   el('routing').addEventListener('submit',event=>{
     event.preventDefault();
@@ -303,8 +322,10 @@
   el('settings').addEventListener('toggle',()=>{
     if (el('settings').open && source.value==='personal' && owner()) reloadProfiles();
   });
+  window.addEventListener('pagehide',cancelRemoval);
   window.addEventListener('vjbot-account-ready',()=>{
     if (drawnIdentity===roleKey()) return;
+    cancelRemoval();
     metadataOwner=null;rows=[];catalogs.clear();el('key').value='';drawnIdentity=roleKey();restore();
     if (owner() && source.value==='personal') reloadProfiles();
   });

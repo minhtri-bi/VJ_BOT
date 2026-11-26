@@ -926,6 +926,13 @@
                     <p class="ai-field-hint" id="voice-v2-status" role="status" aria-live="polite"></p>
                   </div></details>
                 </div></details>
+                <dialog id="voice-v2-confirm-dialog" class="ai-confirm-dialog" aria-labelledby="voice-v2-confirm-title" aria-describedby="voice-v2-confirm-description">
+                  <form method="dialog">
+                    <header><p class="ai-confirm-eyebrow">Âm thanh</p><h2 id="voice-v2-confirm-title">Xóa kết nối giọng nói</h2></header>
+                    <p id="voice-v2-confirm-description" class="ai-confirm-warning"></p>
+                    <footer><button type="submit" class="stage-btn" value="cancel" autofocus>Hủy</button><button type="submit" class="public-cta" id="voice-v2-confirm-delete" value="delete">Xóa kết nối</button></footer>
+                  </form>
+                </dialog>
                 <div class="setting-toggle-row"><strong>Âm báo khi học</strong><button type="button" class="sketch-action-chip" id="btn-toggle-sound-setting" aria-label="Âm báo khi học" aria-pressed="true">Bật âm thanh</button></div>
               </section>
               <section class="settings-card danger-card" id="settings-danger-card">
