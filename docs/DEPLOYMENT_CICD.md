@@ -11,14 +11,14 @@
 
 ```mermaid
 flowchart LR
-  A[Nhánh tính năng] -->|push| B[GitHub Actions: test + build dry-run]
+  A[Feature branch or fork] -->|push or PR to main| B[GitHub Actions: test + build dry-run]
   A -->|PR xanh + squash merge| M[main]
   M --> C[Workers Builds: npm run build]
   C --> D[npm run release: migrate rồi cf deploy]
   D --> P[vjbot.dangphuc.me]
 ```
 
-- **GitHub Actions** chỉ kiểm tra, không giữ khóa Cloudflare. `ci.yml` chạy trên mọi push: cài dependency với cache npm, sinh catalog một lần, `npm test`, rồi `npm run build:worker` (dry run) để không sinh catalog lần thứ hai. `python.yml` chạy pytest khi `app/`, `scripts/`, test Python hoặc `requirements.txt` đổi.
+- GitHub Actions only validates changes; it does not use Cloudflare credentials. `ci.yml` runs on pushes and pull requests targeting `main`, including fork PRs from Devin. It installs npm dependencies, generates the catalog once, runs `npm test`, and validates the Worker with `npm run build:worker` (dry run). GitHub may require maintainer approval before running workflows from fork PRs; the fork's own push check is not a substitute for the upstream PR check. `python.yml` runs pytest when changes match `app/`, `scripts/`, Python tests, `requirements.txt`, or `pytest.ini`.
 - **Ruleset "Protect main branch"**: phải qua PR và check tên `Test & Quality Checks` (tên của job trong `ci.yml`; đổi tên job là chặn merge). Thread review phải được giải quyết. Chỉ squash/merge qua PR, không push thẳng.
 - **Phân vai**: test chỉ chạy ở GitHub Actions (check bắt buộc trước khi merge), nên `main` luôn đã qua test. Workers Builds không chạy lại test mà chỉ dựng file cần để deploy, vì vậy một test chập chờn hay lệch phiên bản Node không còn làm hỏng deploy.
 - **Cloudflare Workers Builds** là nơi duy nhất deploy. Push hoặc merge vào `main` tự chạy. Đồng đội chỉ cần quyền ghi repo, không cần token Cloudflare; muốn xem log build thì cần vào dashboard Cloudflare hoặc dùng `cf builds`.
