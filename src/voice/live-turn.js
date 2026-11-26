@@ -6,7 +6,7 @@ import {providerFailure, resolveProvider} from '../providers.js';
 import {catalogLesson, groundLesson, processingAllowed, resolveTaskReference, teacherCatalog, validFocusReference, validLessonReference, validTaskReference} from '../tutor-context.js';
 import {normalizeVoiceText} from './normalizer.js';
 import {segmentVoiceText} from './segmenter.js';
-import {readVoiceBody} from './tts-route.js';
+import {MAX_VOICE_TEXT, readVoiceBody} from './tts-route.js';
 
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
 const tag = /<(\/?)(ja|vi)>/i;
@@ -16,7 +16,8 @@ const tagPrefix = /<\/?(?:[jv][ai]?)?$/i;
 const sentence = /(?:[。！？!?…][」』”’"')）]*|\.[」』”’"')）]*(?=\s))/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
 const PLAIN_TARGET = 180;
-const MAX_LOOKAHEAD = 220;
+const PLAIN_LOOKAHEAD = 256;
+const TAGGED_LOOKAHEAD = 220;
 
 function lengthCut(text, target) {
   const space = text.slice(0, target + 1).search(/\s+\S*$/u);
@@ -24,22 +25,25 @@ function lengthCut(text, target) {
 }
 
 function plainCut(text) {
-  // Give a sentence near the preferred split point time to finish, regardless of delta size.
-  const end = sentence.exec(text.slice(0, MAX_LOOKAHEAD + 1));
+  // A normal-length reply can end in the next delta or close at a language marker.
+  const end = sentence.exec(text.slice(0, PLAIN_LOOKAHEAD + 1));
   const cut = end ? end.index + end[0].length : 0;
-  if (cut && cut <= MAX_LOOKAHEAD) return cut;
-  return text.length > MAX_LOOKAHEAD ? lengthCut(text, PLAIN_TARGET) : 0;
+  if (cut && cut <= PLAIN_LOOKAHEAD) return cut;
+  return text.length > PLAIN_LOOKAHEAD ? lengthCut(text, PLAIN_TARGET) : 0;
 }
 
 export function createSegmentChunker({maxSegments = 8, onSegment}) {
-  let buffer = '', language = null;
+  let buffer = '', language = null, overflow = false, spokenLength = 0;
   const segments = [];
   function emit(raw, hint) {
     const text = normalizeVoiceText(raw.replace(tags, ' '));
     // Tags are hints, not proof that upstream kept Japanese and Vietnamese separate.
-    const parts = segmentVoiceText(text, 'bilingual', {hint}) ?? [];
+    const parts = segmentVoiceText(text, 'bilingual', {hint});
+    if (!parts) {overflow = true;return;}
     for (const part of parts) {
-      if (segments.length >= maxSegments) break;
+      const length = part.text.length + `<${part.lang}></${part.lang}>`.length + Number(segments.length > 0);
+      if (segments.length >= maxSegments || spokenLength + length > MAX_VOICE_TEXT) {overflow = true;break;}
+      spokenLength += length;
       const index = segments.length;
       const boundary = !index ? 'start' : sentenceEnd.test(segments[index - 1].text) ? 'sentence' : 'inline';
       const item = {index, lang:part.lang, boundary, text:part.text};
@@ -48,16 +52,18 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
     }
   }
   function emitBlock(raw) {
-    while (!language && segments.length < maxSegments) {
-      const cut = plainCut(raw);
-      if (!cut) break;
+    // If a tag or EOF completes the block, split on real sentence endings only.
+    while (!language && !overflow) {
+      const end = sentence.exec(raw);
+      if (!end) break;
+      const cut = end.index + end[0].length;
       emit(raw.slice(0, cut), null);
       raw = raw.slice(cut);
     }
-    emit(raw, language);
+    if (!overflow) emit(raw, language);
   }
   function drain(final) {
-    while (buffer && segments.length < maxSegments) {
+    while (buffer && !overflow) {
       const marker = tag.exec(buffer);
       if (marker) {
         const raw = buffer.slice(0, marker.index);
@@ -75,25 +81,25 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
       let cut;
       if (!language) cut = plainCut(available);
       else {
-        if (available.length <= MAX_LOOKAHEAD) break;
+        if (available.length <= TAGGED_LOOKAHEAD) break;
         const end = sentence.exec(available);
-        cut = end ? end.index + end[0].length : lengthCut(available, MAX_LOOKAHEAD);
+        cut = end ? end.index + end[0].length : lengthCut(available, TAGGED_LOOKAHEAD);
       }
       if (!cut) break;
       emit(buffer.slice(0, cut), language);
       buffer = buffer.slice(cut);
     }
-    if (segments.length >= maxSegments) buffer = '';
+    if (overflow) buffer = '';
   }
   return {
     push(delta) {
-      if (segments.length >= maxSegments) return;
+      if (overflow) return;
       buffer += delta;
       drain(false);
     },
     flush() {
       drain(true);
-      return {fullText:segments.map(part => part.text).join(' '), count:segments.length};
+      return {fullText:segments.map(part => part.text).join(' '), count:segments.length, overflow};
     }
   };
 }
@@ -140,7 +146,11 @@ function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
           const result = await streamLLM(provider, {system, turns:[{role:'user', content:envelope}], signal, onDelta:chunker.push});
           if (signal.aborted) return;
           if (!result.ok) {send('error', upstreamFailure(result.status));return;}
-          const {fullText, count} = chunker.flush();
+          const {fullText, count, overflow} = chunker.flush();
+          if (overflow) {
+            send('error', {code:'live_reply_too_long', detail:'Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.'});
+            return;
+          }
           sendPending(true);
           if (!count) send('error', {code:'live_empty_reply', detail:'Thầy chưa trả lời được. Em thử nói lại nhé.'});
           else send('done', {full_text:fullText, count, japanese_only:japaneseOnly});

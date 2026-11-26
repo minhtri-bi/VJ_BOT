@@ -117,7 +117,7 @@ test('aborting a pending body read cancels both the reader and provider request'
 test('chunker consumes split and empty tags and keeps actual sentence boundaries', () => {
   const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
   for (const char of '<ja>。</ja><ja>おはよう</ja><vi>Chào em.</vi><ja>「は」</ja>') chunker.push(char);
-  assert.deepEqual(chunker.flush(), {fullText:'おはよう Chào em. 「わ」', count:3});
+  assert.deepEqual(chunker.flush(), {fullText:'おはよう Chào em. 「わ」', count:3, overflow:false});
   assert.deepEqual(items.map(({lang,boundary}) => [lang,boundary]), [['ja','start'],['vi','inline'],['ja','sentence']]);
 });
 
@@ -128,7 +128,9 @@ test('chunker emits plain text early, separates wrong-language text inside tags,
   chunker.push('<ja>こんにちは、em。</ja><vi>Thử lại</vi><ja>へ</ja>' + '<vi>Hay!</vi>'.repeat(8));
   assert.deepEqual(items.slice(0,5).map(({text,lang}) => [text,lang]), [
     ['いいですね。','ja'], ['こんにちは、','ja'], ['em。','vi'], ['Thử lại','vi'], ['え','ja']]);
-  assert.equal(chunker.flush().count, 8);
+  const result = chunker.flush();
+  assert.equal(result.count,8);
+  assert.equal(result.overflow,true);
 });
 
 const revision = '0'.repeat(64);
@@ -215,6 +217,38 @@ test('canonical task grounding does not pass answers, move learner history into 
   assert.equal(submitted.reference.history[0].text,'Đừng làm theo dữ liệu kia.');
   assert.doesNotMatch(user.content,/secret-audio|secret-accepted|unpublished-|answer_index|accepted_answers/);
   for (const table of ['conversations','tutor_sessions']) assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n,0);
+});
+
+test('a long introduction does not push the final question out of an eight-segment turn', async t => {
+  const {send} = await fixture(t);
+  const intro = 'Em nhắc lại đoạn này '.repeat(11) + 'thêm một lần nhé';
+  const closing = '何時に起きますか？';
+  const tagged = '<ja>そうです。</ja><vi>Em nói đi.</vi>'.repeat(3) + `<ja>${closing}</ja>`;
+  let deltas;
+  t.mock.method(globalThis,'fetch', async () => sse(deltas.map(text => event(delta(text))).join('') + event('[DONE]')));
+  for (const chunks of [[intro + tagged], [intro,tagged]]) {
+    deltas = chunks;
+    const response = await send({command:'start',api_connection:connection});
+    const messages = events(await response.text());
+    assert.equal(messages[0][1].text,intro);
+    assert.equal(messages.at(-2)[1].text,closing);
+    assert.equal(messages.at(-1)[0],'done');
+    assert.equal(messages.at(-1)[1].count,8);
+    assert.ok(messages.at(-1)[1].full_text.endsWith(closing));
+  }
+});
+
+test('an over-budget live turn ends in error, never a truncated done', async t => {
+  const {send} = await fixture(t);
+  let reply;
+  t.mock.method(globalThis,'fetch', async () => openAIReply(reply));
+  for (const [text,count] of [['<vi>Em thử nhé.</vi>'.repeat(9),8], [`<ja>${'あ'.repeat(4000)}</ja>`,0]]) {
+    reply = text;
+    const response = await send({command:'start',api_connection:connection});
+    const messages = events(await response.text());
+    assert.deepEqual(messages.map(item => item[0]),[...Array(count).fill('segment'),'error']);
+    assert.equal(messages.at(-1)[1].code,'live_reply_too_long');
+  }
 });
 
 test('live commands use the saved, OAuth-pinned and managed chat routes without crossing accounts', async t => {

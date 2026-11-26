@@ -4,6 +4,8 @@ import {authoredVoiceReading, normalizeVoiceText} from './normalizer.js';
 import {MAX_SEGMENTS, segmentVoiceText} from './segmenter.js';
 import {MAX_AUDIO, VOICE_BASES, VoiceError, synthesizeVoice, voiceCatalog, voiceSettings} from './tts-adapters.js';
 
+export const MAX_VOICE_TEXT = 4000;
+
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const profileId = /^[\w-]{1,128}$/;
@@ -146,7 +148,7 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     }
     if (body.action !== undefined || body.stream !== true || typeof body.text !== 'string' || !body.text.trim()
       || !['ja','bilingual'].includes(body.mode ?? 'bilingual')) throw bad();
-    if (body.text.length > 4000 || typeof body.reading === 'string' && body.reading.length > 4000)
+    if (body.text.length > MAX_VOICE_TEXT || typeof body.reading === 'string' && body.reading.length > MAX_VOICE_TEXT)
       throw new VoiceError('tts_text_limit',413,'Đoạn cần đọc không được dài quá 4000 ký tự.');
     const ja = routeSlot(routing,'ja');
     const kanjiMode = ja.kanji_mode ?? 'kanji_native';
