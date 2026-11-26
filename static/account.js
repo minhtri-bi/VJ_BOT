@@ -12,13 +12,19 @@ function antigravityConnectionId(owner) {
   return typeof value==='string'&&/^[A-Za-z0-9_-]{1,128}$/.test(value)?value:null;
 }
 async function apiFetch(path,options={}) {
+  const {voiceRouting,...requestOptions}=options;
+  options=requestOptions;
   if(signedInUser) {
     const owner=signedInUser.user_id;
     const inference=['/api/chat','/api/kaiwa/evaluate','/api/practice/coach','/api/tts','/api/stt','/api/ai/test'].includes(path)&&options.method?.toUpperCase()==='POST';
     const speech=inference&&path==='/api/tts', voice=speech||path==='/api/stt', revision=voiceRevision;
     const managed=inference&&signedInUser.is_admin===true;
     let oauth,connectionId,method,voiceChoice,prepared=options;
-    if(managed) {
+    if (voiceRouting === true && speech) {
+      const headers = new Headers(options.headers);
+      headers.delete('X-VJBot-Profile');
+      prepared={...options,headers,redirect:'error'};
+    } else if(managed) {
       const headers=new Headers(options.headers);
       headers.set('X-VJBot-Profile','platform_openai');
       prepared={...options,headers};
@@ -54,6 +60,8 @@ async function apiFetch(path,options={}) {
     if(signedInUser?.user_id!==owner)return Response.json({detail:'Tài khoản đăng nhập đã thay đổi.'},{status:401});
     if(inference&&(signedInUser.is_admin===true)!==managed)
       return Response.json({detail:'Quyền dùng AI đã đổi. Hãy gửi lại yêu cầu.',code:'api_profile_unavailable'},{status:409});
+    if(voiceRouting === true && speech && revision !== voiceRevision)
+      return Response.json({detail:'Kết nối giọng nói đã đổi. Bấm Nghe lại.',code:'api_profile_unavailable'},{status:409});
     const headers=new Headers(prepared.headers);
     headers.set('X-VJBot-Account',owner);
     const response=await fetch(path,{...prepared,headers}).catch(error=>{

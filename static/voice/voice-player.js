@@ -1,0 +1,107 @@
+(function () {
+  const maxLine=7 * 1024 * 1024;
+  async function consume(response, append, current) {
+    if (!response.ok) {
+      const problem=await response.json();
+      throw new Error(problem.detail || 'Không đọc được đoạn này.');
+    }
+    if (!response.headers.get('Content-Type')?.startsWith('application/x-ndjson') || !response.body)
+      throw new Error('Phản hồi âm thanh không hợp lệ.');
+    const reader=response.body.getReader(), decoder=new TextDecoder('utf-8',{fatal:true});
+    const segments=[];
+    let pending='', ended=false, complete=false;
+    try {
+      for (;;) {
+        const {done,value}=await reader.read();
+        if (!current()) return null;
+        pending+=done ? decoder.decode() : decoder.decode(value,{stream:true});
+        let position;
+        while ((position=pending.indexOf('\n'))!==-1) {
+          if (position>maxLine || ended) throw new Error('Phản hồi âm thanh không hợp lệ.');
+          const record=JSON.parse(pending.slice(0,position));pending=pending.slice(position+1);
+          if (record.type==='error') throw new Error(record.detail || 'Không đọc được đoạn này.');
+          if (record.type==='done' && segments.length && record.count===segments.length) {ended=true;continue;}
+          if (record.type!=='segment' || record.index!==segments.length || segments.length>=8
+            || !['ja','vi'].includes(record.lang) || !['start','inline','sentence','arrow'].includes(record.boundary)
+            || typeof record.speed!=='number' || record.speed<0.5 || record.speed>2
+            || typeof record.audioBase64!=='string' || !record.audioBase64) throw new Error('Đoạn âm thanh không hợp lệ.');
+          segments.push(record);
+          await append(record);
+          if (!current()) return null;
+        }
+        if (pending.length>maxLine) throw new Error('Đoạn âm thanh quá lớn.');
+        if (done) break;
+      }
+      if (pending || !ended) throw new Error('Âm thanh chưa tải xong. Bấm Nghe để thử lại.');
+      complete=true;
+      return segments;
+    } finally {
+      if (!complete) await reader.cancel().catch(()=>{});
+      reader.releaseLock();
+    }
+  }
+  let selected;
+  function stop() {
+    const previous=selected;selected=null;
+    if (previous) {previous.controller.abort();previous.audio.stop();mascotMgr.setState('idle');}
+  }
+  async function speak(text, options={}) {
+    let config;
+    if (options.legacyVoice) return playLegacyTTS(text,options);
+    try {config=window.VJVoiceRouting?.stored();}
+    catch (error) {stopSpeech();speechStatus(error.message);return;}
+    if (!config) return playLegacyTTS(text,{...options, japaneseOnly:options.mode==='ja' || options.japaneseOnly});
+    stopSpeech();globalThis.stopJapaneseInputs?.();window.speechSynthesis?.cancel();
+    text=String(text || '');
+    if (!/\p{L}/u.test(text)) {speechStatus('Không có chữ để đọc.');return;}
+    let state;
+    try {
+      const identity=window.VJVoiceRouting.identity(config);
+      const controller=new AbortController(), audio=window.VJVoiceStitcher.create();
+      state=selected={controller,audio};
+      const current=()=>{
+        if (selected!==state || controller.signal.aborted) return false;
+        try {
+          if (identity===window.VJVoiceRouting.identity(window.VJVoiceRouting.stored())) return true;
+        } catch { /* An unavailable profile cannot keep playing. */ }
+        stopSpeech();return false;
+      };
+      speechStatus('Đang chuẩn bị âm thanh…',true);
+      const mode=options.mode || (options.japaneseOnly || options.language==='ja-JP' ? 'ja' : 'bilingual');
+      const reference={mode,reading:mode==='ja'?options.reading:undefined};
+      const context=options.preview ? null : options.lesson ? options : globalThis.teacherContext?.();
+      if (context?.lesson) {
+        Object.assign(reference,{lesson:context.lesson,focus:context.focus || null,view:context.view || 'checks'});
+        if (context.task) reference.task=await taskReference(context.task);
+      }
+      if (!current()) return;
+      const routing=await window.VJVoiceRouting.prepared(config,controller.signal);
+      if (!current()) return;
+      const cache=window.VJVoiceCache, persist=options.cacheAudio===true && !options.privateAudio && !options.preview && !config.admin_override;
+      const cacheKey=await cache.key(identity,text,reference).catch(()=>null);
+      const hit=cacheKey ? await cache.get(cacheKey,persist) : null;
+      if (!current()) return;
+      async function append(segment) {
+        await audio.append(segment);
+        if (current()) {mascotMgr.setState('speaking');speechStatus('Đang đọc · '+(segment.lang==='ja'?'Tiếng Nhật':'Tiếng Việt'),true);}
+      }
+      if (hit) {
+        for (const segment of hit) {if (!current()) return;await append(segment);}
+      } else {
+        const response=await apiFetch('/api/tts',{voiceRouting:true,method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({...reference,text,stream:true,routing})});
+        const segments=await consume(response,append,current);
+        if (segments && current() && cacheKey) void cache.put(cacheKey,segments,persist);
+      }
+      if (!current()) return;
+      await audio.finish();
+      if (current()) stopSpeech();
+    } catch (error) {
+      if (state && state!==selected) return;
+      stopSpeech();
+      speechStatus(error.name==='NotAllowedError' ? 'Trình duyệt chặn phát âm thanh. Bấm Nghe lại.' : error.message || 'Chưa phát được âm thanh.');
+    }
+  }
+  window.addEventListener('vjbot-account-ready',()=>window.VJVoiceCache.clearMemory());
+  window.VJVoice=Object.freeze({speak,stop});
+})();

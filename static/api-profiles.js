@@ -3,8 +3,10 @@
 // This is not an OS credential vault or a guarantee against a compromised browser.
 (function () {
   const DB_NAME = 'vjbot_ai_profiles_v1', ACTIVE = 'vjbot_ai_active_v1:', VOICE = 'vjbot_voice_profile_v1:';
-  const BASES = {openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com'};
-  const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/};
+  const BASES = {openai: 'https://api.openai.com/v1', anthropic: 'https://api.anthropic.com', gemini: 'https://generativelanguage.googleapis.com',
+    elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai_compatible:''};
+  const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/,
+    mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
   const BLOCKED = /(^|\.)(localhost|local|internal|localdomain|home|lan|workers\.dev|dangphuc\.me)$/i;
   const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal: true});
@@ -27,12 +29,12 @@
     if (!Object.hasOwn(BASES, protocol)) throw problem('Loại API không hợp lệ.');
     if (raw !== undefined && typeof raw !== 'string') throw problem('URL API không hợp lệ.');
     const text = raw?.trim() || '';
-    if (!text) return BASES[protocol];
+    if (!text && BASES[protocol]) return BASES[protocol];
     let url;
     try { url = new URL(text); } catch { throw problem('URL API không hợp lệ.'); }
     const host = url.hostname;
     if (text.length > 200 || url.protocol !== 'https:' || url.username || url.password || url.search || url.hash
-      || !host.includes('.') || host.includes(':') || /^[\d.]+$/.test(host) || BLOCKED.test(host)) {
+      || !host.includes('.') || host.includes(':') || /^[\d.]+$/.test(host) || BLOCKED.test(host.replace(/\.$/, ''))) {
       throw problem('Dùng địa chỉ API công khai bắt đầu bằng HTTPS, không kèm thông tin đăng nhập, địa chỉ IP hay phần sau dấu ? hoặc #.');
     }
     return url.origin + url.pathname.replace(/\/+$/, '').replace(SUFFIX[protocol], '');
@@ -51,7 +53,7 @@
   }
   function publicProfile(row) {
     return {id: row.id, name: row.name, protocol: row.protocol, base_url: row.base_url, model: row.model,
-      key_last4: row.key_last4, connection_id: row.connection_id, models: [...row.models], checked_at: row.checked_at};
+      key_last4: row.key_last4, connection_id: row.connection_id, revision: row.revision, models: [...row.models], checked_at: row.checked_at};
   }
   function record(row, owner, id) {
     try {
@@ -310,6 +312,7 @@
     if (speech && !((profile.protocol === 'gemini' && profile.base_url === BASES.gemini)
       || (profile.protocol === 'openai' && [BASES.openai, 'https://api.mistral.ai/v1'].includes(profile.base_url)))) throw problem('Giọng nói cần Gemini gốc, OpenAI chính thức hoặc Mistral chính thức.');
     if (!speech && !profile.model) throw problem('Hãy chọn và kiểm tra một model trong cài đặt API trước khi dùng kết nối này.');
+    if (!speech && !['openai','anthropic','gemini'].includes(profile.protocol)) throw unavailable();
     const headers = new Headers(options.headers);
     headers.delete('X-VJBot-Profile');
     result.headers = Object.fromEntries(headers);

@@ -5,6 +5,9 @@ export const MAX_AUDIO = 5 * 1024 * 1024;
 const MAX_CATALOG = 1024 * 1024;
 const alphabet = /^[\w.:-]+$/;
 const id = value => typeof value === 'string' && value.length <= 100 && alphabet.test(value);
+const modelId = (kind,value) => kind === 'openai_compatible'
+  ? typeof value === 'string' && value.length <= 100 && /^[\w.:/-]+$/.test(value)
+  : id(value);
 const presets = {ja:'voice_3133', vi:'voice_3144'};
 const openaiModel = 'gpt-4o-mini-tts';
 const elevenModel = 'eleven_flash_v2_5';
@@ -113,7 +116,7 @@ export function voiceSettings(kind, slot, lang, single) {
   const model = slot.model || ({elevenlabs:elevenModel,mistral:MISTRAL_SPEECH_MODEL,openai:openaiModel,gemini:DEFAULT_SPEECH_MODEL})[kind];
   const voice = slot.voice_id || ({mistral:single ? null : presets[lang],openai:'alloy',gemini:'Charon'})[kind];
   const format = slot.format ?? (kind === 'elevenlabs' ? 'mp3_44100_128' : undefined);
-  if (!id(model) || !id(voice) || (kind === 'elevenlabs' && !['mp3_44100_128','mp3_22050_32'].includes(format)) ||
+  if (!modelId(kind,model) || !id(voice) || (kind === 'elevenlabs' && !['mp3_44100_128','mp3_22050_32'].includes(format)) ||
       (kind === 'gemini' && (voice !== 'Charon' || !compatibleSpeechModel(model))) ||
       (kind === 'openai' && (model !== openaiModel || !/^[a-z]+$/.test(voice))) ||
       (kind === 'mistral' && model !== MISTRAL_SPEECH_MODEL)) throw new VoiceError('tts_invalid_settings',400,'Chọn model và giọng đọc hợp lệ cho nhà cung cấp này.');
@@ -149,7 +152,15 @@ const registry = {
       return audioData(await send(provider,'/audio/speech',signal,{model,voice_id:voice,input:text,response_format:'mp3'}),
         {mime:'audio/mpeg',jsonField:body => ({data:body?.audio_data})});
     },
-    async listCatalog() {return {models:[{id:MISTRAL_SPEECH_MODEL}],voices:[{id:presets.ja,name:'Haruto',lang:'ja'},{id:presets.vi,name:'Huong',lang:'vi'}]};}
+    async listCatalog(provider,signal,cursor) {
+      const query = new URLSearchParams({page_size:'100',type:'all'});
+      if (cursor) query.set('page_token',cursor);
+      const connection = {...provider,baseUrl:provider.baseUrl.replace(/\/v1$/,'')};
+      const page = await readJson(await send(connection,'/v2/audio/voices?' + query,signal));
+      if (!Array.isArray(page?.data)) throw new VoiceError('tts_unavailable',502);
+      return {models:[{id:MISTRAL_SPEECH_MODEL}],next_cursor:page.next_page_token,
+        voices:page.data.map(row => ({id:row?.id,name:row?.name,category:row?.type==='custom'?'cloned':'premade'}))};
+    }
   },
   openai_compatible: {
     async synthesize({text,model,voice}, provider, signal) {
@@ -192,7 +203,7 @@ export function synthesizeVoice(segment, provider, signal) {
 export async function voiceCatalog(provider, signal, cursor) {
   const result = await registry[provider.kind].listCatalog(provider,signal,cursor);
   const safe = value => typeof value === 'string' && !value.includes(provider.apiKey);
-  const models = result.models.filter(row => id(row.id) && safe(row.id)).slice(0,1000);
+  const models = result.models.filter(row => modelId(provider.kind,row.id) && safe(row.id)).slice(0,1000);
   const voices = result.voices.filter(row => id(row.id) && safe(row.id) && safe(row.name)).slice(0,150).map(row => ({id:row.id,
     name:row.name.slice(0,120),...(['cloned','premade','professional','generated'].includes(row.category) ? {category:row.category} : {}),
     ...(['ja','vi'].includes(row.lang) ? {lang:row.lang} : {})}));

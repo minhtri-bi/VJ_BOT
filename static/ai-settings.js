@@ -32,7 +32,7 @@
     const empty = document.createElement('option');
     empty.value = ''; empty.textContent = 'Chọn kết nối đã lưu'; list.append(empty);
     for (const [label, scope] of [['Khóa API · Thiết bị này', 'local'], ['Khóa API · Máy chủ', 'server'], ['Antigravity OAuth', 'oauth']]) {
-      const rows = scope === 'oauth' ? window.savedOAuthConnections?.() || [] : profilesOwner === owner ? profileRows.filter(row => row.scope === scope) : [];
+      const rows = scope === 'oauth' ? window.savedOAuthConnections?.() || [] : profilesOwner === owner ? profileRows.filter(row => row.scope === scope && Object.hasOwn(BASES,row.protocol)) : [];
       if (!rows.length) continue;
       const group = document.createElement('optgroup'); group.label = label;
       for (const row of rows) {
@@ -128,23 +128,44 @@
     return `Đã lưu ${profile.name} ${scope === 'local' ? 'trên thiết bị này' : 'vào tài khoản của em'}. ${model ? 'Đã chọn model đã lưu. Không gửi yêu cầu thử mới.' : 'Bấm Tìm model dùng được khi sẵn sàng.'}`;
   }
   window.saveVoiceProfile = async (owner, input, scope) => {
-    if (!owner || signedInUser?.user_id !== owner || managed()) throw new Error('API cá nhân chỉ dành cho tài khoản học viên.');
+    const admin = managed();
+    if (!owner || signedInUser?.user_id !== owner || admin && input.version !== 2) throw new Error('Chọn hồ sơ giọng nói cá nhân trước khi lưu.');
     if (!['local', 'server'].includes(scope)) throw new Error('Chọn nơi lưu hợp lệ.');
     if (scope === 'server' && !storageEnabled) throw new Error('Máy chủ chưa lưu được khóa. Hãy chọn lưu trên thiết bị này.');
     const protocol = input.protocol || 'gemini';
-    if (!['gemini', 'openai', 'mistral'].includes(protocol)) throw new Error('Chọn Gemini gốc, OpenAI chính thức hoặc Mistral chính thức.');
-    // Mistral speech is pinned to the official OpenAI-compatible base; the label stays 'mistral' only in the UI.
-    const connection = protocol === 'mistral' ? {protocol:'openai', base_url:'https://api.mistral.ai/v1'} : {protocol, base_url:BASES[protocol]};
-    const draft = {name:input.name, api_key:input.api_key, ...connection, model:''};
+    const kinds=input.version===2 ? ['gemini','openai','mistral','elevenlabs','openai_compatible'] : ['gemini','openai','mistral'];
+    if (!kinds.includes(protocol)) throw new Error('Chọn nhà cung cấp giọng nói hợp lệ, như Gemini, OpenAI hoặc Mistral.');
+    const draft = {name:input.name,api_key:input.api_key,protocol,base_url:input.base_url,model:''};
+    if (Object.hasOwn(BASES,protocol)) {
+      if (input.version === 2 && input.base_url && input.base_url.replace(/\/+$/,'') !== BASES[protocol])
+        throw new Error('Dùng URL chính thức hoặc chọn loại Custom OpenAI-compatible.');
+      draft.base_url=BASES[protocol];
+    }
+    if (input.version !== 2 && protocol === 'mistral') Object.assign(draft,{protocol:'openai',base_url:'https://api.mistral.ai/v1'});
     const profile = scope === 'local' ? await VJProfiles.save(owner, draft)
       : (await send('/api/ai/profiles', 'POST', draft)).profile;
-    if (signedInUser?.user_id !== owner || managed()) throw new Error('Tài khoản hoặc quyền đăng nhập đã thay đổi.');
+    if (signedInUser?.user_id !== owner || managed() !== admin) throw new Error('Tài khoản hoặc quyền đăng nhập đã thay đổi.');
     rendering++;
     const previous = profilesOwner === owner ? profileRows : [];
     profileRows = [...previous, {...profile, scope}];
     profilesOwner = owner;
-    refreshSavedConnections();
+    if (admin) window.renderVoiceProfiles?.(owner,profileRows,storageEnabled,undefined,true);
+    else refreshSavedConnections();
     return {scope, id:profile.id, name:profile.name};
+  };
+  window.removeVoiceProfile = async (owner,scope,id) => {
+    const admin=managed();
+    const profile=profilesOwner===owner && profileRows.find(row=>row.scope===scope && row.id===id);
+    if (!owner || owner!==signedInUser?.user_id || !profile || profile.model)
+      throw new Error('Chỉ xóa được kết nối giọng nói riêng tại đây.');
+    if (scope==='local') await VJProfiles.remove(owner,id);
+    else if (scope==='server') await send(`/api/ai/profiles/${encodeURIComponent(id)}`,'DELETE');
+    else throw new Error('Kết nối giọng nói không hợp lệ.');
+    if (owner!==signedInUser?.user_id || admin!==managed()) return;
+    rendering++;
+    profileRows=profileRows.filter(row=>row.scope!==scope || row.id!==id);
+    if (admin) window.renderVoiceProfiles?.(owner,profileRows,storageEnabled,undefined,true);
+    else refreshSavedConnections();
   };
 
   async function profileAction(action) {
@@ -495,23 +516,23 @@
   window.renderAccountSettings = renderAccountCard;
 
   // Restore voice metadata at sign-in without opening editors or discovering/generating models.
-  window.loadVoiceProfiles = async () => {
-    const owner = signedInUser?.user_id, version = rendering;
-    if (!owner || managed()) return;
+  window.loadVoiceProfiles = async ({personalVoice=false}={}) => {
+    const owner = signedInUser?.user_id, version = rendering, admin = managed();
+    if (!owner || admin && !personalVoice) return;
     let local = [];
     try { local = await VJProfiles.list(owner); } catch { /* Server references may still be usable. */ }
-    if (signedInUser?.user_id !== owner || managed() || version !== rendering) return;
+    if (signedInUser?.user_id !== owner || managed() !== admin || version !== rendering) return;
     try {
       const data = await call('/api/ai/profiles');
-      if (signedInUser?.user_id !== owner || managed() || version !== rendering) return;
+      if (signedInUser?.user_id !== owner || managed() !== admin || version !== rendering) return;
       profileRows = [...data.profiles.map(profile => ({...profile,scope:'server'})), ...local.map(profile => ({...profile,scope:'local'}))];
       profilesOwner = owner; storageEnabled = data.can_store;
-      window.renderVoiceProfiles?.(owner, profileRows, storageEnabled);
+      window.renderVoiceProfiles?.(owner, profileRows, storageEnabled, data.platform, true);
     } catch {
-      if (signedInUser?.user_id !== owner || managed() || version !== rendering) return;
+      if (signedInUser?.user_id !== owner || managed() !== admin || version !== rendering) return;
       profileRows = local.map(profile => ({...profile,scope:'local'}));
       profilesOwner = owner; storageEnabled = false;
-      window.renderVoiceProfiles?.(owner, profileRows);
+      window.renderVoiceProfiles?.(owner, profileRows, false, undefined, true);
     }
   };
   async function renderSettings() {
@@ -619,7 +640,7 @@
         const owner = signedInUser?.user_id;
         const data = await call('/api/ai/settings');
         if (owner !== signedInUser?.user_id || !managed()) return 'none';
-        window.renderVoiceProfiles?.(owner, [], false, data.platform);
+        window.renderVoiceProfiles?.(owner, profilesOwner === owner ? profileRows : [], profilesOwner === owner && storageEnabled, data.platform);
         return data.source === 'platform' && data.platform?.configured ? 'platform' : 'none';
       }
       if (window.usesAntigravityOAuth?.(signedInUser?.user_id)) {
@@ -745,7 +766,7 @@
       refreshSavedConnections();
       return;
     }
-    const profile = profileRows.find(row => profileChoice(row) === value);
+    const profile = profileRows.find(row => Object.hasOwn(BASES,row.protocol) && profileChoice(row) === value);
     if (value && !profile) return;
     await profileAction(async owner => {
       if (profile?.scope === 'server') await send(`/api/ai/profiles/${encodeURIComponent(profile.id)}/activate`, 'POST', {});

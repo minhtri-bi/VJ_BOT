@@ -25,7 +25,7 @@ export async function readVoiceBody(request) {
   } finally {reader.releaseLock();}
 }
 
-function voiceBase(kind, raw, env) {
+export function voiceBase(kind, raw, env) {
   if (!Object.hasOwn(VOICE_BASES,kind) || raw !== undefined && typeof raw !== 'string') throw bad();
   const input = raw?.trim();
   if (!input && !VOICE_BASES[kind]) throw bad();
@@ -88,16 +88,22 @@ const problem = error => error instanceof VoiceError ? error : new VoiceError('t
 function streamAudio(segments, signal) {
   const encoder = new TextEncoder(), abort = new AbortController();
   const combined = AbortSignal.any([signal,abort.signal]);
-  const pending = new Map();
-  let index = 0, scheduled = 0, bytes = 0;
+  const pending = new Map(), inFlight = new Map();
+  let index = 0, bytes = 0;
   const line = row => encoder.encode(JSON.stringify(row) + '\n');
   return new Response(new ReadableStream({
     async pull(controller) {
       if (signal.aborted) {controller.error(signal.reason);return;}
       if (index === segments.length) {controller.enqueue(line({type:'done',count:index}));controller.close();return;}
-      while (scheduled < Math.min(index + 4,segments.length)) {
-        const next = segments[scheduled];
-        pending.set(scheduled++,synthesizeVoice(next,next.provider,combined).then(audio => ({audio}),error => ({error:problem(error)})));
+      for (let candidate = index; candidate < Math.min(index + 4,segments.length); candidate++) {
+        if (pending.has(candidate)) continue;
+        const next = segments[candidate], {kind,baseUrl,apiKey} = next.provider;
+        const connection = kind === 'elevenlabs' ? baseUrl + '\0' + apiKey : null;
+        if (connection && (inFlight.get(connection) || 0) >= 2) continue;
+        if (connection) inFlight.set(connection,(inFlight.get(connection) || 0) + 1);
+        pending.set(candidate,synthesizeVoice(next,next.provider,combined)
+          .then(audio => ({audio}),error => ({error:problem(error)}))
+          .finally(() => {if (connection) inFlight.set(connection,inFlight.get(connection) - 1);}));
       }
       const result = await pending.get(index);
       if (abort.signal.aborted) return;

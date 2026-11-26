@@ -97,3 +97,52 @@ test('over-eight segments and unauthorized managed routes fail before synthesis'
   assert.equal((await tts({text:'Xin chào.',stream:true,routing},{admin:true,env:{OPENAI_API_KEY:key}})).status,403);
   assert.equal(calls,0);
 });
+
+test('same ElevenLabs account never exceeds two concurrent syntheses, even for one language', async t => {
+  let active=0,peak=0;
+  intercept(t,async()=>{
+    peak=Math.max(peak,++active);
+    await new Promise(resolve=>setImmediate(resolve));
+    active--;
+    return mp3();
+  });
+  const primary=slot('elevenlabs','clone');
+  const response=await tts({text:'学校 → 教室 → 駅 → 図書館',stream:true,routing:{version:2,mode:'single',primary}});
+  const records=await lines(response);
+  assert.deepEqual(records.slice(0,-1).map(record=>record.index),[0,1,2,3]);
+  assert.equal(records.at(-1).count,4);
+  assert.equal(peak,2);
+});
+
+test('Mistral catalog returns account clones with an opaque next-page cursor', async t => {
+  intercept(t,async (url,init)=>{
+    const target=new URL(url);
+    assert.equal(target.pathname,'/v2/audio/voices');
+    assert.equal(target.searchParams.get('page_token'),'second');
+    assert.equal(init.method,'GET');
+    return Response.json({data:[{id:'voice_custom',name:'Teacher clone',type:'custom'}],next_page_token:'third'});
+  });
+  const response=await tts({action:'catalog',cursor:'second',routing:{version:2,mode:'single',primary:slot('mistral','')}});
+  assert.deepEqual(await response.json(),{models:[{id:'voxtral-mini-tts-3-0'}],
+    voices:[{id:'voice_custom',name:'Teacher clone',category:'cloned'}],verified:false,next_cursor:'third'});
+});
+
+test('a namespaced custom model returned by catalog is used unchanged for synthesis', async t => {
+  const calls=[];
+  intercept(t,async (url,init)=>{
+    calls.push(new URL(url).pathname);
+    if (init.method==='GET') return Response.json({data:[{id:'owner/model'}]});
+    assert.equal(JSON.parse(init.body).model,'owner/model');
+    return Response.json({audioBase64:'SUQzBA==',mimeType:'audio/mpeg'});
+  });
+  const env={VOICE_ALLOWED_ORIGINS:'https://tts.example'};
+  const primary=slot('openai_compatible','custom_voice','https://tts.example/v1');
+  const routing={version:2,mode:'single',primary};
+  const catalog=await (await tts({action:'catalog',routing},{env})).json();
+  assert.deepEqual(catalog.models,[{id:'owner/model'}]);
+  primary.model=catalog.models[0].id;
+  const records=await lines(await tts({text:'Xin chào.',stream:true,routing},{env}));
+  assert.equal(records[0].model,'owner/model');
+  assert.equal(records[0].type,'segment');
+  assert.deepEqual(calls,['/v1/models','/v1/audio/speech']);
+});
