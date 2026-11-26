@@ -19,7 +19,7 @@ const MISTRAL_VOICE_FALLBACK='voice_3133';
 // Context bias steers Voxtral toward the words the learner actually practices. Entries count
 // against the model's context window, and restricted content must never leave the server.
 const MISTRAL_STT_STAPLES=['thầy Lâm','こんにちは','ありがとうございます','すみません','はい','いいえ','わかりました','もう一度お願いします'];
-function lessonVocabulary(lesson){
+export function lessonVocabulary(lesson){
   const terms=[];
   for(const word of lesson?.words||[])if(processingAllowed(word)&&typeof word?.jp==='string'&&word.jp.length<=40)terms.push(word.jp);
   return [...new Set([...terms,...MISTRAL_STT_STAPLES])].slice(0,40);

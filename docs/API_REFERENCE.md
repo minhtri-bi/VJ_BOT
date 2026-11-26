@@ -95,11 +95,29 @@ Both languages default to 1×; already saved speeds are preserved. Supported Ele
 
 Use `{action:"catalog",routing,cursor?}` to discover models and voices for the primary profile without generating audio. Follow `next_cursor` if present. Catalog entries are not proof of synthesis access. Custom OpenAI-compatible TTS and non-native ElevenLabs/Mistral origins require an exact operator-managed HTTPS origin in `VOICE_ALLOWED_ORIGINS` (comma-separated). Keep that list limited to trusted public services; URL syntax checks alone are not a public-network guarantee. Redirects are never followed. The legacy JSON read-aloud contract remains available without `routing`.
 
-In **Settings → Sound → Japanese–Vietnamese voice**, add a local or server profile, load the catalog, and save the single, shared-account dual, or split-account routing configuration before using the bilingual preview. A catalog request does not generate audio; previews do. Saving these settings does not select or replace the chat connection. Chat messages and previews use memory-only replay. Confirm Japanese, Vietnamese, and mixed-provider playback with authorized provider accounts before treating voice quality or cost as validated. Native live calls and the existing speech-to-text routes do not consume this configuration.
+In **Settings → Sound → Japanese–Vietnamese voice**, add a local or server profile, load the catalog, and save the single, shared-account dual, or split-account routing configuration before using the bilingual preview. A catalog request does not generate audio; previews do. Saving these settings does not select or replace the chat connection. Chat messages and previews use memory-only replay. Confirm Japanese, Vietnamese, and mixed-provider playback with authorized provider accounts before treating voice quality or cost as validated. Native live calls do not consume this configuration; recorded transcription can use an explicitly selected voice profile as described below.
 
 Cached replay does not synthesize or decrypt a device key. It still checks device-profile revisions or revalidates server profiles online, so a deleted or rotated profile cannot replay under the old identity. A change to pronunciation or synthesis-speed semantics invalidates old audio cache keys.
 
 Common AI failures: `403 {code:"no_ai"}` for a missing selected API, `409 {code:"rekey"}` for an undecryptable key, `409 {code:"profile_changed"}` for a removed pinned profile, `403 {code:"oauth_model"}` for an unselected OAuth model, `409/503 {code:"oauth_reconnect"}` for unavailable OAuth, `429` for quota/rate limits and `503` for provider failures. Provider response bodies and secrets are not exposed.
+
+### Cascaded Live Voice backend
+
+`POST /api/live/turn` requires a signed-in session and an exact `X-VJBot-Account` binding. Send `{transcript?,command?,japanese_only?,history?,level?,lesson?,focus?,view?,task?}`. At least one of `transcript` (1–1,500 trimmed characters) or `command` (`start`, `hint`, `explain`, `situation`, `check`, `slower`, `summary`) is required. Replay stays on the client. `history` accepts up to 12 `{role:"user"|"assistant",text}` entries of up to 600 characters each. The body is limited to 20 KiB. The same pinned Chat API connection rules apply as for Chat, including `X-VJBot-Profile: antigravity_oauth:<id>` and mutual exclusion with a local `api_connection`.
+
+The Worker resolves canonical lesson and focus selectors, rejects unavailable sources or stale task revisions, and excludes authored answers and reveal-only dictation audio or transcript from pre-answer request context. `japanese_only` sets the default spoken language for the turn; the model can offer Vietnamese support when the learner asks for help in Vietnamese or says they do not understand. The endpoint does not write transcripts or assistant replies to conversation history or tutor sessions.
+
+After successful HTTP validation, consume `text/event-stream`. `segment` contains `{index,lang:"ja"|"vi",boundary:"start"|"inline"|"sentence",text}`. Expect at most eight ordered segments, then `done` with `{full_text,count,japanese_only}`. Failed turns end with `error` instead (`live_quota`, `live_key_rejected`, `live_timeout`, `live_empty_reply`, or `live_unavailable`). An abort cancels upstream work and does not emit further events. Never reuse partial output as a completed turn. `429` before the stream opens means the account's shared inference budget is exhausted.
+
+Native provider streams must report completion; compatible proxies may finish at EOF after a complete SSE frame. An abort also stops in-flight Antigravity connection verification.
+
+### Recorded speech-to-text
+
+`POST /api/stt` requires a signed-in session and exact `X-VJBot-Account`. Send `{audio,mime_type}` for a transcription (`audio` is base64; decoded limit 2 MiB), or `{action:"capabilities"}` to check support without sending audio, using quota or creating a transcript. The success body for transcription is `{text}`. Existing callers can omit STT routing: admins use managed OpenAI, and learners use a pinned official OpenAI or Mistral Chat connection.
+
+For a different connection, send `stt_routing:{version:2,provider:"openai"|"mistral"|"elevenlabs",profile,admin_override?}`. The profile has the same scope and connection format as TTS. Do not send `api_connection` or `X-VJBot-Profile` with explicit routing, including for admins. An admin with a private voice profile must opt in using `admin_override:true`; invalid or unavailable selections never borrow Chat or platform keys. Explicit capabilities return `{supported,provider,model}`. Custom Mistral and ElevenLabs origins must pass the same allowlist as TTS.
+
+An optional `lesson:{id,level}` must resolve to approved-for-processing source material for any STT provider. Mistral receives up to 40 permitted canonical vocabulary hints, and retries once without those hints only if Mistral rejects the biased request with HTTP `422`. ElevenLabs uses Scribe v2; the selected Chat provider is unchanged.
 
 ### Estimated Kaiwa assessment
 
