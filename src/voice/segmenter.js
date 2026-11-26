@@ -11,6 +11,7 @@ const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
 const acronymOnly = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ\d０-９ -]*[。！？.!?]?$/u;
 const numeral = /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u;
 const clauseEnd = /[\r\n。！？.!?…]/u;
+const phraseEnd = /[\r\n。！？.!?…、，,;；:：–—]/u;
 
 export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
   const segments = [];
@@ -36,6 +37,7 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
     const attachAcronyms = mode === 'ja' || hint === 'ja';
     const tokens = attachAcronyms ? value.match(latinWord) ?? [] : value;
     const following = attachAcronyms ? new Set() : null;
+    const boundary = hint === 'ja' ? phraseEnd : clauseEnd;
     if (following) {
       let hasJapanese = false;
       for (let i = tokens.length - 1; i >= 0; i--) {
@@ -43,7 +45,7 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
         if (acronym.test(token)) {
           if (hasJapanese) following.add(i);
         } else if (japanese.test(token)) hasJapanese = true;
-        else if (letter.test(token) || clauseEnd.test(token)) hasJapanese = false;
+        else if (letter.test(token) || boundary.test(token)) hasJapanese = false;
       }
     }
     let index = 0, preceding = false;
@@ -54,7 +56,7 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
       if (following) {
         index++;
         if (isJapanese) preceding = true;
-        else if (kind === 'vi' || clauseEnd.test(token)) preceding = false;
+        else if (kind === 'vi' || boundary.test(token)) preceding = false;
       }
       if (kind && lang && kind !== lang) {
         const prefix = pending.match(trailingPrefix)?.[1] ?? (kind === 'ja' ? pending.match(leadingNumber)?.[1] : '') ?? '';

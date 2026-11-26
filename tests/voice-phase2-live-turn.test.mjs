@@ -329,6 +329,12 @@ test('live keeps decimal tokens whole and routes Japanese acronyms without swall
   assert.equal(chunker.flush().fullText,'Khoảng 3.5 phút. 今日はJLPT N5です。 Em thử nhé。');
 });
 
+test('a phrase separator detaches Vietnamese abbreviations from Japanese speech', () => {
+  const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+  chunker.push('<ja>「犬」 — VD: con chó nhà em.</ja>');
+  assert.deepEqual(items.map(({lang,text}) => [lang,text]),[['ja','「犬」 —'],['vi','VD: con chó nhà em.']]);
+});
+
 test('a provider key reflected across two tagged segments is never emitted', async t => {
   const {send} = await fixture(t);
   t.mock.method(globalThis,'fetch', async () => sse(event(delta('<vi>synthetic-live</vi>'))
