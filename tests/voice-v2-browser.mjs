@@ -30,17 +30,21 @@ AudioContext.prototype.createBufferSource = function () {
   try {
     const replay=location.search==='?replay';
     const japanese='DVDを見ます。';
+    const existingBilingual='Xin chào. おはよう。';
     if (!replay) {
-      const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(['fixture',japanese,{mode:'ja'}])));
-      const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
-      const stale=await fetch('/stale-audio').then(response=>response.json());
-      await VJVoiceCache.put(oldKey,[stale],true);
-      VJVoiceCache.clearMemory();
-      if (!(await VJVoiceCache.get(oldKey,true))) throw new Error('Stale disk fixture was not seeded');
+      const prior=await fetch('/prior-cache').then(response=>response.json());
+      for (const [mode,text] of [['ja',japanese],['bilingual',existingBilingual]]) {
+        const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(['fixture',text,{mode}])));
+        const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
+        await VJVoiceCache.put(oldKey,prior[mode],true);
+        VJVoiceCache.clearMemory();
+        if (!(await VJVoiceCache.get(oldKey,true))) throw new Error(mode+': prior disk fixture was not seeded');
+      }
       VJVoiceCache.clearMemory();
     }
     for (const [mode,text,order] of [
       ['bilingual','Chào em. こんにちは。','ended:1.0,ended:0.9,idle'],
+      ['bilingual',existingBilingual,'ended:1.0,ended:0.9,idle'],
       ['ja',japanese,'ended:0.9,idle']
     ]) {
       await VJVoice.speak(text,{mode,cacheAudio:true});
@@ -77,14 +81,15 @@ const server = createServer(async (req,res)=>{
     return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(html);
   }
   if (scripts.has(req.url)) return res.writeHead(200,{'Content-Type':'application/javascript'}).end(scripts.get(req.url));
-  if (req.url==='/stale-audio') {
-    return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({...rows[0],lang:'ja',speed:1.2}));
+  if (req.url==='/prior-cache') {
+    const prior={ja:[{...rows[0],lang:'ja',speed:1.2}],bilingual:rows.slice(0,-1)};
+    return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(prior));
   }
   if (req.url==='/api/tts' && req.method==='POST') {
     let body='';
     for await (const chunk of req) body+=chunk;
-    const {mode}=JSON.parse(body);
-    requests.push(mode);
+    const {mode,text}=JSON.parse(body);
+    requests.push([mode,text]);
     const segments=mode==='ja' ? [{...rows[1],index:0,boundary:'start'},{type:'done',count:1}] : rows;
     res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(segments.map(row=>JSON.stringify(row)+'\n').join(''));
   } else if (req.url==='/result' && req.method==='POST') {
@@ -108,8 +113,9 @@ try {
     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Playback timed out (pages ${pages}; synthesis ${requests}): ${diagnostics}`)),25000);})]);
   assert.equal(error,'');
   assert.deepEqual(pages,['/','/?replay'],'Replay must survive navigation');
-  assert.deepEqual(requests,['bilingual','ja'],'Stale Japanese audio must miss; reloaded audio must hit');
-  console.log('Chromium decoded WAV and PCM in order, replaced stale Japanese audio, and replayed from IndexedDB after reload.');
+  assert.deepEqual(requests,[['bilingual','Chào em. こんにちは。'],['ja','DVDを見ます。']],
+    'Only uncached bilingual text and stale Japanese audio may synthesize, even after reload');
+  console.log('Chromium decoded WAV and PCM, preserved prior bilingual cache hits, and refreshed stale Japanese audio before reloading.');
 } finally {
   clearTimeout(timer);
   server.close();
