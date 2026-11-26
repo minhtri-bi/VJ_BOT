@@ -22,7 +22,13 @@ const mascotMgr = {setState:value=>states.push(value)};
 const createSource = AudioContext.prototype.createBufferSource;
 AudioContext.prototype.createBufferSource = function () {
   const source = createSource.call(this);
-  source.addEventListener('ended',()=>states.push('ended:'+source.playbackRate.value.toFixed(1)),{once:true});
+  source.addEventListener('ended',()=>{
+    const samples=source.buffer.getChannelData(0);
+    let rising=0;
+    for (let i=1;i<samples.length;i++) if (samples[i-1]<=0 && samples[i]>0) rising++;
+    const frequency=Math.round(rising/source.buffer.duration);
+    states.push('ended:'+frequency+'@'+source.playbackRate.value.toFixed(1));
+  },{once:true});
   return source;
 };
 (async()=>{
@@ -43,9 +49,9 @@ AudioContext.prototype.createBufferSource = function () {
       VJVoiceCache.clearMemory();
     }
     for (const [mode,text,order] of [
-      ['bilingual','Chào em. こんにちは。','ended:1.0,ended:0.9,idle'],
-      ['bilingual',existingBilingual,'ended:1.0,ended:0.9,idle'],
-      ['ja',japanese,'ended:0.9,idle']
+      ['bilingual','Chào em. こんにちは。','ended:660@1.0,ended:440@0.9,idle'],
+      ['bilingual',existingBilingual,'ended:550@1.0,ended:880@0.9,idle'],
+      ['ja',japanese,'ended:770@0.9,idle']
     ]) {
       await VJVoice.speak(text,{mode,cacheAudio:true});
       const status=document.getElementById('speech-status').textContent;
@@ -63,15 +69,22 @@ function tone(frequency) {
   for (let i=0;i<pcm.length/2;i++) pcm.writeInt16LE(Math.round(7000*Math.sin(2*Math.PI*frequency*i/24000)),i*2);
   return pcm;
 }
-const pcm = tone(440);
-const wav = Buffer.concat([Buffer.from('524946460000000057415645666d74201000000001000100c05d000080bb0000020010006461746100000000','hex'),tone(660)]);
-wav.writeUInt32LE(wav.length-8,4);
-wav.writeUInt32LE(wav.length-44,40);
+function wavTone(frequency) {
+  const wav=Buffer.concat([Buffer.from('524946460000000057415645666d74201000000001000100c05d000080bb0000020010006461746100000000','hex'),tone(frequency)]);
+  wav.writeUInt32LE(wav.length-8,4);
+  wav.writeUInt32LE(wav.length-44,40);
+  return wav.toString('base64');
+}
 const rows = [
-  {type:'segment',index:0,lang:'vi',boundary:'start',speed:1,mimeType:'audio/wav',audioBase64:wav.toString('base64')},
-  {type:'segment',index:1,lang:'ja',boundary:'sentence',speed:0.9,mimeType:'audio/L16;rate=24000',audioBase64:pcm.toString('base64')},
+  {type:'segment',index:0,lang:'vi',boundary:'start',speed:1,mimeType:'audio/wav',audioBase64:wavTone(660)},
+  {type:'segment',index:1,lang:'ja',boundary:'sentence',speed:0.9,mimeType:'audio/L16;rate=24000',audioBase64:tone(440).toString('base64')},
   {type:'done',count:2}
 ];
+const prior = {
+  ja:[{...rows[0],lang:'ja',speed:1.2,audioBase64:wavTone(990)}],
+  bilingual:[{...rows[0],audioBase64:wavTone(550)},{...rows[1],audioBase64:tone(880).toString('base64')}]
+};
+const japanese = [{...rows[1],index:0,boundary:'start',audioBase64:tone(770).toString('base64')},{type:'done',count:1}];
 const profile = await mkdtemp(join(tmpdir(),'vjbot-voice-browser-'));
 const {promise: completed, resolve: result} = Promise.withResolvers();
 const requests = [], pages = [];
@@ -82,7 +95,6 @@ const server = createServer(async (req,res)=>{
   }
   if (scripts.has(req.url)) return res.writeHead(200,{'Content-Type':'application/javascript'}).end(scripts.get(req.url));
   if (req.url==='/prior-cache') {
-    const prior={ja:[{...rows[0],lang:'ja',speed:1.2}],bilingual:rows.slice(0,-1)};
     return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify(prior));
   }
   if (req.url==='/api/tts' && req.method==='POST') {
@@ -90,7 +102,7 @@ const server = createServer(async (req,res)=>{
     for await (const chunk of req) body+=chunk;
     const {mode,text}=JSON.parse(body);
     requests.push([mode,text]);
-    const segments=mode==='ja' ? [{...rows[1],index:0,boundary:'start'},{type:'done',count:1}] : rows;
+    const segments=mode==='ja' ? japanese : rows;
     res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(segments.map(row=>JSON.stringify(row)+'\n').join(''));
   } else if (req.url==='/result' && req.method==='POST') {
     let body='';
