@@ -208,6 +208,8 @@ test('canonical task grounding does not pass answers, move learner history into 
   ]);
   const [system,user] = payload.messages;
   assert.match(system.content,/accepted[_ ]answers/i);
+  assert.match(system.content,/at most 8 tagged segments/i);
+  assert.match(system.content,/use fewer examples rather than mixing languages/i);
   assert.ok(!system.content.includes(injection));
   assert.equal(user.role,'user');
   const submitted = JSON.parse(user.content);
@@ -249,6 +251,29 @@ test('an over-budget live turn ends in error, never a truncated done', async t =
     assert.deepEqual(messages.map(item => item[0]),[...Array(count).fill('segment'),'error']);
     assert.equal(messages.at(-1)[1].code,'live_reply_too_long');
   }
+});
+
+test('segment overflow cancels a provider that has not finished and still sends the specific error', {timeout:3000}, async t => {
+  const {send} = await fixture(t);
+  const cancelled = Promise.withResolvers();
+  let signal;
+  t.mock.method(globalThis,'fetch', async (_url,init) => {
+    signal = init.signal;
+    return sse(new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(event(delta('<vi>Em thử nhé.</vi>'.repeat(9)))));
+      },
+      cancel() {cancelled.resolve();}
+    }));
+  });
+  const response = await send({command:'start',api_connection:connection});
+  const messages = events(await response.text());
+  assert.equal(messages.filter(([name]) => name === 'segment').length,8);
+  const [name, payload] = messages.at(-1);
+  assert.equal(name,'error');
+  assert.equal(payload.code,'live_reply_too_long');
+  await cancelled.promise;
+  assert.equal(signal.aborted,true);
 });
 
 test('live commands use the saved, OAuth-pinned and managed chat routes without crossing accounts', async t => {

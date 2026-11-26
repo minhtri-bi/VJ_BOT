@@ -1,7 +1,7 @@
 import {sessionUser} from '../auth.js';
 import {rateLimited} from '../ai-usage.js';
 import {streamLLM} from '../llm.js';
-import {VOICE_COMMANDS, voiceStreamingInstructions} from '../prompt.js';
+import {LIVE_MAX_SEGMENTS, VOICE_COMMANDS, voiceStreamingInstructions} from '../prompt.js';
 import {providerFailure, resolveProvider} from '../providers.js';
 import {catalogLesson, groundLesson, processingAllowed, resolveTaskReference, teacherCatalog, validFocusReference, validLessonReference, validTaskReference} from '../tutor-context.js';
 import {normalizeVoiceText} from './normalizer.js';
@@ -32,7 +32,7 @@ function plainCut(text) {
   return text.length > PLAIN_LOOKAHEAD ? lengthCut(text, PLAIN_TARGET) : 0;
 }
 
-export function createSegmentChunker({maxSegments = 8, onSegment}) {
+export function createSegmentChunker({maxSegments = LIVE_MAX_SEGMENTS, onSegment}) {
   let buffer = '', language = null, overflow = false, spokenLength = 0;
   const segments = [];
   function emit(raw, hint) {
@@ -93,9 +93,10 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
   }
   return {
     push(delta) {
-      if (overflow) return;
+      if (overflow) return false;
       buffer += delta;
       drain(false);
+      return !overflow;
     },
     flush() {
       drain(true);
@@ -117,6 +118,8 @@ const upstreamFailure = (status) => {
 function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
   const encoder = new TextEncoder(), stop = new AbortController();
   const signal = AbortSignal.any([requestSignal, stop.signal]);
+  const budget = new AbortController();
+  const generationSignal = AbortSignal.any([signal, budget.signal]);
   const compact = value => value.replace(/\s+/gu, '');
   const secret = compact(normalizeVoiceText(provider.apiKey));
   const pending = [];
@@ -140,17 +143,19 @@ function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
         }
       }
       const chunker = createSegmentChunker({onSegment:item => {pending.push(item);sendPending();}});
+      const tooLong = () => send('error', {code:'live_reply_too_long', detail:'Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.'});
       void (async () => {
         try {
           if (signal.aborted) return;
-          const result = await streamLLM(provider, {system, turns:[{role:'user', content:envelope}], signal, onDelta:chunker.push});
+          const result = await streamLLM(provider, {system, turns:[{role:'user', content:envelope}], signal:generationSignal,
+            onDelta(delta) {
+              if (!chunker.push(delta)) budget.abort();
+            }});
           if (signal.aborted) return;
+          if (budget.signal.aborted) {tooLong();return;}
           if (!result.ok) {send('error', upstreamFailure(result.status));return;}
           const {fullText, count, overflow} = chunker.flush();
-          if (overflow) {
-            send('error', {code:'live_reply_too_long', detail:'Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.'});
-            return;
-          }
+          if (overflow) {tooLong();return;}
           sendPending(true);
           if (!count) send('error', {code:'live_empty_reply', detail:'Thầy chưa trả lời được. Em thử nói lại nhé.'});
           else send('done', {full_text:fullText, count, japanese_only:japaneseOnly});
