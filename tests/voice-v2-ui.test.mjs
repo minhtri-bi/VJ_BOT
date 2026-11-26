@@ -81,8 +81,8 @@ test('a long stream replays all parts only after a fresh profile check',async()=
   assert.match(history.at(-1)[1],/đã bị xóa/);
 });
 
-function settingsFixture(apiFetch, profileReads=[]) {
-  const nodes = new Map(), storage = new Map();
+function settingsFixture(apiFetch,profileReads=[],storage=new Map()) {
+  const nodes = new Map();
   function node(tag) {
     return {tag, value:'', children:[], events:{},
       set id(id) {nodes.set(id,id.startsWith('voice-v2-') ? this : undefined);},
@@ -116,6 +116,22 @@ function settingsFixture(apiFetch, profileReads=[]) {
     save:()=>el('routing').events.submit({preventDefault(){}}),
     catalog:()=>el('slots').children[0].children.find(child=>child.tag==='button').events.click()};
 }
+
+test('saved dual routing preserves single speed across reload without changing either dual speed',()=>{
+  const storage=new Map();
+  const first=settingsFixture(undefined,[],storage);
+  first.change('primary-profile','local:b');
+  first.el('primary-speed').value='0.8';
+  first.save();
+  first.change('mode','dual_same_api');
+  first.el('ja-speed').value='1.1';
+  first.save();
+  const reloaded=settingsFixture(undefined,[],storage);
+  assert.deepEqual([reloaded.saved().ja.speed,reloaded.saved().vi.speed],[1.1,1]);
+  reloaded.change('mode','single');
+  reloaded.save();
+  assert.equal(reloaded.saved().primary.speed,0.8);
+});
 
 test('switches only the affected voice overrides and uses valid speeds for blank inputs',()=>{
   const {el,profiles,refresh,change,save,saved}=settingsFixture();
@@ -175,7 +191,7 @@ test('custom speed is opt-in and cannot follow a selected endpoint change',()=>{
   assert.equal(saved().primary.speed,0.8);
   change('mode','dual_same_api');
   save();
-  assert.equal(saved().primary.speed,undefined);
+  assert.equal(saved().primary.speed,0.8);
   assert.equal(saved().ja.speed,1);
   change('mode','single');
   save();

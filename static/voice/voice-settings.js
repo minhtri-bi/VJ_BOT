@@ -120,10 +120,12 @@
       if (model) settings.model=model;
       if (voice) settings.voice_id=voice;
       if (!control.nativeSpeed.disabled && control.nativeSpeed.checked) settings.native_speed=true;
-      if (!control.speed.disabled) {
-        const speed=control.speed.value==='' ? 1 : Number(control.speed.value);
-        if (!Number.isFinite(speed) || speed<0.5 || speed>2) throw new Error('Tốc độ phải từ 0.5 đến 2.');
-        if (slot!=='primary' || speed!==1) settings.speed=speed;
+      const speed=control.speed.value==='' ? 1 : Number(control.speed.value);
+      if (!Number.isFinite(speed) || speed<0.5 || speed>2) {
+        if (!control.speed.disabled) throw new Error('Tốc độ phải từ 0.5 đến 2.');
+      } else if (slot!=='primary' || speed!==1) {
+        // Dual slots always save their own speed; retain the primary value for single mode.
+        settings.speed=speed;
       }
       if (control.reading) settings.kanji_mode=control.reading.value;
       config[slot]=settings;
