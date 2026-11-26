@@ -67,9 +67,13 @@ Tái sử dụng [`endpoint()`](../src/llm.js#L30-L34) và [`request()`](../src/
      - `anthropic` (`streaming = true`): với `data.type === 'content_block_delta' && data.delta?.type === 'text_delta'`, trả nguyên `data.delta.text` (KHÔNG `.trim()`); với `content_block_start` có `content_block.type === 'text'`, trả nguyên `data.content_block.text`.
      - `gemini`: đọc `data.candidates?.[0]?.content?.parts`, lọc `typeof part?.text === 'string' && !part.thought`, `.join('')` (KHÔNG `.trim()`).
    - Nếu `data.error || data.type === 'error'`, ném lỗi stream ngay lập tức.
-2. **Xử lý khung SSE cuối cùng của Gemini (chứa cả `text` lẫn `finishReason`):**
-   - Trong mỗi SSE event của Gemini/OpenAI/Anthropic: kiểm tra `incomplete(protocol, data)` trước; nếu bị chặn/cắt cụt (`SAFETY`, `RECITATION`, `BLOCKLIST`, `content_filter`, `refusal`, `MAX_TOKENS`, `length`), dừng stream và trả `{ ok: false, status: 502, emitted }`.
-   - Nếu KHÔNG bị `incomplete`: **phát `delta` text TRƯỚC**, rồi mới ghi nhận `finishReason` (`finish_reason` / `stop_reason` / `finishReason`) và kết thúc khi gặp `[DONE]` / `message_stop` / EOF.
+2. **Xử lý khung SSE cuối cùng của Gemini & `message_delta` của Anthropic:**
+   - Kiểm tra trạng thái bị chặn/cắt cụt trên từng event **đúng theo schema streaming của mỗi protocol** (không gọi nguyên [`incomplete()`](../src/llm.js#L88-L96) lên `message_delta` của Anthropic vì Anthropic gửi `data.delta?.stop_reason` lồng trong `delta`, không ở top-level):
+     - `openai`: `['length', 'content_filter'].includes(data.choices?.[0]?.finish_reason)`.
+     - `anthropic`: `['max_tokens', 'refusal'].includes(data.delta?.stop_reason ?? data.stop_reason)`.
+     - `gemini`: dùng lại [`incomplete('gemini', data)`](../src/llm.js#L91-L95) (`MAX_TOKENS`, `SAFETY`, `RECITATION`, `BLOCKLIST`, `promptFeedback.blockReason`, `safetyRatings`).
+     Nếu bị chặn/cắt cụt → dừng stream và trả `{ ok: false, status: 502, emitted }`.
+   - Nếu KHÔNG bị chặn/cắt cụt: **phát `delta` text TRƯỚC** (quan trọng với Gemini vì chunk cuối thường chứa cả `parts[0].text` lẫn `finishReason: "STOP"`), rồi mới ghi nhận `finishReason` (`finish_reason` / `delta?.stop_reason ?? stop_reason` / `finishReason`) và kết thúc khi gặp `[DONE]` / `message_stop` / EOF.
 3. **Fallback danh sách `provider.models` CHỈ được phép trước delta đầu tiên:**
    - Lặp qua `for (const model of provider.models)`:
      - Nếu `emitted === false` và gặp mã trong `RETRYABLE` (`404, 429, 500, 502, 503, 504`) trong khi vẫn còn ngân sách thời gian (`left >= 1000ms`), được phép thử model tiếp theo (giống [`callLLM()`](../src/llm.js#L104-L136)).
@@ -128,7 +132,7 @@ export function voiceStreamingInstructions(level, { japaneseOnly = false, preAns
 - **Headers bắt buộc:**
   - Cookie phiên hợp lệ (đã kiểm tra tại `privateRoutes` → `401` nếu thiếu).
   - `X-VJBot-Account`: **bắt buộc bằng `user.user_id`** — kiểm tra chặt `request.headers.get('X-VJBot-Account') !== userId` ngay đầu `liveTurnRoute` → `409 { code: 'account_changed', detail: 'Tài khoản đã đổi. Hãy tải lại trang.' }` (giống `/api/tts` Voice v2 tại [`src/worker.js`](../src/worker.js#L446)).
-  - `X-VJBot-Profile`: tùy chọn (server profile / `platform_openai` / `antigravity:<id>`).
+  - `X-VJBot-Profile`: tùy chọn (server profile / `platform_openai` / `antigravity_oauth:<id>`).
 - **Body JSON (`<= 20 KiB`, đã chặn ở `src/worker.js#L94`):**
   ```json
   {
@@ -198,10 +202,11 @@ export function createSegmentChunker({ maxSegments = 8, onSegment } = {})
      - Nếu không có dấu `<` nào và gặp dấu kết thúc câu `[。！？.!?]` (hoặc buffer vượt 160 ký tự) → `tagMode = 'plain'`.
    - Khi `tagMode === 'tagged'`:
      - Lặp tìm cặp thẻ hoàn chỉnh đầu tiên `/<(ja|vi)>([\s\S]*?)<\/\1>/i`:
-       - Nếu có văn bản lọt trước thẻ mở (do LLM viết chen): chạy `plainEmit(prefix)`.
+       - **Luôn cắt bỏ toàn bộ phần đã khớp (kể cả `prefix` + thẻ vừa khớp) ra khỏi `buffer` TRƯỚC tiên** — bất kể bên trong thẻ có chữ hay không — để các thẻ rỗng (`<ja></ja>`) hoặc chỉ chứa dấu câu (`<ja>...</ja>`) không bao giờ làm kẹt vòng lặp vô hạn.
+       - Nếu có `prefix` lọt trước thẻ mở (do LLM viết chen): chạy `plainEmit(prefix)`.
        - Lấy `lang = match[1].toLowerCase()`, `raw = match[2]`.
        - Chuẩn hóa qua [`normalizeVoiceText(raw)`](../src/voice/normalizer.js#L10-L20); nếu `lang === 'ja'`, chạy thêm [`particleReading()`](../src/voice/normalizer.js#L23-L26).
-       - Nếu còn chữ cái (`/\p{L}/u.test(clean)`), gọi `emit(lang, clean)` và cắt phần đã xử lý khỏi `buffer`.
+       - Chỉ gọi `emit(lang, clean)` nếu còn chữ cái (`/\p{L}/u.test(clean)`).
      - **An toàn với thẻ bị cắt đôi giữa 2 chunk TCP** (ví dụ chunk 1 kết thúc bằng `"こんにちは。</j"`, chunk 2 bắt đầu bằng `"a><vi>Chào em</vi>"`): vì regex chưa khớp thẻ đóng hoàn chỉnh, phần chưa khớp vẫn nằm nguyên trong `buffer` chờ chunk 2 ghép vào!
      - Nếu buffer có thẻ mở `<ja>` nhưng bên trong dài `> 220` ký tự chưa thấy thẻ đóng (LLM quên đóng thẻ) và đã qua một dấu kết thúc câu `[。！？.!?]`, cắt tại dấu câu gần nhất và emit ngay để không nghẽn TTFB.
    - Khi `tagMode === 'plain'` (LLM quên hoàn toàn thẻ `<ja>`/`<vi>`):
@@ -271,7 +276,7 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
 ### 6.2. Nhánh chọn kết nối STT (Hai chế độ tách biệt tuyệt đối)
 
 1. **Chế độ Legacy / Mặc định (`!Object.hasOwn(data, 'stt_routing')`):**
-   - Giữ nguyên 100% logic hiện tại của [`src/transcription.js`](../src/transcription.js#L28-L37) để toàn bộ test trong [`tests/worker.test.mjs`](../tests/worker.test.mjs#L1205-L1315) pass nguyên vẹn:
+   - Giữ nguyên 100% logic chọn kết nối của [`src/transcription.js`](../src/transcription.js#L28-L37) để toàn bộ test trong [`tests/worker.test.mjs`](../tests/worker.test.mjs#L1205-L1315) pass nguyên vẹn, đồng thời **bổ sung trường `provider: 'openai'` / `provider: 'mistral'`** vào 2 candidate legacy (`{ provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'gpt-transcribe', label: 'OpenAI' }` và `{ provider: 'mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'voxtral-mini-transcribe-3', label: 'Mistral' }`):
      - Admin → `platform_openai` (`https://api.openai.com/v1`, `gpt-transcribe`).
      - Learner → chỉ chấp nhận Chat connection tường minh (`X-VJBot-Profile` hoặc `api_connection`) có `protocol === 'openai'` và `baseUrl` là OpenAI chính thức hoặc Mistral chính thức (`https://api.mistral.ai/v1`).
      - Tuyệt đối không mượn Voice profile nếu không có `stt_routing`.
@@ -346,7 +351,10 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
    - Abort `signal` phía caller hủy ngay upstream `fetch` và gọi `reader.cancel()`.
    - Chặn redirect `3xx` (`redirect: 'manual'`) và chặn stream vượt `256 KiB`.
 2. **`createSegmentChunker()`:**
-   - Thẻ `<ja>`/`</ja>` và `<vi>`/`</vi>` bị tách đôi ở mọi vị trí biên byte/ký tự (`"<j"`, `"a>おはよう</"`, `"ja><vi>Chào em</vi>"`) vẫn cắt đúng 2 segment với `boundary: 'start'` và `'sentence'`.
+   - Thẻ `<ja>`/`</ja>` và `<vi>`/`</vi>` bị tách đôi ở mọi vị trí biên byte/ký tự:
+     - Có dấu kết thúc câu: `"<j"`, `"a>おはよう。</"`, `"ja><vi>Chào em</vi>"` → cắt đúng 2 segment với `boundary: 'start'` và `'sentence'`.
+     - Không có dấu kết thúc câu: `"<j"`, `"a>おはよう</"`, `"ja><vi>Chào em</vi>"` → cắt đúng 2 segment với `boundary: 'start'` và `'inline'`.
+   - Thẻ rỗng hoặc chỉ chứa dấu câu (`<ja></ja>`, `<vi>...</vi>`) bị loại bỏ sạch khỏi buffer, không emit segment rỗng và không gây lặp vô hạn.
    - Chạy [`normalizeVoiceText()`](../src/voice/normalizer.js#L10-L20) và [`particleReading()`](../src/voice/normalizer.js#L23-L26) (trợ từ đứng riêng `は` → `わ`, `へ` → `え`).
    - LLM quên gắn thẻ → fallback plain text tự cắt tại dấu câu và gán đúng `lang` qua `segmentVoiceText()`.
    - Cắt trần ở 8 segment tối đa (`maxSegments = 8`).
@@ -355,7 +363,7 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
    - Xác thực đủ 7 `VOICE_COMMANDS` (`start`, `hint`, `explain`, `situation`, `check`, `slower`, `summary`).
    - Grounding bài học & `focus.kind === 'question'`: từ chối `409` khi `processingAllowed === false` hoặc `task.revision` lệch; khi hợp lệ, `system` prompt bật quy tắc không tiết lộ đáp án và envelope KHÔNG chứa `answer_index`/`accepted_answers`.
    - Prompt injection trong `transcript` và `history` luôn nằm trong JSON user envelope duy nhất, không lọt vào `system` prompt; không ghi bản ghi nào vào bảng `conversations` hay `tutor_sessions`.
-   - Hoạt động với Admin (`platform_openai`), Learner (local + server profile) và Antigravity OAuth (`X-VJBot-Profile: antigravity:<id>`).
+   - Hoạt động với Admin (`platform_openai`), Learner (local + server profile) và Antigravity OAuth (`X-VJBot-Profile: antigravity_oauth:<id>`).
    - SSE stream trả đúng chuỗi `event: segment` → `event: done`, hoặc `event: error` khi upstream lỗi giữa chừng (không lộ API key).
 
 ### 7.2. `tests/voice-phase2-stt.test.mjs`
@@ -373,13 +381,16 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
    - Profile server đã bị xóa, sai chủ sở hữu, hoặc Admin thiếu `admin_override: true` → `403 stt_profile_unavailable`, tuyệt đối không fallback sang `OPENAI_API_KEY` hay Chat key.
    - Không rò rỉ body lỗi hoặc `apiKey` khi upstream trả `429`/`503`.
 
-### 7.3. Lệnh kiểm chứng bắt buộc trước khi mở PR 2A
+### 7.3. Kiểm chứng bắt buộc trước khi mở PR 2A
 
 ```bash
 git diff --check
 npm test
-npm run build:worker
+npm run build
 ```
+
+- Dùng `npm run build` (thay vì chỉ `build:worker`) để chạy đủ `prebuild` (`npm run teacher:catalog`) và `cf deploy --dry-run`.
+- Vì Task 2 có sửa [`src/prompt.js`](../src/prompt.js), thực hiện thêm bước kiểm chứng bắt buộc trong [CONTRIBUTING.md](CONTRIBUTING.md#L48-L50): chạy tay một hội thoại **5 lượt** (sai, gợi ý, đúng, tự giải thích, kết thúc) ở cả **N5** và **N3** qua `voiceStreamingInstructions()` và dán kết quả vào mô tả PR.
 
 ---
 
@@ -388,8 +399,8 @@ npm run build:worker
 Sau khi **PR 2A** merge vào `main`, **PR 2B** sẽ triển khai frontend theo [VOICE_PHASE2_GUIDE.md](VOICE_PHASE2_GUIDE.md) dựa trên 3 điểm nối cố định này:
 
 1. **`static/api-profiles.js` & `static/account.js`:**
-   - Thêm `'/api/live/turn'` vào `PATHS` và danh sách `inference` để tự động đính kèm Chat connection (`api_connection` local hoặc `X-VJBot-Profile` server / `platform_openai` / `antigravity:<id>`).
-   - Trong `prepareRequest('/api/stt', ...)`: nếu body JSON đã có `Object.hasOwn(body, 'stt_routing')`, **bỏ qua** việc chèn Chat `api_connection`/`X-VJBot-Profile` (giống cách `/api/tts` bỏ qua khi có `routing`) để tránh lỗi `400 stt_invalid_routing`.
+   - Thêm `'/api/live/turn'` vào `PATHS` ([`static/api-profiles.js`](../static/api-profiles.js#L11)) và danh sách `inference` ([`static/account.js`](../static/account.js#L19)) để tự động đính kèm Chat connection (`api_connection` local hoặc `X-VJBot-Profile` server / `platform_openai` / `antigravity_oauth:<id>`).
+   - Tại [`static/account.js`](../static/account.js#L20-L27): đổi nhánh `if (voiceRouting === true && speech)` thành `if (voiceRouting === true && voice)` (trong đó `voice = speech || path === '/api/stt'` đã có sẵn ở dòng 20). Khi PR 2B gọi `apiFetch('/api/stt', { method: 'POST', voiceRouting: true, body: JSON.stringify({ ..., stt_routing }) })`, nhánh này sẽ xóa `X-VJBot-Profile` và **bỏ qua cả việc gắn `platform_openai` của Admin lẫn `VJProfiles.prepareRequest` của Learner**, tránh lỗi `400 stt_invalid_routing` trên cả hai vai trò.
 2. **`static/voice/live-cascaded.js`:**
    - Đọc SSE từ `POST /api/live/turn` (`event: segment` / `done` / `error`).
    - Bắn `POST /api/tts` ngay cho segment `#0`, gom `#1..#N` vào 1 request `POST /api/tts` sau khi nhận `event: done`, và **tuần tự hóa mọi lời gọi `VJVoiceStitcher.append()` qua một chuỗi promise duy nhất** để đảm bảo thứ tự phát không bao giờ bị đảo.
