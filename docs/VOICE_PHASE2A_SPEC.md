@@ -345,7 +345,7 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
 1. **`streamLLM()` trên 3 protocol (`openai`, `anthropic`, `gemini`):**
    - Giữ nguyên khoảng trắng giữa các delta (`"Chào"` + `" em."` → `"Chào em."`).
    - Gemini trả đồng thời `parts[0].text` + `finishReason: "STOP"` ở chunk cuối vẫn emit đủ chữ cuối.
-   - Gemini/OpenAI/Anthropic báo `SAFETY` / `content_filter` / `refusal` trả `{ ok: false, status: 502 }`.
+   - Gemini báo `SAFETY`, OpenAI báo `content_filter`, và Anthropic gửi event `message_delta` với `delta.stop_reason: 'refusal'` / `'max_tokens'` (lồng trong `delta`, không chỉ top-level) đều trả `{ ok: false, status: 502 }`.
    - Fallback sang JSON thường khi upstream bỏ qua `stream: true`.
    - Fallback sang model thứ 2 trong `provider.models` khi model đầu trả `503` **trước** delta đầu tiên; **KHÔNG** fallback nếu đã emit delta trước khi gặp lỗi giữa chừng.
    - Abort `signal` phía caller hủy ngay upstream `fetch` và gọi `reader.cancel()`.
