@@ -319,6 +319,29 @@ test('plain sentences before a tag do not depend on how the provider packages de
   assert.deepEqual(chunk(parts),expected);
 });
 
+test('long plain sentences wait for bounded lookahead without depending on delta size', () => {
+  const sentence = 'Em nhắc lại đoạn này '.repeat(9) + 'một lần.';
+  const next = ' Sau đó em thử câu mới.';
+  const items = [], parser = createSegmentChunker({onSegment:item => items.push(item)});
+  parser.push(sentence);
+  assert.deepEqual(items,[]);
+  parser.push(next);
+  assert.equal(items[0].text,sentence);
+  assert.equal(parser.flush().fullText,sentence + next);
+  assert.deepEqual(items.map(({boundary}) => boundary),['start','sentence']);
+
+  const oversized = 'Em nhắc lại đoạn này '.repeat(20) + 'một lần.';
+  function chunks(deltas) {
+    const out = [], parser = createSegmentChunker({onSegment:item => out.push(item)});
+    for (const text of deltas) parser.push(text);
+    return {items:out, result:parser.flush()};
+  }
+  const whole = chunks([oversized]);
+  assert.ok(whole.items.length > 1);
+  assert.equal(whole.result.fullText,oversized);
+  assert.deepEqual(chunks(oversized),whole);
+});
+
 test('live keeps decimal tokens whole and routes Japanese acronyms without swallowing Vietnamese', () => {
   const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
   chunker.push('Khoảng 3.');

@@ -15,6 +15,21 @@ const tagPrefix = /<\/?(?:[jv][ai]?)?$/i;
 // Wait for lookahead after an ASCII period: the next delta may contain a fractional digit.
 const sentence = /(?:[。！？!?…][」』”’"')）]*|\.[」』”’"')）]*(?=\s))/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
+const PLAIN_TARGET = 180;
+const MAX_LOOKAHEAD = 220;
+
+function lengthCut(text, target) {
+  const space = text.slice(0, target + 1).search(/\s+\S*$/u);
+  return space > 0 ? space : target - Number(/[\uD800-\uDBFF]/.test(text[target - 1]));
+}
+
+function plainCut(text) {
+  // Give a sentence near the preferred split point time to finish, regardless of delta size.
+  const end = sentence.exec(text.slice(0, MAX_LOOKAHEAD + 1));
+  const cut = end ? end.index + end[0].length : 0;
+  if (cut && cut <= MAX_LOOKAHEAD) return cut;
+  return text.length > MAX_LOOKAHEAD ? lengthCut(text, PLAIN_TARGET) : 0;
+}
 
 export function createSegmentChunker({maxSegments = 8, onSegment}) {
   let buffer = '', language = null;
@@ -32,15 +47,12 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
       onSegment(item);
     }
   }
-  function emitBeforeMarker(raw) {
-    if (!language) {
-      while (segments.length < maxSegments) {
-        const end = sentence.exec(raw);
-        if (!end) break;
-        const cut = end.index + end[0].length;
-        emit(raw.slice(0, cut), null);
-        raw = raw.slice(cut);
-      }
+  function emitBlock(raw) {
+    while (!language && segments.length < maxSegments) {
+      const cut = plainCut(raw);
+      if (!cut) break;
+      emit(raw.slice(0, cut), null);
+      raw = raw.slice(cut);
     }
     emit(raw, language);
   }
@@ -50,22 +62,23 @@ export function createSegmentChunker({maxSegments = 8, onSegment}) {
       if (marker) {
         const raw = buffer.slice(0, marker.index);
         buffer = buffer.slice(marker.index + marker[0].length);
-        emitBeforeMarker(raw);
+        emitBlock(raw);
         language = marker[1] ? null : marker[2].toLowerCase();
         continue;
       }
       if (final) {
-        emit(buffer.replace(tagPrefix, ''), language);
+        emitBlock(buffer.replace(tagPrefix, ''));
         buffer = '';
         break;
       }
       const available = buffer.replace(tagPrefix, '');
-      const limit = language ? 220 : 180;
-      if (language && available.length <= limit) break;
-      const end = sentence.exec(available);
-      const space = available.length > limit && available.slice(0, limit + 1).search(/\s+\S*$/u);
-      const cut = end ? end.index + end[0].length : typeof space === 'number' && space > 0 ? space
-        : available.length > limit ? limit - Number(/[\uD800-\uDBFF]/.test(available[limit - 1])) : 0;
+      let cut;
+      if (!language) cut = plainCut(available);
+      else {
+        if (available.length <= MAX_LOOKAHEAD) break;
+        const end = sentence.exec(available);
+        cut = end ? end.index + end[0].length : lengthCut(available, MAX_LOOKAHEAD);
+      }
       if (!cut) break;
       emit(buffer.slice(0, cut), language);
       buffer = buffer.slice(cut);

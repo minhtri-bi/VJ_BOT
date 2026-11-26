@@ -109,6 +109,8 @@ The Worker resolves canonical lesson and focus selectors, rejects unavailable so
 
 After successful HTTP validation, consume `text/event-stream`. `segment` contains `{index,lang:"ja"|"vi",boundary:"start"|"inline"|"sentence",text}`. Expect at most eight ordered segments, then `done` with `{full_text,count,japanese_only}`. Failed turns end with `error` instead (`live_quota`, `live_key_rejected`, `live_timeout`, `live_empty_reply`, or `live_unavailable`). An abort cancels upstream work and does not emit further events. Never reuse partial output as a completed turn. `429` before the stream opens means the account's shared inference budget is exhausted.
 
+For untagged text, the Worker can look ahead past the preferred 180-character split point to finish a sentence. At most 220 characters of untagged text wait for lookahead; longer text is split near a word boundary. A period at a token boundary is not enough to confirm the end of a sentence.
+
 Native provider streams must report completion; compatible proxies may finish at EOF after a complete SSE frame. An abort also stops in-flight Antigravity connection verification.
 
 ### Recorded speech-to-text
