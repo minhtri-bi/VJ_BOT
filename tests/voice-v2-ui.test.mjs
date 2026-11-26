@@ -241,6 +241,16 @@ test('removing a voice profile uses the native dialog and cancels on dismiss or 
   await confirmed;
   assert.deepEqual(removed,[['learner','local','a']]);
   assert.match(el('status').textContent,/Đã xóa kết nối giọng nói/);
+  const backed=el('remove').events.click();
+  assert.equal(dialog.open,true);
+  window.dispatchEvent(new Event('popstate'));
+  await backed;
+  assert.equal(dialog.open,false);
+  const hashed=el('remove').events.click();
+  assert.equal(dialog.open,true);
+  window.dispatchEvent(new Event('hashchange'));
+  await hashed;
+  assert.equal(dialog.open,false);
   const switched=el('remove').events.click();
   assert.equal(dialog.open,true);
   context.signedInUser={user_id:'other-learner'};

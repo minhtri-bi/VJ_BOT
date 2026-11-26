@@ -65,7 +65,9 @@ sequenceDiagram
 ```
 
 > **Lưu ý quan trọng về Rate Limit (`ai_usage`: 20 req/phút):**
-> Với chiến lược **1 request TTS cho câu #0 (để mở tiếng sớm) + 1 request TTS gom tất cả câu còn lại `#1..#N`**, mỗi lượt hội thoại chỉ tiêu thụ tối đa **3–4 request** (1 STT + 1 Live Turn + 1–2 TTS) — đủ cho 5–6 lượt đối thoại liên tục/phút mà không chạm trần 429 và không phải nới lỏng rate-limit toàn hệ thống.
+> Với chiến lược **1 request TTS cho câu #0 (để mở tiếng sớm) + 1 request TTS gom tất cả câu còn lại `#1..#N`**, mỗi lượt hội thoại tiêu thụ:
+> - **4 request** (1 STT + 1 Live Turn + 2 TTS batch) khi câu trả lời có `>= 2` câu/segment → tối đa **5 lượt/phút** (`5 × 4 = 20`) không chạm trần 429.
+> - **3 request** (1 STT + 1 Live Turn + 1 TTS duy nhất khi câu trả lời chỉ 1 câu, hoặc bỏ bước `/api/stt` khi dùng Web Speech API) → tối đa **6 lượt/phút** (`6 × 3 = 18`).
 > Đặc biệt, lệnh **Nhắc lại** phát lại trực tiếp từ bộ nhớ lượt vừa rồi (**0 API call**) và lệnh **Nói chậm** chỉ gọi lại TTS (không gọi STT/LLM).
 
 ---
@@ -200,10 +202,11 @@ sequenceDiagram
   3. **Gọi `/api/live/turn` (SSE) & Pipelining sang Voice v2 `/api/tts`:**
      - Ngay khi nhận SSE `event: segment` có `index === 0`:
        - Hiển thị ngay lên [`createLiveTranscript`](../static/live-transcript.js) (`timeline.upsert`).
-       - Gửi ngay segment `#0` sang `/api/tts` (`{ text: '<ja>...</ja>', mode: 'bilingual', stream: true, routing }`) và đưa vào `VJVoiceStitcher` phát ngay.
+       - Gửi ngay segment `#0` sang `/api/tts` (`{ text: '<ja>...</ja>', mode: 'bilingual', stream: true, routing }`) và đẩy từng audio chunk vào hàng đợi tuần tự của `VJVoiceStitcher` để phát ngay.
      - Thu gom các segment `#1..#N` cho tới `event: done`:
        - Cập nhật caption realtime khi từng segment về.
-       - Khi `event: done` về (hoặc đủ batch): gửi gộp `#1..#N` trong **1 request `/api/tts`** (truyền thẻ `<ja>`/`<vi>` đã chuẩn hóa sẵn) rồi nối tiếp không khựng vào cùng instance `VJVoiceStitcher`!
+       - Khi `event: done` về (hoặc đủ batch): gửi gộp `#1..#N` trong **1 request `/api/tts`** (truyền thẻ `<ja>`/`<vi>` đã chuẩn hóa sẵn).
+       - **Ràng buộc thứ tự phát bắt buộc (tránh đảo câu):** [`VJVoiceStitcher.append()`](../static/voice/audio-stitcher.js#L24-L69) chỉ xếp lịch lên `AudioContext` *sau khi* `decodeAudioData()` hoàn tất, nên gọi song song 2 batch vào cùng một stitcher có thể làm batch `#1..#N` nhảy lên phát trước câu `#0`. Vì vậy, HTTP fetch của batch `#1..#N` có thể chạy song song với quá trình phát câu `#0`, **nhưng** toàn bộ bước `stitcher.append(...)` phải đi qua **một hàng đợi tuần tự duy nhất** (`appendChain = appendChain.then(...)`) sao cho toàn bộ chunk của batch `#0` hoàn tất `append()` trước khi bất kỳ chunk nào của batch `#1..#N` được đưa vào `stitcher.append()`.
      - Lưu mảng `lastAssistantSegments` (audio encoded của lượt Thầy vừa nói) trong RAM phiên để lệnh **`Nhắc lại`** phát lại tức thì (0ms, không gọi LLM/TTS).
      - Lệnh **`Nói chậm`**: giảm hệ số tốc độ tiếng Nhật cho phiên hiện tại (`sessionJaRate = Math.max(0.75, current - 0.12)`) và gọi phát lại câu cuối (hoặc gửi `command: 'slower'`).
   4. **Giữ lịch sử ngắn trong phiên:**

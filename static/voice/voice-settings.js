@@ -323,6 +323,8 @@
     if (el('settings').open && source.value==='personal' && owner()) reloadProfiles();
   });
   window.addEventListener('pagehide',cancelRemoval);
+  window.addEventListener('hashchange',cancelRemoval);
+  window.addEventListener('popstate',cancelRemoval);
   window.addEventListener('vjbot-account-ready',()=>{
     if (drawnIdentity===roleKey()) return;
     cancelRemoval();
