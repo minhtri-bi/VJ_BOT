@@ -1,0 +1,52 @@
+import {particleReading} from './normalizer.js';
+
+export const MAX_SEGMENTS = 8;
+const japanese = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u;
+const letter = /\p{L}/u;
+const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
+const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
+const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
+
+export function segmentVoiceText(text, mode = 'bilingual') {
+  const segments = [];
+  let nextBoundary = 'start';
+  const add = (lang, raw) => {
+    const value = raw.trim();
+    if (!letter.test(value) || (mode === 'ja' && lang !== 'ja')) return;
+    const previous = segments.at(-1);
+    if (previous?.lang === lang && nextBoundary !== 'arrow') {
+      previous.text += ' ' + value;
+    } else {
+      segments.push({lang, text:value, boundary:nextBoundary === 'arrow' || !previous ? nextBoundary
+        : sentenceEnd.test(previous.text) ? 'sentence' : 'inline'});
+    }
+    nextBoundary = 'inline';
+  };
+  function plain(value, explicit) {
+    if (explicit) return add(explicit, value);
+    let lang, pending = '';
+    for (const character of value) {
+      const kind = japanese.test(character) ? 'ja' : letter.test(character) ? 'vi' : null;
+      if (kind && lang && kind !== lang) {
+        const prefix = pending.match(trailingPrefix)?.[1] ?? (kind === 'ja' ? pending.match(leadingNumber)?.[1] : '') ?? '';
+        add(lang, prefix ? pending.slice(0, -prefix.length) : pending);
+        pending = prefix;
+      }
+      if (kind) lang = kind;
+      pending += character;
+    }
+    if (lang) add(lang, pending);
+  }
+  for (const part of text.split(/(<(?:ja|vi)>[\s\S]*?<\/(?:ja|vi)>|→)/gi)) {
+    if (part === '→') {nextBoundary = segments.length ? 'arrow' : 'start'; continue;}
+    const marked = /^<(ja|vi)>([\s\S]*?)<\/\1>$/i.exec(part);
+    const value = marked?.[2] ?? part.replace(/<\/?(?:ja|vi)>/gi, ' ');
+    const clauses = value.split('→');
+    for (const [index, clause] of clauses.entries()) {
+      if (index && segments.length) nextBoundary = 'arrow';
+      plain(clause, marked?.[1].toLowerCase());
+    }
+    if (segments.length > MAX_SEGMENTS) return null;
+  }
+  return segments.map(segment => segment.lang === 'ja' ? {...segment,text:particleReading(segment.text)} : segment);
+}

@@ -87,6 +87,12 @@ Regular learners use their selected API-key or Antigravity OAuth connection for 
 
 TTS sends `text` as the verbatim transcript. Reading directions stay in `speech_metadata`, never prepended to spoken text, preserving the transcript fix merged in PR #24.
 
+**Voice v2:** Send `X-VJBot-Account` and `{text, mode:"bilingual"|"ja", stream:true, routing}`. Keep the existing lesson, focus and task references where applicable. The response is `application/x-ndjson`: ordered `{type:"segment",index,lang,boundary,speed,voice,model,mimeType,audioBase64}` records, then `{type:"done",count}`. A provider failure after streaming begins ends the stream with `{type:"error",index,code,detail}` instead. Do not cache incomplete streams. The request limit is 4,000 characters, eight segments and 5 MiB of decoded audio total; it uses one account rate-limit slot.
+
+`routing` has `version:2`, a `mode` (`single`, `dual_same_api` or `dual_split_api`), and `primary:{provider,profile,model?,voice_id?,format?,speed?,kanji_mode?}`. For dual modes, `ja` and `vi` can override pronunciation settings; a `null` slot profile inherits the primary connection. Profiles are `{scope:"server",id}`, `{scope:"local",connection:{base_url?,api_key}}` or `{scope:"platform",id:"openai"}`. The managed profile requires current admin rights. To use a personal voice profile, admins must send `admin_override:true`; neither path falls back to the other.
+
+Use `{action:"catalog",routing,cursor?}` to discover models and voices for the primary profile without generating audio. Follow `next_cursor` if present. Catalog entries are not proof of synthesis access. Custom OpenAI-compatible TTS and non-native ElevenLabs/Mistral origins require an exact operator-managed HTTPS origin in `VOICE_ALLOWED_ORIGINS` (comma-separated). Keep that list limited to trusted public services; URL syntax checks alone are not a public-network guarantee. Redirects are never followed. The legacy JSON read-aloud contract remains available without `routing`.
+
 Common AI failures: `403 {code:"no_ai"}` for a missing selected API, `409 {code:"rekey"}` for an undecryptable key, `409 {code:"profile_changed"}` for a removed pinned profile, `403 {code:"oauth_model"}` for an unselected OAuth model, `409/503 {code:"oauth_reconnect"}` for unavailable OAuth, `429` for quota/rate limits and `503` for provider failures. Provider response bodies and secrets are not exposed.
 
 ### Estimated Kaiwa assessment
