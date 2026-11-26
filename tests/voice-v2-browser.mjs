@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import {spawn} from 'node:child_process';
+import {execFile, spawn} from 'node:child_process';
 import {once} from 'node:events';
 import {mkdtemp, readFile, rm} from 'node:fs/promises';
 import {createServer} from 'node:http';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {promisify} from 'node:util';
 
 const executable = process.env.BROWSER;
 assert.ok(executable, 'Set BROWSER to a Chromium browser executable.');
@@ -27,13 +28,27 @@ AudioContext.prototype.createBufferSource = function () {
 (async()=>{
   let error = '';
   try {
-    const text='Chào em. こんにちは。';
-    for (let play=0; play<2; play++) {
-      await window.VJVoice.speak(text,{preview:true});
+    const replay=location.search==='?replay';
+    const japanese='DVDを見ます。';
+    if (!replay) {
+      const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(['fixture',japanese,{mode:'ja'}])));
+      const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
+      const stale=await fetch('/stale-audio').then(response=>response.json());
+      await VJVoiceCache.put(oldKey,[stale],true);
+      VJVoiceCache.clearMemory();
+      if (!(await VJVoiceCache.get(oldKey,true))) throw new Error('Stale disk fixture was not seeded');
+      VJVoiceCache.clearMemory();
+    }
+    for (const [mode,text,order] of [
+      ['bilingual','Chào em. こんにちは。','ended:1.0,ended:0.9,idle'],
+      ['ja',japanese,'ended:0.9,idle']
+    ]) {
+      await VJVoice.speak(text,{mode,cacheAudio:true});
       const status=document.getElementById('speech-status').textContent;
       const events=states.splice(0).filter(state=>state!=='speaking');
-      if (status || events.join(',')!=='ended:1.0,ended:0.9,idle') throw new Error(status || 'Playback finished or stopped out of order: '+events);
+      if (status || events.join(',')!==order) throw new Error(mode+': '+(status || 'Playback stopped or played stale audio: '+events));
     }
+    if (!replay) {location.search='?replay';return;}
   } catch (failure) {error=failure.message;}
   await fetch('/result',{method:'POST',body:error});
 })();
@@ -55,13 +70,23 @@ const rows = [
 ];
 const profile = await mkdtemp(join(tmpdir(),'vjbot-voice-browser-'));
 const {promise: completed, resolve: result} = Promise.withResolvers();
-let requests = 0;
+const requests = [], pages = [];
 const server = createServer(async (req,res)=>{
-  if (req.url==='/') return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8'}).end(html);
+  if (req.url==='/' || req.url==='/?replay') {
+    pages.push(req.url);
+    return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(html);
+  }
   if (scripts.has(req.url)) return res.writeHead(200,{'Content-Type':'application/javascript'}).end(scripts.get(req.url));
+  if (req.url==='/stale-audio') {
+    return res.writeHead(200,{'Content-Type':'application/json'}).end(JSON.stringify({...rows[0],lang:'ja',speed:1.2}));
+  }
   if (req.url==='/api/tts' && req.method==='POST') {
-    requests++;req.resume();
-    res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(rows.map(row=>JSON.stringify(row)+'\n').join(''));
+    let body='';
+    for await (const chunk of req) body+=chunk;
+    const {mode}=JSON.parse(body);
+    requests.push(mode);
+    const segments=mode==='ja' ? [{...rows[1],index:0,boundary:'start'},{type:'done',count:1}] : rows;
+    res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(segments.map(row=>JSON.stringify(row)+'\n').join(''));
   } else if (req.url==='/result' && req.method==='POST') {
     let body='';
     for await (const chunk of req) body+=chunk;
@@ -70,7 +95,8 @@ const server = createServer(async (req,res)=>{
 });
 server.listen(0,'127.0.0.1');
 await once(server,'listening');
-const browser = spawn(executable,['--headless','--disable-gpu','--no-first-run','--no-default-browser-check','--autoplay-policy=no-user-gesture-required',
+// Keep Chromium's decoder and playback clock, without depending on a physical audio device.
+const browser = spawn(executable,['--headless','--disable-gpu','--disable-audio-output','--no-first-run','--no-default-browser-check','--autoplay-policy=no-user-gesture-required',
   `--user-data-dir=${profile}`,`http://127.0.0.1:${server.address().port}/`],{stdio:['ignore','ignore','pipe']});
 let diagnostics = '';
 browser.stderr.on('data',chunk=>{diagnostics=(diagnostics+chunk).slice(-2000);});
@@ -79,15 +105,19 @@ let timer;
 try {
   const error = await Promise.race([completed,
     exit.then(([code])=>{throw new Error(`Browser exited early (${code}): ${diagnostics}`);}),
-    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Playback did not finish: ${diagnostics}`)),12000);})]);
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Playback timed out (pages ${pages}; synthesis ${requests}): ${diagnostics}`)),25000);})]);
   assert.equal(error,'');
-  assert.equal(requests,1,'Replay must use the cache');
-  console.log('Chromium played WAV and PCM in request order and replayed without a second synthesis request.');
+  assert.deepEqual(pages,['/','/?replay'],'Replay must survive navigation');
+  assert.deepEqual(requests,['bilingual','ja'],'Stale Japanese audio must miss; reloaded audio must hit');
+  console.log('Chromium decoded WAV and PCM in order, replaced stale Japanese audio, and replayed from IndexedDB after reload.');
 } finally {
   clearTimeout(timer);
   server.close();
-  if (browser.pid) {
-    browser.kill('SIGKILL');
+  if (browser.pid && browser.exitCode===null && browser.signalCode===null) {
+    if (process.platform==='win32') {
+      await promisify(execFile)('taskkill.exe',['/pid',String(browser.pid),'/t','/f'],{timeout:5000})
+        .catch(error=>{if (error.code!==128) throw error;});
+    } else browser.kill('SIGKILL');
     try {
       await Promise.race([exit,new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error('Browser did not exit after termination')),4000);})]);
     } finally {clearTimeout(timer);}

@@ -66,6 +66,7 @@
   }
   function updateAccounts(reset=false) {
     for (const [slot,control] of controls) {
+      if (!reset && control.section.hidden) continue;
       const reference=effectiveAccount(slot);
       const previous=selectedAccounts.get(slot), row=rows.find(row=>ref(row)===reference);
       const endpoint=row ? JSON.stringify([provider(row),row.base_url]) : null;

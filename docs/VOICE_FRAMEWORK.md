@@ -191,7 +191,7 @@ sequenceDiagram
     U->>App: Bấm "Nghe"
     App->>Player: VJVoice.speak(text, { mode: 'bilingual' | 'ja', reading, lesson, focus, task })
     Player->>Player: Dừng audio cũ + hủy mic đang thu
-    Player->>Cache: SHA-256 of routing identity, NFC input, mode, reading and source reference
+    Player->>Cache: SHA-256 of routing identity, NFC input, mode, reading, source reference and applicable synthesis revision
     alt Cache HIT
         Cache-->>Player: Encoded segment records (audioBase64, MIME type, language, speed, boundary)
         Player->>Stitch: Decode records to AudioBuffers and schedule playback

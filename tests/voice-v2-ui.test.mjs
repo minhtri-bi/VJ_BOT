@@ -111,6 +111,17 @@ test('switches only the affected voice overrides and uses valid speeds for blank
   assert.deepEqual([saved().primary.provider,saved().ja.voice_id,saved().vi.voice_id],['openai','keep_ja',undefined]);
 });
 
+test('hiding split settings in single-voice mode preserves the draft for both languages',()=>{
+  const {el,change,save,saved}=settingsFixture();
+  change('primary-profile','local:b');
+  change('mode','dual_split_api');
+  change('ja-profile','local:a');change('vi-profile','local:a');
+  el('ja-voice').value='ja_clone';el('vi-voice').value='vi_clone';
+  change('mode','single');change('mode','dual_split_api');
+  save();
+  assert.deepEqual([saved().ja.voice_id,saved().vi.voice_id],['ja_clone','vi_clone']);
+});
+
 test('catalog keeps paging after model selection but starts fresh after a profile switch',async()=>{
   const cursors=[];
   const {el,change,catalog}=settingsFixture(async (_path,request)=>{
