@@ -104,6 +104,7 @@ export async function mistralLiveRoute(request,env) {
     if(typeof data?.id!=='string'||!/^[\w.\-]{4,128}$/.test(data.id))return json({detail:'Phiên không hợp lệ.'},400);
     try{
       const closed=await fetch(`${MISTRAL_SPEECH_BASE}/audio/sessions/${data.id}`,{method:'DELETE',redirect:'manual',headers,signal:AbortSignal.timeout(10000)});
+      void closed.body?.cancel().catch(()=>{});
       if(!closed.ok)return json({detail:'Mistral chưa xác nhận đóng phiên.',code:'live_close_failed'},502);
       return json({ok:true});
     }catch{return json({detail:'Không đóng được phiên. Hãy thử lại.'},504);}

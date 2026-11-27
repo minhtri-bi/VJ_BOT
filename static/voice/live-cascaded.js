@@ -11,6 +11,8 @@
   const sttSettings='Trong Cài đặt → Âm thanh → Nguồn chép lời, em chọn nguồn khác.';
   const explicitUnavailable='Kết nối chép lời giọng nói đã chọn không dùng được. Hệ thống không dùng nguồn khác. '+sttSettings;
   const firstSentenceEnd=/[。！？!?…][。！？.!?…]*[」』”’"')）]*|\.+[」』”’"')）]*(?=\s|$)/gu;
+  // Mirror the TTS check for spoken text and explicitly labelled numbers.
+  const hasSpokenText=text=>/\p{L}/u.test(text) || /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u.test(text);
   const message=(error,fallback)=>error instanceof SyntaxError ? invalidReply : error?.message || fallback;
   const detail=(body,fallback)=>typeof body?.detail==='string' && body.detail.trim() ? body.detail.slice(0,600) : fallback;
   const cancelBody=response=>{void response.body?.cancel().catch(()=>{});};
@@ -515,9 +517,7 @@
           const rest=last.text.slice(cut).trim();
           if (rest) {
             parts[parts.length-1]={...last,text:last.text.slice(0,cut)};
-            // Mirror the TTS check for spoken text and explicitly labelled numbers.
-            if (/\p{L}/u.test(rest) || /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u.test(rest))
-              tail={...last,text:rest,boundary:'sentence'};
+            if (hasSpokenText(rest)) tail={...last,text:rest,boundary:'sentence'};
           }
         }
         batch(parts);
@@ -541,6 +541,7 @@
         if (!firstEnd) {
           for (const end of part.text.matchAll(firstSentenceEnd)) {
             const at=end.index+end[0].length;
+            if (part.index===0 && !hasSpokenText(part.text.slice(0,at).trim())) continue;
             if (/[」』]$/u.test(end[0]) && /^[\s]*[\p{Script=Hiragana}\p{Script=Han}]/u.test(part.text.slice(at))) continue;
             firstEnd=part.index+1;cut=at;break;
           }

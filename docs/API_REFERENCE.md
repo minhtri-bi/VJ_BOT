@@ -117,6 +117,8 @@ For a focused canonical multiple-choice item, Live does not have a verified subm
 
 After successful HTTP validation, consume `text/event-stream`. `segment` contains `{index,lang:"ja"|"vi",boundary:"start"|"inline"|"sentence",text}`. Expect at most sixteen ordered segments, then `done` with `{full_text,count,japanese_only}`. Failed turns end with `error` instead (`live_quota`, `live_key_rejected`, `live_timeout`, `live_empty_reply`, or `live_unavailable`). An abort cancels upstream work and does not emit further events. Never reuse partial output as a completed turn. `429` before the stream opens means the account's shared inference budget is exhausted.
 
+With one Mistral voice, the browser waits for a first sentence with spoken content, or `done`. Opening hesitation marks such as `…` do not trigger a separate synthesis request. Captions keep the original segment text.
+
 For untagged text, the Worker can look ahead past the preferred 180-character split point. It waits for up to 256 characters of unfinished text, then splits near a word boundary. A language tag can complete a preceding plain block without an artificial length split. The streaming prompt shares the sixteen-segment limit and asks for fewer examples rather than mixed-language tags. Turns exceeding the segment or playable text budget stop upstream generation and terminate with `live_reply_too_long`, not a truncated `done`.
 
 Native provider streams must report completion; compatible proxies may finish at EOF after a complete SSE frame. An abort also stops in-flight Antigravity connection verification.

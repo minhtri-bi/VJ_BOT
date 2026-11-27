@@ -206,6 +206,20 @@ test('native Mistral creates and deletes with the same explicit server selection
   }finally{ui.windowEvents.pagehide();}
 });
 
+test('native Mistral cannot start without a selected Chat model',async()=>{
+  for(const model of [undefined,null,'']){
+    const own={id:'pinned',protocol:'openai',base_url:'https://api.mistral.ai/v1',model,connection_id:'saved'};
+    const ui=liveUI({settings:{is_admin:false,own}});
+    ui.context.VJProfiles={active:()=>({scope:'server',id:own.id})};
+    try {
+      await ui.element('live-start').events.click();
+      assert.equal(ui.permissions(),0);
+      assert.equal(ui.requests.length,0);
+      assert.match(ui.element('live-status').textContent,/Cài đặt/);
+    } finally {ui.windowEvents.pagehide();}
+  }
+});
+
 test('native Live cannot borrow a dormant Mistral profile while OAuth is selected or profile storage is missing',async()=>{
   const mistral={id:'pinned',protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'mistral-small-latest'};
   for(const blocked of ['oauth','storage']){
@@ -278,7 +292,7 @@ test('Mistral Live times out while the room is still connecting',async t=>{
   t.mock.timers.enable({apis:['setTimeout']});
   let joined,release;
   const connecting=new Promise(resolve=>{joined=resolve;});
-  const ui=liveUI({settings:{is_admin:false,own:{protocol:'openai',base_url:'https://api.mistral.ai/v1'}},
+  const ui=liveUI({settings:{is_admin:false,own:{protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'m'}},
     mistralConnect:()=>new Promise(resolve=>{release=resolve;joined();})});
   const start=ui.element('live-start').events.click();
   try {
@@ -294,7 +308,7 @@ test('Mistral Live times out while the room is still connecting',async t=>{
 });
 
 test('Live uses the latest saved provider when starting a Mistral call',async()=>{
-  const settings={is_admin:false,own:{protocol:'openai',base_url:'https://openrouter.ai/api/v1'}};
+  const settings={is_admin:false,own:{protocol:'openai',base_url:'https://openrouter.ai/api/v1',model:'m'}};
   const ui=liveUI({settings});
   try {
     await ui.element('live-start').events.click();

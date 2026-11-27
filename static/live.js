@@ -443,7 +443,7 @@
       return isMistralProfile(profile) && profile.model && profile.connection_id!==null
         ? {name:'mistral',serverId:selected.id,binding} : null;
     }
-    if(isMistralProfile(own))return own.model!=='' && own.connection_id!==null ? {name:'mistral',serverId:own.id,binding} : null;
+    if(isMistralProfile(own))return own.model && own.connection_id!==null ? {name:'mistral',serverId:own.id,binding} : null;
     const host=protocol=>new URL((own?.base_url||'').trim()||settings?.bases?.[protocol]||'https://x').hostname;
     if(own?.protocol==='gemini' && /(^|\.)generativelanguage\.googleapis\.com$/.test(host('gemini')))return {name:'gemini'};
     if(own?.protocol==='openai' && /(^|\.)openai\.com$/.test(host('openai')))return {name:'openai'};

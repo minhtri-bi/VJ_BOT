@@ -1099,10 +1099,14 @@ test('Mistral Live pins the owned server profile for create and delete without f
     return worker.fetch(new Request('https://vjbot.test/api/live/mistral',{method,headers,body:JSON.stringify(body)}),env);
   };
   const calls=[];
-  let closeStatus=204;
+  let closeStatus=204, closeBodyCancelled=false;
   globalThis.fetch=async(url,options)=>{
     calls.push([options.method,url,options.headers.Authorization]);
-    if(options.method==='DELETE')return new Response(null,{status:closeStatus});
+    if(options.method==='DELETE'){
+      if(closeStatus===204)return new Response(null,{status:204});
+      const body=new ReadableStream({cancel(){closeBodyCancelled=true;}});
+      return new Response(body,{status:closeStatus});
+    }
     assert.equal(JSON.parse(options.body).llm.model,'pinned-mistral');
     return Response.json({id:'sess_pinned',participant_token:'pt-pinned',server_url:'https://lk.test'});
   };
@@ -1116,6 +1120,7 @@ test('Mistral Live pins the owned server profile for create and delete without f
     const unclosed=await send('DELETE',profile.id,{id});
     assert.equal(unclosed.status,502);
     assert.equal((await unclosed.json()).code,'live_close_failed');
+    assert.equal(closeBodyCancelled,true);
     const api_connection={protocol:'openai',base_url,model:'device-mistral',api_key:'synthetic-device-key'};
     for(const [method,body] of [['POST',{level:'N5'}],['DELETE',{id}]]){
       const conflict=await send(method,profile.id,{...body,api_connection});

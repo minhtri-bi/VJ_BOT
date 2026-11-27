@@ -154,6 +154,34 @@ test('single Mistral waits for the first sentence and splits the TTS payload wit
   assert.equal(f.errors.length,0);f.engine.stop();
 });
 
+test('single Mistral does not batch an opening hesitation as a sentence',async()=>{
+  for(const openingMark of ['…','...']){
+    const stream=pushStream('text/event-stream');
+    const parts=[{lang:'ja',boundary:'start',text:`${openingMark} もう一度`},
+      {lang:'vi',boundary:'inline',text:'em thử nói lại nhé.'}];
+    const f=fixture({route:async()=>({...routeSingle,primary:{provider:'mistral',speed:1}}),fetch(call){
+      if(call.path==='/api/live/turn')return stream.response;
+      if(call.path==='/api/tts')return audioResponse('ja');
+    }});
+    const spoken=()=>f.calls.filter(call=>call.path==='/api/tts').map(call=>call.body.text);
+    const opening=f.engine.start();await cycle();
+    stream.write(segment(0,parts[0]));await cycle();
+    const early=spoken();
+    stream.write(segment(1,parts[1]));await cycle();
+    const first=spoken();
+    stream.write(done(parts));stream.close();
+    try {
+      await opening;
+      assert.deepEqual(early,[]);
+      assert.deepEqual(first,[`<ja>${parts[0].text}</ja> <vi>${parts[1].text}</vi>`]);
+      assert.deepEqual(spoken(),first);
+      assert.equal(f.captions.at(-1).text,parts.map(part=>part.text).join(' '));
+      assert.equal(f.clips.length,1);
+      assert.deepEqual(f.errors,[]);
+    } finally {f.engine.stop();}
+  }
+});
+
 test('single Mistral skips a nonspoken tail without losing captions or replay',async()=>{
   const parts=[{lang:'ja',boundary:'start',text:'こんにちは！😊'}];
   const f=fixture({route:async()=>({...routeSingle,primary:{provider:'mistral',speed:1}}),fetch(call){
