@@ -230,7 +230,7 @@ test('legacy and explicit routing preserve their own provider error status contr
     assert.ok(!JSON.stringify(result).includes(key));
     if (status===402) {
       assert.equal(result.code,'stt_billing');
-      assert.match(result.detail,/Billing/);
+      assert.match(result.detail,/thanh toán.*hạn mức chi tiêu/);
     }
   }
   assert.equal(calls.length,8);

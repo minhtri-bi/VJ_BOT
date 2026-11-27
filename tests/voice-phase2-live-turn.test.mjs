@@ -441,7 +441,7 @@ test('Live turns report provider billing separately from rejected keys and rate 
     assert.equal(body.code,code);
     assert.deepEqual(extra,[]);
     assert.doesNotMatch(body.detail,/Private provider response/);
-    if (upstream===402) assert.match(body.detail,/Billing/);
+    if (upstream===402) assert.match(body.detail,/thanh toán.*hạn mức chi tiêu/);
   }
   assert.equal(fetch.mock.callCount(),4);
 });

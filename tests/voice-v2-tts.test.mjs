@@ -256,7 +256,7 @@ test('voice catalog and playback distinguish billing from a rejected key and cat
     const body = await response.json();
     assert.equal(body.code,code);
     assert.doesNotMatch(body.detail,/Private provider response/);
-    if (status===402) assert.match(body.detail,/Billing/);
+    if (status===402) assert.match(body.detail,/thanh toán.*hạn mức chi tiêu/);
   }
   for (const [status,code] of [[402,'tts_billing'],[403,'tts_key_rejected']]) {
     upstream = status;

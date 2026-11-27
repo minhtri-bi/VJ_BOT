@@ -2,7 +2,7 @@ import {compatibleSpeechModel, DEFAULT_SPEECH_MODEL, MISTRAL_SPEECH_BASE, MISTRA
 import {DEFAULT_BASES, listModels} from '../llm.js';
 
 export const MAX_AUDIO = 5 * 1024 * 1024;
-export const VOICE_BILLING_DETAIL = 'Nhà cung cấp chưa bật thanh toán hoặc đã hết hạn mức chi tiêu. Kiểm tra mục Billing của tài khoản.';
+export const VOICE_BILLING_DETAIL = 'Tài khoản nhà cung cấp chưa bật thanh toán hoặc đã hết hạn mức chi tiêu.';
 const MAX_CATALOG = 1024 * 1024;
 const alphabet = /^[\w.:-]+$/;
 const id = value => typeof value === 'string' && value.length <= 100 && alphabet.test(value);

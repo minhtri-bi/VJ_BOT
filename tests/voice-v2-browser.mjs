@@ -334,17 +334,24 @@ async function runLiveBrowser(debuggerUrl,origin){
     await until('loopback voice profile metadata',()=>observe(()=>Boolean(document.querySelector('#voice-v2-primary-profile option[value="server:fixture"]'))));
     await choose('#voice-v2-primary-profile','server:fixture');
     const catalogButton='#voice-v2-slots fieldset:first-child > button';
+    const catalogNotice='#voice-v2-primary-catalog-status';
+    const {root}=await send('DOM.getDocument',{depth:0});
+    const {nodeId}=await send('DOM.querySelector',{nodeId:root.nodeId,selector:catalogNotice});
+    const {nodes:[emptyNotice]}=await send('Accessibility.getPartialAXTree',{nodeId,fetchRelatives:false});
+    assert.equal(emptyNotice.ignored,false,'The catalog status must be available to assistive technology before the first update');
+    assert.equal(emptyNotice.role.value,'status');
     await tabTo(catalogButton);await press('Enter');
     await until('Mistral preset catalog shows Haruto',()=>observe(()=>document.querySelector('#voice-v2-voices-primary option')?.textContent==='Haruto · Tiếng Nhật (nam)'));
     assert.equal(await observe(()=>document.querySelector('#voice-v2-voices-primary option').value),'01a151d2-8c66-7662-a216-d4c1f38e8642');
     await choose('#voice-v2-primary-profile','server:restricted');
     await tabTo(catalogButton);await press('Enter');
-    await until('ElevenLabs catalog shows visible manual entry guidance',()=>observe(()=>{
-      const notice=document.querySelector('#voice-v2-primary-catalog-status'), rect=notice.getBoundingClientRect();
-      return rect.top<innerHeight && rect.bottom>0 && /Voices: Read.*Models: Read.*nhập tay ID giọng/.test(notice.textContent);
-    }));
+    await until('ElevenLabs catalog shows visible manual entry guidance',()=>observe(selector=>{
+      const notice=document.querySelector(selector), rect=notice.getBoundingClientRect();
+      return rect.top<innerHeight && rect.bottom>0 && /quyền đọc giọng và model.*nhập tay ID giọng/.test(notice.textContent);
+    },catalogNotice));
     await choose('#voice-v2-primary-profile','server:fixture');
-    assert.ok(!await visible('#voice-v2-primary-catalog-status'),'ElevenLabs guidance must not follow the Mistral profile');
+    assert.equal(await observe(selector=>document.querySelector(selector).textContent,catalogNotice),'',
+      'ElevenLabs guidance must not follow the Mistral profile');
     await choose('#voice-v2-mode','dual_same_api');
     assert.ok(await visible('#voice-v2-ja-preset-hint') && await visible('#voice-v2-vi-preset-hint'),
       'Blank shared Mistral voice IDs should show the two preset defaults');
