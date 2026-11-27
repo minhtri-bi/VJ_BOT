@@ -245,6 +245,83 @@ test('voice catalog discovers ElevenLabs models and voices without synthesis or 
   assert.equal(JSON.stringify(catalog).includes(key),false);
 });
 
+test('voice catalog and playback distinguish billing from a rejected key and catalog permissions', async t => {
+  let upstream;
+  intercept(t, async () => new Response(`Private provider response ${key}`,{status:upstream}));
+  const settings = provider => ({version:2,mode:'single',primary:slot(provider,'demo_voice')});
+  for (const [status,code,http] of [[401,'tts_key_rejected',403],[402,'tts_billing',402],[403,'tts_catalog_permission',403],[429,'tts_quota',429]]) {
+    upstream = status;
+    const response = await tts({action:'catalog',routing:settings('elevenlabs')});
+    assert.equal(response.status,http);
+    const body = await response.json();
+    assert.equal(body.code,code);
+    assert.doesNotMatch(body.detail,/Private provider response/);
+    if (status===402) assert.match(body.detail,/thanh toán.*hạn mức chi tiêu/);
+  }
+  for (const [status,code] of [[402,'tts_billing'],[403,'tts_key_rejected']]) {
+    upstream = status;
+    for (const provider of ['mistral','elevenlabs']) {
+      const response = await tts({text:'こんにちは',mode:'ja',stream:true,routing:settings(provider)});
+      const [record] = await lines(response);
+      assert.equal(record.type,'error');
+      assert.equal(record.code,code);
+      assert.doesNotMatch(record.detail,/Private provider response/);
+    }
+  }
+});
+
+test('ElevenLabs catalog distinguishes restricted credentials from invalid keys in bounded 401 replies', async t => {
+  let failedPath, rejected, cancelled;
+  intercept(t,async (url,init)=>{
+    if (init.method==='POST' || url.includes(failedPath)) return rejected();
+    return url.includes('/v1/models') ? Response.json([]) : Response.json({voices:[]});
+  });
+  const routing = {version:2,mode:'single',primary:slot('elevenlabs','manual_voice')};
+  const denial = status => () => Response.json({detail:{status,message:`Private provider response ${key}`}},{status:401});
+  for (failedPath of ['/v1/models','/v2/voices']) {
+    for (const [make,code] of [
+      [denial('missing_permissions'),'tts_catalog_permission'],
+      [denial('invalid_api_key'),'tts_key_rejected'],
+      [() => new Response(null,{status:401}),'tts_key_rejected'],
+      [() => new Response('<html>Private provider response</html>',{status:401}),'tts_key_rejected'],
+      [() => new Response(new ReadableStream({
+        start(controller){controller.enqueue(new Uint8Array(8193));},
+        cancel(){cancelled = true;}
+      }),{status:401}),'tts_key_rejected']
+    ]) {
+      rejected = make;
+      const response = await tts({action:'catalog',routing});
+      assert.equal(response.status,403);
+      const body = await response.json();
+      assert.equal(body.code,code);
+      assert.doesNotMatch(JSON.stringify(body),/Private provider response|missing_permissions|invalid_api_key/);
+    }
+    assert.equal(cancelled,true);
+    cancelled=false;
+  }
+  rejected=denial('missing_permissions');
+  const [record]=await lines(await tts({text:'こんにちは',mode:'ja',stream:true,routing}));
+  assert.equal(record.type,'error');
+  assert.equal(record.code,'tts_key_rejected','synthesis must not apply the catalog classification');
+});
+
+test('ElevenLabs catalog prioritizes billing even when a permissions failure arrives first', async t => {
+  let first, permissionStatus;
+  intercept(t, async url => {
+    const status = url.includes('/v1/models') ? 402 : permissionStatus;
+    if (status !== first) await new Promise(resolve => setImmediate(resolve));
+    return status===401 ? Response.json({detail:{status:'missing_permissions'}},{status:401}) : new Response(null,{status});
+  });
+  const routing = {version:2,mode:'single',primary:slot('elevenlabs','')};
+  for (permissionStatus of [401,403]) {
+    for (first of [402,permissionStatus]) {
+      const response = await tts({action:'catalog',routing});
+      assert.equal(response.status,402);
+      assert.equal((await response.json()).code,'tts_billing');
+    }
+  }
+});
+
 test('approved ElevenLabs proxies retain versioned mounts for catalog and speech',async t=>{
   const calls=[];
   intercept(t,async (url,init)=>{
@@ -337,17 +414,19 @@ test('Mistral catalog identifies account clones and known presets without changi
     assert.equal(init.method,'GET');
     return Response.json({data:[
       {id:'voice_custom',name:'Teacher clone',type:'custom'},
-      {id:'voice_3133',name:'Provider JP',type:'preset'},
-      {id:'voice_3144',name:'Provider VI',type:'preset'},
-      {id:'voice_other',name:'Other provider voice',type:'preset'}
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8642',slug:'voice_3133',name:'Provider JP',type:'preset',languages:['ja']},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8643',slug:'voice_3144',name:'Provider VI',type:'preset',languages:['vi']},
+      {id:'voice_3133',name:'Legacy JP',type:'preset'},
+      {id:'voice_other',name:'Other provider voice',type:'preset',languages:['ja']}
     ],next_page_token:'third'});
   });
   const response=await tts({action:'catalog',cursor:'second',routing:{version:2,mode:'single',primary:slot('mistral','')}});
   assert.deepEqual(await response.json(),{models:[{id:'voxtral-mini-tts-3-0'}],
     voices:[
       {id:'voice_custom',name:'Teacher clone',category:'cloned'},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8642',name:'Haruto',category:'premade',lang:'ja'},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8643',name:'Huong',category:'premade',lang:'vi'},
       {id:'voice_3133',name:'Haruto',category:'premade',lang:'ja'},
-      {id:'voice_3144',name:'Huong',category:'premade',lang:'vi'},
       {id:'voice_other',name:'Other provider voice',category:'premade'}
     ],verified:false,next_cursor:'third'});
 });

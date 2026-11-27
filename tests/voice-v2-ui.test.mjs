@@ -389,6 +389,51 @@ test('catalog keeps paging after model selection but starts fresh after a profil
   assert.deepEqual(el('voices-primary').children.map(option=>option.value),['first']);
 });
 
+test('ElevenLabs catalog suggests models but keeps the blank default and guides restricted keys',async()=>{
+  let code;
+  const {el,change,catalog,save,saved}=settingsFixture(async ()=>{
+    if (code) return Response.json({code,detail:'Provider refused the request.'},{status:code==='tts_billing'?402:403});
+    return Response.json({models:['eleven_v3','eleven_turbo_v2_5','eleven_flash_v2_5','custom_model'].map(id=>({id,languages:['ja','vi']})),voices:[]});
+  });
+  change('primary-profile','local:a');
+  await catalog();
+  assert.deepEqual(el('models-primary').children.map(({value,textContent})=>[value,textContent]),[
+    ['eleven_v3','Ưu tiên độ rõ Nhật–Việt · ja · vi'],['eleven_turbo_v2_5','Nhanh và rõ cho hội thoại · ja · vi'],
+    ['eleven_flash_v2_5','Ưu tiên tốc độ · mặc định · ja · vi'],['custom_model','ja · vi']
+  ]);
+  code='tts_billing';
+  await catalog();
+  assert.equal(el('primary-catalog-status').textContent,'Provider refused the request.');
+  code='tts_catalog_permission';
+  await catalog();
+  assert.match(el('primary-catalog-status').textContent,/quyền đọc giọng và model.*nhập tay ID giọng.*để trống hoặc nhập eleven_v3 hay eleven_turbo_v2_5/);
+  el('primary-voice').value='manual_voice';
+  await save();
+  assert.equal(saved().primary.voice_id,'manual_voice');
+  assert.ok(!saved().primary.model);
+  change('primary-profile','local:b');
+  assert.equal(el('primary-catalog-status').textContent,'');
+});
+
+test('an in-flight split catalog cannot announce after the slot switches to the primary catalog',async()=>{
+  const sent=Promise.withResolvers(), reply=Promise.withResolvers();
+  const {el,change}=settingsFixture(async ()=>{
+    sent.resolve();
+    return reply.promise;
+  });
+  change('primary-profile','local:a');
+  change('mode','dual_split_api');
+  change('ja-profile','local:a');
+  const pending=el('ja-catalog').events.click();
+  await sent.promise;
+  change('mode','dual_same_api');
+  reply.resolve(Response.json({code:'tts_catalog_permission'},{status:403}));
+  await pending;
+  assert.equal(el('ja-catalog-status').hidden,true);
+  assert.equal(el('ja-catalog-status').textContent,'');
+  assert.equal(el('primary-catalog-status').textContent,'');
+});
+
 test('Mistral catalog labels clones and known presets across pages without changing option values',async()=>{
   const cursors=[];
   const {el,profiles,refresh,change,catalog}=settingsFixture(async (_path,request)=>{

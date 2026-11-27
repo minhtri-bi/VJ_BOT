@@ -6,6 +6,7 @@ import {providerFailure, resolveProvider} from '../providers.js';
 import {catalogLesson, groundLesson, processingAllowed, resolveTaskReference, teacherCatalog, validFocusReference, validLessonReference, validTaskReference} from '../tutor-context.js';
 import {normalizeVoiceText} from './normalizer.js';
 import {segmentVoiceText} from './segmenter.js';
+import {VOICE_BILLING_DETAIL} from './tts-adapters.js';
 import {MAX_VOICE_TEXT, readVoiceBody} from './tts-route.js';
 
 const LEVELS = ['N5', 'N4', 'N3', 'N2', 'N1'];
@@ -110,7 +111,8 @@ const invalid = () => jsonError(400, 'live_invalid_request', 'Lượt hội tho�
 const forbidden = () => jsonError(409, 'live_source_unavailable', 'Nguồn này không được dùng để nhờ AI giải thích. Em chọn tài liệu khác nhé.');
 const upstreamFailure = (status) => {
   if (status === 429) return {code:'live_quota', detail:'Đã chạm giới hạn lượt dùng của nhà cung cấp. Hãy thử lại sau.'};
-  if ([401,402,403].includes(status)) return {code:'live_key_rejected', detail:'Nhà cung cấp từ chối kết nối đã chọn. Kiểm tra Cài đặt.'};
+  if (status === 402) return {code:'live_billing', detail:VOICE_BILLING_DETAIL};
+  if ([401,403].includes(status)) return {code:'live_key_rejected', detail:'Nhà cung cấp từ chối kết nối đã chọn. Kiểm tra Cài đặt.'};
   if (status === 504) return {code:'live_timeout', detail:'Nhà cung cấp phản hồi quá lâu. Em thử lại nhé.'};
   return {code:'live_unavailable', detail:'Chưa kết nối được với thầy. Em thử lại nhé.'};
 };

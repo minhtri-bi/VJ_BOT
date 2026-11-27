@@ -428,6 +428,24 @@ test('live commands use the saved, OAuth-pinned and managed chat routes without 
   assert.deepEqual(sent.at(-1).slice(0,2),['api.openai.com','Bearer ' + env.OPENAI_API_KEY]);
 });
 
+test('Live turns report provider billing separately from rejected keys and rate limits', async t => {
+  const {send} = await fixture(t);
+  let status;
+  const fetch = t.mock.method(globalThis,'fetch',async () => new Response(`Private provider response ${key}`,{status}));
+  for (const [upstream,code] of [[401,'live_key_rejected'],[402,'live_billing'],[403,'live_key_rejected'],[429,'live_quota']]) {
+    status = upstream;
+    const response = await send({command:'start',api_connection:{...connection,base_url:'https://api.mistral.ai/v1'}});
+    assert.equal(response.status,200);
+    const [[event,body], ...extra] = events(await response.text());
+    assert.equal(event,'error');
+    assert.equal(body.code,code);
+    assert.deepEqual(extra,[]);
+    assert.doesNotMatch(body.detail,/Private provider response/);
+    if (upstream===402) assert.match(body.detail,/thanh toán.*hạn mức chi tiêu/);
+  }
+  assert.equal(fetch.mock.callCount(),4);
+});
+
 test('first segment arrives before upstream ends and midstream errors do not leak provider text or a false done', {timeout:3000}, async t => {
   const {send} = await fixture(t);
   const started = Promise.withResolvers();

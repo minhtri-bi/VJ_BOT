@@ -4,6 +4,8 @@
   const bases={elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai:'https://api.openai.com/v1',gemini:'https://generativelanguage.googleapis.com',openai_compatible:''};
   const titles={primary:'Kết nối chính',ja:'Tiếng Nhật',vi:'Tiếng Việt'};
   const mistralPresets={ja:'Haruto · Tiếng Nhật (nam)',vi:'Huong · Tiếng Việt (nữ)'};
+  const elevenModelHints={eleven_v3:'Ưu tiên độ rõ Nhật–Việt',eleven_turbo_v2_5:'Nhanh và rõ cho hội thoại',
+    eleven_flash_v2_5:'Ưu tiên tốc độ · mặc định'};
   const mode=el('mode'), slots=el('slots'), status=el('status'), kind=el('kind'), url=el('url');
   const liveEngine=el('live-engine'), liveTurn=el('live-turn'), liveBarge=el('live-barge'),
     liveStt=el('live-stt'), liveSlot=el('live-stt-slot'), liveSlotField=el('live-stt-slot-field'), liveOptions=el('live-options');
@@ -127,6 +129,8 @@
       const useMain=!primary && (!split || !control.profile.value);
       if (!primary) control.model.placeholder=control.voice.placeholder=useMain?'Dùng chung':'Mặc định';
       control.catalog.hidden=useMain;
+      control.catalogStatus.hidden=useMain || control.section.hidden;
+      if (control.catalogStatus.hidden) control.catalogStatus.textContent='';
       control.model.setAttribute('list',useMain?controls.get('primary').modelList.id:control.modelList.id);
       control.voice.setAttribute('list',useMain?controls.get('primary').voiceList.id:control.voiceList.id);
       for (const field of [control.model,control.voice,control.reading]) if (field) field.disabled=control.section.hidden;
@@ -180,6 +184,7 @@
         }
         control.modelList.replaceChildren();control.voiceList.replaceChildren();
         control.catalog.textContent='Tải danh mục';
+        control.catalogStatus.textContent='';
         catalogs.delete(slot);
         selectedAccounts.set(slot,{reference,endpoint:endpoint || (!changed && previous?.endpoint),revision});
       }
@@ -194,6 +199,9 @@
     const header=document.createElement('div');header.className='sound-slot-header';section.append(header);
     const profile=input(header,'',slot+'-profile','select'), headerText=document.createElement('span');
     profile.parentElement.prepend(headerText);
+    const catalogStatus=document.createElement('p');
+    catalogStatus.id='voice-v2-'+slot+'-catalog-status';catalogStatus.className='ai-field-hint';
+    catalogStatus.setAttribute('role','status');section.append(catalogStatus);
     const fields=document.createElement('div');fields.className='sound-ids';section.append(fields);
     const voice=input(fields,'ID giọng',slot+'-voice');voice.maxLength=100;
     voice.placeholder='Mặc định';
@@ -234,7 +242,7 @@
     reading?.append(option('kanji_native','Giữ Kanji'),option('kana_first','Ưu tiên kana'));
     const catalog=document.createElement('button');catalog.type='button';catalog.id='voice-v2-'+slot+'-catalog';catalog.className='settings-link';catalog.textContent='Tải danh mục';header.append(catalog);
     if (fallback) header.append(fallback);
-    controls.set(slot,{section,header,headerText,fields,tuning,profile,model,voice,speed,nativeSpeed,reading,catalog,modelList,voiceList,presetHint,fallback,fallbackOpen:false});
+    controls.set(slot,{section,header,headerText,fields,tuning,profile,model,voice,speed,nativeSpeed,reading,catalog,catalogStatus,modelList,voiceList,presetHint,fallback,fallbackOpen:false});
     voice.addEventListener('input',updateMistralHints);
     voice.addEventListener('change',updateMistralHints);
     catalog.addEventListener('click',()=>loadCatalog(slot));
@@ -436,36 +444,45 @@
   const liveIdentity=config=>JSON.stringify([identity(config),liveConfig(config)]);
   async function loadCatalog(slot) {
     if (busy) return;
-    const control=controls.get(slot), role=roleKey();
+    const control=controls.get(slot), role=roleKey(), selection=selectedAccounts.get(slot), notice=control.catalogStatus;
+    const current=()=>!notice.hidden && role===roleKey() && selection===selectedAccounts.get(slot);
+    if (!current()) return;
     busy=true;control.catalog.disabled=true;
     try {
-      const selection=selectedAccounts.get(slot);
       const selectedRef=effectiveAccount(slot);
       const row=rows.find(row=>ref(row)===selectedRef);
       if (!row) throw new Error('Chọn kết nối đã lưu cho '+titles[slot]+'.');
       const config={version:2,mode:'single',admin_override:admin(),primary:{profile:{scope:row.scope,id:row.id},provider:provider(row)}};
       const start=identity(config), cached=catalogs.get(slot);
       const all=cached?.identity===start ? cached : {identity:start,models:new Map(),voices:new Map()};
-      status.textContent='Đang tải giọng và model. Không tạo âm thanh.';
+      notice.textContent='Đang tải giọng và model. Không tạo âm thanh.';
       const routing=await prepared(config);
+      if (!current()) return;
       const response=await apiFetch('/api/tts',{voiceRouting:true,method:'POST',headers:{'Content-Type':'application/json'},
         signal:AbortSignal.timeout(30000),body:JSON.stringify({action:'catalog',routing,...(all.cursor?{cursor:all.cursor}:{})})});
       const data=await response.json();
-      if (role!==roleKey() || selection!==selectedAccounts.get(slot) || start!==identity(config)) return;
-      if (!response.ok) throw new Error(data.detail || 'Không tải được giọng và model.');
+      if (!current() || start!==identity(config)) return;
+      if (!response.ok) {
+        if (response.status===403 && data.code==='tts_catalog_permission' && config.primary.provider==='elevenlabs')
+          throw new Error('Cấp quyền đọc giọng và model trên ElevenLabs hoặc nhập tay ID giọng. Ở ô ID model, để trống hoặc nhập eleven_v3 hay eleven_turbo_v2_5.');
+        throw new Error(data.detail || 'Không tải được giọng và model.');
+      }
       if (!Array.isArray(data.models) || !Array.isArray(data.voices)) throw new Error('Danh sách giọng không hợp lệ.');
       for (const row of data.models) all.models.set(row.id,row);
       for (const row of data.voices) all.voices.set(row.id,row);
       all.cursor=data.next_cursor;
       catalogs.set(slot,all);
-      control.modelList.replaceChildren(...[...all.models.values()].map(row=>option(row.id,row.languages ? row.languages.join(' · ') : row.id)));
+      control.modelList.replaceChildren(...[...all.models.values()].map(row=>{
+        const hint=config.primary.provider==='elevenlabs' && Object.hasOwn(elevenModelHints,row.id) ? elevenModelHints[row.id] : null;
+        return option(row.id,[hint,...(row.languages ?? [])].filter(Boolean).join(' · ') || row.id);
+      }));
       control.voiceList.replaceChildren(...[...all.voices.values()].map(row=>{
         const preset=config.primary.provider==='mistral' ? mistralPresets[row.lang] : null;
         return option(row.id,row.category==='cloned' ? `${row.name} · Giọng nhân bản` : preset || row.name);
       }));
       control.catalog.textContent=all.cursor?'Tải thêm giọng':'Tải danh mục';
-      status.textContent=`${all.models.size} model · ${all.voices.size} giọng${all.cursor?' · còn kết quả':''}. Chưa thử tạo âm thanh.`;
-    } catch (error) {if (role===roleKey()) status.textContent=error.message;}
+      notice.textContent=`${all.models.size} model · ${all.voices.size} giọng${all.cursor?' · còn kết quả':''}. Chưa thử tạo âm thanh.`;
+    } catch (error) {if (current()) notice.textContent=error.message;}
     finally {busy=false;control.catalog.disabled=false;}
   }
   function activeIdentity() {

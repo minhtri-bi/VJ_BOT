@@ -97,13 +97,19 @@ Both languages default to 1×; already saved speeds are preserved. Supported Ele
 
 Use `{action:"catalog",routing,cursor?}` to discover models and voices for the primary profile without generating audio. Follow `next_cursor` if present. Catalog entries are not proof of synthesis access. Custom OpenAI-compatible TTS and non-native ElevenLabs/Mistral origins require an exact operator-managed HTTPS origin in `VOICE_ALLOWED_ORIGINS` (comma-separated). Keep that list limited to trusted public services; URL syntax checks alone are not a public-network guarantee. Redirects are never followed. The legacy JSON read-aloud contract remains available without `routing`.
 
-In **Settings → Sound → Japanese–Vietnamese voice**, add a local or server profile, load the catalog, and save the single, shared-account dual, or split-account routing configuration before using the bilingual preview. A catalog request does not generate audio; previews do. Saving these settings does not select or replace the chat connection. Chat messages and previews use memory-only replay. Confirm Japanese, Vietnamese, and mixed-provider playback with authorized provider accounts before treating voice quality or cost as validated. Native live calls do not consume this configuration; recorded transcription can use an explicitly selected voice profile as described below.
+In **Settings → Sound → Japanese–Vietnamese voice**, add a local or server profile and save the routing before previewing. Load the catalog or enter the voice ID manually. For an ElevenLabs restricted key, catalog discovery needs **Voices: Read** and **Models: Read**. Manual entry skips discovery but does not grant speech permissions. A blank ElevenLabs model keeps `eleven_flash_v2_5`; select `eleven_turbo_v2_5` for Live or try `eleven_v3` when prioritizing clarity. The catalog keeps the Mistral voice ID returned by the provider, including UUIDs for named presets.
+
+Catalog requests do not generate audio; previews do. Saving does not replace the Chat connection. Chat messages and previews use memory-only replay. Confirm playback with authorized provider accounts before treating voice quality or cost as validated. Native Live does not consume these settings; recorded transcription can use an explicitly selected voice profile.
 
 Cached replay does not synthesize or decrypt a device key. It still checks device-profile revisions or revalidates server profiles online, so a deleted or rotated profile cannot replay under the old identity. A change to pronunciation or synthesis-speed semantics invalidates old audio cache keys.
 
 Common AI failures: `403 {code:"no_ai"}` for a missing selected API, `409 {code:"rekey"}` for an undecryptable key, `409 {code:"profile_changed"}` for a removed pinned profile, `403 {code:"oauth_model"}` for an unselected OAuth model, `409/503 {code:"oauth_reconnect"}` for unavailable OAuth, `429` for quota/rate limits and `503` for provider failures. Provider response bodies and secrets are not exposed.
 
+Upstream `402` on routed TTS becomes `tts_billing` (HTTP `402` for catalog, or an NDJSON `error` record for synthesis). For ElevenLabs catalog permission denial specifically, HTTP `403` returns `tts_catalog_permission`. Key rejection and rate limiting remain separate.
+
 Native Mistral Live accepts `X-VJBot-Profile` on both `POST /api/live/mistral` and `DELETE /api/live/mistral`. The pin must resolve to an owned official Mistral Chat profile and cannot be combined with `api_connection`. Start and close use the same explicit profile. An unavailable pin does not fall back to another account.
+
+Native Mistral starts with the saved Chat model. If Mistral rejects the model for Voice Agents, it tries `mistral-small-latest` before `mistral-medium-latest`, skipping models already attempted. This does not change the saved Chat model.
 
 ### Cascaded Live Voice backend
 
@@ -115,7 +121,7 @@ The Worker resolves canonical lesson and focus selectors, rejects unavailable so
 
 For a focused canonical multiple-choice item, Live does not have a verified submission. The Worker returns a short strategy or, for `summary`, a closing reminder, in the requested language. It does not send the task, transcript or history to a Chat provider and does not grade the choice. This guidance does not require a Chat connection, but an explicit pin or device connection must still be valid. Authentication, task revision, request body cap, rate limit and SSE framing still apply. To continue with model-generated conversation or summary, leave the focused choice.
 
-After successful HTTP validation, consume `text/event-stream`. `segment` contains `{index,lang:"ja"|"vi",boundary:"start"|"inline"|"sentence",text}`. Expect at most sixteen ordered segments, then `done` with `{full_text,count,japanese_only}`. Failed turns end with `error` instead (`live_quota`, `live_key_rejected`, `live_timeout`, `live_empty_reply`, or `live_unavailable`). An abort cancels upstream work and does not emit further events. Never reuse partial output as a completed turn. `429` before the stream opens means the account's shared inference budget is exhausted.
+After successful HTTP validation, consume `text/event-stream`. `segment` contains `{index,lang:"ja"|"vi",boundary:"start"|"inline"|"sentence",text}`. Expect at most sixteen ordered segments, then `done` with `{full_text,count,japanese_only}`. Failed turns end with `error` instead (`live_quota`, `live_billing`, `live_key_rejected`, `live_timeout`, `live_empty_reply`, or `live_unavailable`). An abort cancels upstream work and does not emit further events. Never reuse partial output as a completed turn. `429` before the stream opens means the account's shared inference budget is exhausted.
 
 With one Mistral voice, the browser waits for a first sentence with spoken content, or `done`. Opening hesitation marks such as `…` do not trigger a separate synthesis request. Captions keep the original segment text.
 
@@ -130,6 +136,8 @@ Native provider streams must report completion; compatible proxies may finish at
 For a different connection, send `stt_routing:{version:2,provider:"openai"|"mistral"|"elevenlabs",profile,admin_override?}`. The profile has the same scope and connection format as TTS. Do not send `api_connection` or `X-VJBot-Profile` with explicit routing, including for admins. An admin with a private voice profile must opt in using `admin_override:true`; invalid or unavailable selections never borrow Chat or platform keys. Explicit capabilities return `{supported,provider,model}`. Custom Mistral and ElevenLabs origins must pass the same allowlist as TTS.
 
 An optional `lesson:{id,level}` must resolve to approved-for-processing source material for any STT provider. Mistral receives up to 40 permitted canonical vocabulary hints, and retries once without those hints only if Mistral rejects the biased request with HTTP `422`. ElevenLabs uses Scribe v2; the selected Chat provider is unchanged.
+
+An upstream billing failure returns HTTP `402 {code:"stt_billing"}` for both default and explicit transcription routing. It does not trigger a different provider.
 
 ### Estimated Kaiwa assessment
 

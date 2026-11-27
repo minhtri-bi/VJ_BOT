@@ -5,7 +5,7 @@ import {ANTIGRAVITY_PROFILE} from '../antigravity-gateway.js';
 import {rateLimited} from '../ai-usage.js';
 import {catalogLesson, processingAllowed, teacherCatalog, validLessonReference} from '../tutor-context.js';
 import {lessonVocabulary} from '../live.js';
-import {VOICE_BASES, VoiceError} from './tts-adapters.js';
+import {VOICE_BASES, VOICE_BILLING_DETAIL, VoiceError} from './tts-adapters.js';
 import {readVoiceBody, selectConnection} from './tts-route.js';
 
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
@@ -73,7 +73,8 @@ async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, 
     if (!response.ok) {
       void response.body?.cancel().catch(() => {});
       if (response.status === 429) return json({detail:`${engine.label} đang giới hạn lượt dùng. Hãy thử lại sau.`},429);
-      if (explicit && [401,402,403].includes(response.status)) return json({detail:'Nhà cung cấp từ chối khóa chép lời đã chọn.'},403);
+      if (response.status === 402) return json({detail:VOICE_BILLING_DETAIL,code:'stt_billing'},402);
+      if (explicit && [401,403].includes(response.status)) return json({detail:'Nhà cung cấp từ chối khóa chép lời đã chọn.'},403);
       return unavailable();
     }
     raw = await readVoiceBody(response,MAX_RESPONSE,signal);

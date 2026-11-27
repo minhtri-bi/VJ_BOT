@@ -252,7 +252,8 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
 
 - Các mã lỗi `event: error` chuẩn hóa:
   - `live_quota` (upstream `429`)
-  - `live_key_rejected` (upstream `401`/`402`/`403`)
+  - `live_billing` (upstream `402`)
+  - `live_key_rejected` (upstream `401`/`403`)
   - `live_timeout` (quá 28s)
   - `live_empty_reply` (LLM kết thúc nhưng không có chữ hợp lệ)
   - `live_unavailable` (các lỗi upstream 5xx / JSON hỏng / bị chặn nội dung)
@@ -334,7 +335,7 @@ data: {"code":"live_quota","detail":"Đã chạm giới hạn lượt dùng củ
   - Nếu nhận `response.status === 422` (hoặc `400` do vượt ngữ cảnh khi kèm bias) và lần gọi vừa rồi có `bias.length > 0`: hủy body (`await response.body?.cancel()`) và **thử lại đúng 1 lần** với `FormData` mới không kèm `context_bias`.
 - **Quản lý lỗi & Quota:**
   - Gọi `rateLimited(env, user.user_id)` **sau** mọi bước validate input/routing/lesson (tránh đốt quota vì request lỗi 400/403/409), **trước** khi gọi upstream `fetch`.
-  - Không bao giờ forward body lỗi từ upstream (kể cả khi proxy echo `apiKey`); map `429 → 429`, `401/402/403 → 403`, lỗi khác → `503`, timeout → `504`, JSON/text sai → `502`.
+  - Never forward the provider's error body. Map `402` to HTTP `402` with `stt_billing` for both routes, and `429` to HTTP `429`. With explicit routing, map `401`/`403` to `403`, other upstream failures to `503`, timeouts to `504`, and invalid results to `502`. Legacy routing keeps its existing non-billing errors.
 
 ---
 
