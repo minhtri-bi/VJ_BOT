@@ -17,7 +17,7 @@ const assetTypes = {css:'text/css',js:'application/javascript',json:'application
 const voiceProfile = {id:'fixture',name:'Mistral kiểm thử',protocol:'openai',
   base_url:'https://api.mistral.ai/v1',connection_id:'fixture-voice',purpose:'speech'};
 const html = `<!doctype html><meta charset="utf-8"><div id="speech-notice" hidden><span id="speech-status"></span><button id="speech-stop"></button></div>
-<button type="button" id="playback-check">Start playback check</button>
+<button type="button" id="playback-check" disabled>Start playback check</button>
 ${assets.map(path => `<script src="${path}"></script>`).join('')}
 <script>
 const config = {admin_override:false};
@@ -91,13 +91,19 @@ document.getElementById('playback-check').addEventListener('click',async event=>
   } catch (failure) {error=failure.message;}
   await fetch('/result',{method:'POST',body:error});
 },{once:true});
+document.getElementById('playback-check').disabled=false;
 </script>`;
 // Observe the real media objects without changing the app's account, navigation, or controls.
 function observeLiveMedia(){
-  const media=window.voiceSmoke={microphone:null,output:[],keyboardClicks:[],resumes:[]};
+  const media=window.voiceSmoke={microphone:null,output:[],keyboardClicks:[],resumes:new WeakMap()};
+  let startClick;
+  document.addEventListener('click',event=>{
+    if(event.isTrusted && event.detail===0 && event.target.closest('button')?.id==='live-start')startClick=event;
+  },true);
   const resume=AudioContext.prototype.resume;
   AudioContext.prototype.resume=function(){
-    media.resumes.push({activation:navigator.userActivation.isActive,hasMicrophone:Boolean(media.microphone)});
+    if(!media.resumes.has(this))media.resumes.set(this,{startGesture:startClick?.currentTarget?.id==='live-start',
+      activation:navigator.userActivation.isActive,hasMicrophone:Boolean(media.microphone)});
     return resume.call(this);
   };
   const getUserMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
@@ -226,9 +232,12 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.ok(target,'Playback fixture tab was not found');
     ({sessionId}=await send('Target.attachToTarget',{targetId:target.targetId,flatten:true}));
     await send('Runtime.enable');
-    await click('#playback-check');
-    await until('read-aloud reload',()=>observe(()=>location.search==='?replay' && Boolean(document.querySelector('#playback-check'))));
-    await click('#playback-check');
+    await click('#playback-check:enabled');
+    await Promise.race([
+      until('read-aloud reload',()=>observe(()=>location.search==='?replay' && Boolean(document.querySelector('#playback-check')))),
+      completed.then(error=>{throw new Error(error || 'Playback completed without the required cache reload');})
+    ]);
+    await click('#playback-check:enabled');
     assert.equal(await completed,'');
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
     await width(1440);
@@ -272,13 +281,13 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.deepEqual(await motion(),[true,'none','none'],'Reduced motion did not stop the Voice orb animation and transition');
     await tabTo('#live-start');
     await press('Enter');
-    assert.deepEqual(await observe(()=>window.voiceSmoke.resumes[0]),{activation:true,hasMicrophone:false},
-      'Start must resume the actual AudioContext during a trusted gesture, before obtaining the microphone');
+    assert.ok(await observe(()=>window.voiceSmoke.keyboardClicks.includes('live-start')),'Playback Start did not receive a trusted keyboard click');
     await until('opening playback',async()=>await playing()===3 && await turn()==='you');
     assert.deepEqual(await observe(()=>{
-      const {output}=window.voiceSmoke,[a,b,c]=output;
-      return [output.map(item=>item.frequency),output.every(item=>item.context===a.context),b.when>=a.until && c.when>=b.until];
-    }),[[440,550,660],true,true],'Opening batches must play in order without overlap in a shared AudioContext');
+      const {output,resumes}=window.voiceSmoke,[a,b,c]=output;
+      return [output.map(item=>item.frequency),output.every(item=>item.context===a.context),b.when>=a.until && c.when>=b.until,resumes.get(a.context)];
+    }),[[440,550,660],true,true,{startGesture:true,activation:true,hasMicrophone:false}],
+    'The playing AudioContext must resume during the trusted Start action; synthesized audio must play in order without overlap');
     assert.ok(await observe(()=>document.querySelector('.live-turn.assistant')?.textContent.includes('最初')),'Opening caption did not reach the transcript');
 
     // Exact widths in docs/CONTRIBUTING.md; check the same live call without reconnecting.
