@@ -2,6 +2,7 @@ import {compatibleSpeechModel, DEFAULT_SPEECH_MODEL, MISTRAL_SPEECH_BASE, MISTRA
 import {DEFAULT_BASES, listModels} from '../llm.js';
 
 export const MAX_AUDIO = 5 * 1024 * 1024;
+export const VOICE_BILLING_DETAIL = 'Nhà cung cấp chưa bật thanh toán hoặc đã hết hạn mức chi tiêu. Kiểm tra mục Billing của tài khoản.';
 const MAX_CATALOG = 1024 * 1024;
 const alphabet = /^[\w.:-]+$/;
 const id = value => typeof value === 'string' && value.length <= 100 && alphabet.test(value);
@@ -14,6 +15,8 @@ const elevenModel = 'eleven_flash_v2_5';
 const safeMessage = {
   tts_unavailable:'Không tạo được giọng đọc. Hệ thống không đổi nhà cung cấp.',
   tts_key_rejected:'Nhà cung cấp từ chối khóa hoặc quyền giọng nói đã chọn.',
+  tts_billing:VOICE_BILLING_DETAIL,
+  tts_catalog_permission:'ElevenLabs từ chối quyền tải giọng hoặc model.',
   tts_quota:'Nhà cung cấp giọng nói đang giới hạn lượt dùng.',
   tts_voice_unavailable:'Không dùng được giọng hoặc model đã chọn với tài khoản này.',
   tts_audio_limit:'Âm thanh trả về vượt giới hạn.',
@@ -103,7 +106,9 @@ async function send(provider, path, signal, body) {
     cache:'no-store', signal:AbortSignal.any([signal,AbortSignal.timeout(20000)]), body:body && JSON.stringify(body)});
   if (response.ok) return response;
   await response.body?.cancel();
-  if ([401,402,403].includes(response.status)) throw new VoiceError('tts_key_rejected',403);
+  if (response.status === 402) throw new VoiceError('tts_billing',402);
+  if (response.status === 403 && provider.kind === 'elevenlabs' && !body) throw new VoiceError('tts_catalog_permission',403);
+  if ([401,403].includes(response.status)) throw new VoiceError('tts_key_rejected',403);
   if ([404,422].includes(response.status)) throw new VoiceError('tts_voice_unavailable',409);
   if (response.status === 429) throw new VoiceError('tts_quota',429);
   throw new VoiceError('tts_unavailable',502);
@@ -139,10 +144,17 @@ const registry = {
     async listCatalog(provider, signal, cursor) {
       const query = new URLSearchParams({page_size:'100',include_total_count:'false'});
       if (cursor) query.set('next_page_token',cursor);
-      const [models, voices] = await Promise.all([
+      const [modelsResult, voicesResult] = await Promise.allSettled([
         send(provider,'/v1/models',signal).then(response => readJson(response)),
         send(provider,'/v2/voices?' + query,signal).then(response => readJson(response))
       ]);
+      // A scope warning is misleading if either catalog endpoint needs billing first.
+      for (const result of [modelsResult, voicesResult]) {
+        if (result.status === 'rejected' && result.reason?.code === 'tts_billing') throw result.reason;
+      }
+      if (modelsResult.status === 'rejected') throw modelsResult.reason;
+      if (voicesResult.status === 'rejected') throw voicesResult.reason;
+      const {value:models} = modelsResult, {value:voices} = voicesResult;
       if (!Array.isArray(models) || !Array.isArray(voices?.voices)) throw new VoiceError('tts_unavailable',502);
       return {models:models.filter(model => model?.can_do_text_to_speech === true).map(model => ({id:model.model_id,
         languages:Array.isArray(model.languages) ? ['ja','vi'].filter(lang => model.languages.some(row => row?.language_id === lang)) : undefined})),
@@ -164,7 +176,9 @@ const registry = {
       return {models:[{id:MISTRAL_SPEECH_MODEL}],next_cursor:page.next_page_token,
         voices:page.data.map(row => {
           const cloned = row?.type === 'custom', id = row?.id;
-          const lang = cloned ? undefined : id === presets.ja.id ? 'ja' : id === presets.vi.id ? 'vi' : undefined;
+          const slug = row?.slug;
+          const lang = cloned ? undefined : slug === presets.ja.id || id === presets.ja.id ? 'ja'
+            : slug === presets.vi.id || id === presets.vi.id ? 'vi' : undefined;
           return {id,name:row?.name,category:cloned ? 'cloned' : 'premade',lang};
         })};
     }
@@ -199,6 +213,7 @@ const registry = {
     },
     async listCatalog(provider) {
       const result = await listModels({protocol:'gemini',baseUrl:provider.baseUrl,apiKey:provider.apiKey});
+      if (result.status === 402) throw new VoiceError('tts_billing',402);
       if (result.status) throw new VoiceError(result.status === 429 ? 'tts_quota' : 'tts_unavailable',result.status === 429 ? 429 : 502);
       return {models:result.models.filter(compatibleSpeechModel).map(id => ({id})),voices:[{id:'Charon',name:'Charon'}],truncated:result.truncated};
     }

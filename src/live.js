@@ -137,18 +137,16 @@ export async function mistralLiveRoute(request,env) {
         tts:{model:'voxtral-mini-tts-3',voice_id:voice},
         instructions:teaching,welcome_message:MISTRAL_WELCOME})
     });
-    // Voice answers are short, so the LLM is a small share of session cost: prefer the
-    // much stronger instruction following of mistral-medium when the chosen model is rejected.
-    const chain=['mistral-medium-latest','mistral-small-latest'];
-    let model=provider.models[0]||chain[0],tuned=true,voice=MISTRAL_VOICE;
+    const selectedModel=provider.models[0];
+    const fallbackModels=['mistral-small-latest','mistral-medium-latest'].filter(model=>model!==selectedModel);
+    let model=selectedModel||fallbackModels.shift(),tuned=true,voice=MISTRAL_VOICE;
     let response=await create(model,tuned,voice);
     for(let attempt=0;response.status===422&&attempt<3;attempt++){
       const reason=await response.json().catch(()=>null);
       const detail=Array.isArray(reason?.detail)?reason.detail:[];
       const hits=path=>detail.some(e=>path==='llm'&&e?.type==='unsupported_model'
         ||(Array.isArray(e?.loc)&&e.loc[0]==='body'&&e.loc[1]===path));
-      const at=chain.indexOf(model);
-      if(hits('llm')&&at<chain.length-1)model=chain[at+1];
+      if(hits('llm')&&fallbackModels.length)model=fallbackModels.shift();
       else if(hits('tts')&&voice!==MISTRAL_VOICE_FALLBACK)voice=MISTRAL_VOICE_FALLBACK;
       else if(hits('stt')&&tuned)tuned=false;
       else break;

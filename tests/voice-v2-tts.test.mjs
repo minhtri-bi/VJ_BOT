@@ -245,6 +245,46 @@ test('voice catalog discovers ElevenLabs models and voices without synthesis or 
   assert.equal(JSON.stringify(catalog).includes(key),false);
 });
 
+test('voice catalog and playback distinguish billing from a rejected key and catalog permissions', async t => {
+  let upstream;
+  intercept(t, async () => new Response(`Private provider response ${key}`,{status:upstream}));
+  const settings = provider => ({version:2,mode:'single',primary:slot(provider,'demo_voice')});
+  for (const [status,code,http] of [[401,'tts_key_rejected',403],[402,'tts_billing',402],[403,'tts_catalog_permission',403],[429,'tts_quota',429]]) {
+    upstream = status;
+    const response = await tts({action:'catalog',routing:settings('elevenlabs')});
+    assert.equal(response.status,http);
+    const body = await response.json();
+    assert.equal(body.code,code);
+    assert.doesNotMatch(body.detail,/Private provider response/);
+    if (status===402) assert.match(body.detail,/Billing/);
+  }
+  for (const [status,code] of [[402,'tts_billing'],[403,'tts_key_rejected']]) {
+    upstream = status;
+    for (const provider of ['mistral','elevenlabs']) {
+      const response = await tts({text:'こんにちは',mode:'ja',stream:true,routing:settings(provider)});
+      const [record] = await lines(response);
+      assert.equal(record.type,'error');
+      assert.equal(record.code,code);
+      assert.doesNotMatch(record.detail,/Private provider response/);
+    }
+  }
+});
+
+test('ElevenLabs catalog prioritizes billing even when a permissions failure arrives first', async t => {
+  let first;
+  intercept(t, async url => {
+    const status = url.includes('/v1/models') ? 402 : 403;
+    if (status !== first) await new Promise(resolve => setImmediate(resolve));
+    return new Response(null,{status});
+  });
+  const routing = {version:2,mode:'single',primary:slot('elevenlabs','')};
+  for (first of [402,403]) {
+    const response = await tts({action:'catalog',routing});
+    assert.equal(response.status,402);
+    assert.equal((await response.json()).code,'tts_billing');
+  }
+});
+
 test('approved ElevenLabs proxies retain versioned mounts for catalog and speech',async t=>{
   const calls=[];
   intercept(t,async (url,init)=>{
@@ -337,17 +377,19 @@ test('Mistral catalog identifies account clones and known presets without changi
     assert.equal(init.method,'GET');
     return Response.json({data:[
       {id:'voice_custom',name:'Teacher clone',type:'custom'},
-      {id:'voice_3133',name:'Provider JP',type:'preset'},
-      {id:'voice_3144',name:'Provider VI',type:'preset'},
-      {id:'voice_other',name:'Other provider voice',type:'preset'}
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8642',slug:'voice_3133',name:'Provider JP',type:'preset',languages:['ja']},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8643',slug:'voice_3144',name:'Provider VI',type:'preset',languages:['vi']},
+      {id:'voice_3133',name:'Legacy JP',type:'preset'},
+      {id:'voice_other',name:'Other provider voice',type:'preset',languages:['ja']}
     ],next_page_token:'third'});
   });
   const response=await tts({action:'catalog',cursor:'second',routing:{version:2,mode:'single',primary:slot('mistral','')}});
   assert.deepEqual(await response.json(),{models:[{id:'voxtral-mini-tts-3-0'}],
     voices:[
       {id:'voice_custom',name:'Teacher clone',category:'cloned'},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8642',name:'Haruto',category:'premade',lang:'ja'},
+      {id:'01a151d2-8c66-7662-a216-d4c1f38e8643',name:'Huong',category:'premade',lang:'vi'},
       {id:'voice_3133',name:'Haruto',category:'premade',lang:'ja'},
-      {id:'voice_3144',name:'Huong',category:'premade',lang:'vi'},
       {id:'voice_other',name:'Other provider voice',category:'premade'}
     ],verified:false,next_cursor:'third'});
 });

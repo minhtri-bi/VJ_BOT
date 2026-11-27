@@ -1145,14 +1145,24 @@ test('Mistral Live falls back to a supported agent model only when Mistral rejec
   const api_connection={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'magistral-small-latest',api_key:'synthetic-device-mistral-key'};
   const send=body=>{const r=request('/api/live/mistral',body);r.headers.set('X-VJBot-Account','google:qa');return worker.fetch(r,env);};
   const models=[];
+  let supported='mistral-small-latest';
   globalThis.fetch=async(url,options)=>{
     const model=JSON.parse(options.body).llm.model;models.push(model);
-    if(model!=='mistral-small-latest')return Response.json({detail:[{loc:['body','llm','model'],msg:'LLM model is not supported for voice agents',type:'unsupported_model'}]},{status:422});
+    assert.equal(options.headers.Authorization,`Bearer ${api_connection.api_key}`);
+    if(model!==supported)return Response.json({detail:[{loc:['body','llm','model'],msg:'LLM model is not supported for voice agents',type:'unsupported_model'}]},{status:422});
     return Response.json({id:'sess_fb1',participant_token:'pt-fb',server_url:'https://lk.test'});
   };
   try {
-    const response=await send({level:'N5',api_connection});assert.equal(response.status,201);
-    assert.deepEqual(models,['magistral-small-latest','mistral-medium-latest','mistral-small-latest']);
+    for (const model of ['magistral-small-latest','mistral-medium-latest','mistral-small-latest']){
+      models.length=0;
+      const response=await send({level:'N5',api_connection:{...api_connection,model}});
+      assert.equal(response.status,201);
+      assert.deepEqual(models,model==='mistral-small-latest'?[model]:[model,'mistral-small-latest']);
+    }
+    supported='mistral-medium-latest';
+    models.length=0;
+    assert.equal((await send({level:'N5',api_connection})).status,201);
+    assert.deepEqual(models,['magistral-small-latest','mistral-small-latest','mistral-medium-latest']);
     globalThis.fetch=async(url,options)=>{models.push(JSON.parse(options.body).llm.model);
       return Response.json({detail:[{loc:['body','tts','voice_id'],msg:'unknown voice',type:'value_error'}]},{status:422});};
     models.length=0;

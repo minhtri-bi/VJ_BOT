@@ -17,6 +17,8 @@ const assetTypes = {css:'text/css',js:'application/javascript',json:'application
   svg:'image/svg+xml',png:'image/png',ico:'image/x-icon'};
 const voiceProfile = {id:'fixture',name:'Mistral kiểm thử',protocol:'openai',
   base_url:'https://api.mistral.ai/v1',connection_id:'fixture-voice',purpose:'speech'};
+const elevenProfile = {id:'restricted',name:'ElevenLabs kiểm thử',protocol:'elevenlabs',
+  base_url:'https://api.elevenlabs.io',connection_id:'fixture-eleven',purpose:'speech'};
 const html = `<!doctype html><meta charset="utf-8"><div id="speech-notice" hidden><span id="speech-status"></span><button id="speech-stop"></button></div>
 <button type="button" id="playback-check" disabled>Start playback check</button>
 ${assets.map(path => `<script src="${path}"></script>`).join('')}
@@ -331,6 +333,18 @@ async function runLiveBrowser(debuggerUrl,origin){
     await choose('#voice-v2-source','personal');
     await until('loopback voice profile metadata',()=>observe(()=>Boolean(document.querySelector('#voice-v2-primary-profile option[value="server:fixture"]'))));
     await choose('#voice-v2-primary-profile','server:fixture');
+    const catalogButton='#voice-v2-slots fieldset:first-child > button';
+    await tabTo(catalogButton);await press('Enter');
+    await until('Mistral preset catalog shows Haruto',()=>observe(()=>document.querySelector('#voice-v2-voices-primary option')?.textContent==='Haruto · Tiếng Nhật (nam)'));
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-voices-primary option').value),'01a151d2-8c66-7662-a216-d4c1f38e8642');
+    await choose('#voice-v2-primary-profile','server:restricted');
+    await tabTo(catalogButton);await press('Enter');
+    await until('ElevenLabs catalog shows visible manual entry guidance',()=>observe(()=>{
+      const notice=document.querySelector('#voice-v2-primary-catalog-status'), rect=notice.getBoundingClientRect();
+      return rect.top<innerHeight && rect.bottom>0 && /Voices: Read.*Models: Read.*nhập tay ID giọng/.test(notice.textContent);
+    }));
+    await choose('#voice-v2-primary-profile','server:fixture');
+    assert.ok(!await visible('#voice-v2-primary-catalog-status'),'ElevenLabs guidance must not follow the Mistral profile');
     await choose('#voice-v2-mode','dual_same_api');
     assert.ok(await visible('#voice-v2-ja-preset-hint') && await visible('#voice-v2-vi-preset-hint'),
       'Blank shared Mistral voice IDs should show the two preset defaults');
@@ -539,7 +553,7 @@ const appResponses={
   '/api/next-topic':{},
   '/api/completions':{items:[]},
   '/api/ai/settings':{source:'platform',is_admin:true,platform},
-  '/api/ai/profiles':{profiles:[voiceProfile],active_id:null,is_admin:true,can_store:false,platform}
+  '/api/ai/profiles':{profiles:[voiceProfile,elevenProfile],active_id:null,is_admin:true,can_store:false,platform}
 };
 const server = createServer(async (req,res)=>{
   if(req.url==='/browser-stt')return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(browserSttHtml);
@@ -597,6 +611,13 @@ const server = createServer(async (req,res)=>{
       releaseOpener=()=>{releaseOpener=null;res.end(frames.slice(2).join(''));};
       res.write(frames.slice(0,2).join(''));
       return;
+    }
+    if(data.action==='catalog'){
+      const mistral=data.routing.primary.provider==='mistral';
+      const payload=mistral ? {models:[{id:'voxtral-mini-tts-3-0'}],
+        voices:[{id:'01a151d2-8c66-7662-a216-d4c1f38e8642',name:'Haruto',lang:'ja',category:'premade'}]}
+        : {code:'tts_catalog_permission',detail:'ElevenLabs từ chối quyền tải giọng hoặc model.'};
+      return res.writeHead(mistral?200:403,{'Content-Type':'application/json'}).end(JSON.stringify(payload));
     }
     const records = (pairs,long=false)=>[
       ...pairs.map(([lang,frequency],index)=>({...rows[1],lang,index,boundary:index?'sentence':'start',
@@ -686,7 +707,7 @@ try {
     ['speak','answer'],['turn','summary'],['speak','summary-first',[0]],
     ['speak','summary-rest',[1,2,3,4,5,6,7,8,9,10,11]],
     ['stt','capabilities','mistral',sttProfile,true]],'STT must use the selected profile and replay must not call the network');
-  console.log('Chromium full Sound and Classroom shells: preset guidance, four viewport widths, keyboard, ordered mixed Mistral playback and replay, 12-part summary, and Browser STT onset.');
+  console.log('Chromium full Sound and Classroom shells: preset catalog, restricted-key guidance, four viewport widths, keyboard, mixed Mistral playback and replay, 12-part summary, and Browser STT onset.');
 } catch(error) {
   failure=error;
   throw error;

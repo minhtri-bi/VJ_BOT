@@ -218,16 +218,22 @@ test('legacy and explicit routing preserve their own provider error status contr
   const api_connection = {protocol:'openai',base_url:'https://api.openai.com/v1',api_key:key,model:'test-chat'};
   const calls = intercept(t,n => {
     if (n <= 2) return new Response(key,{status:401});
-    if (n <= 4) return new Response('{');
+    if (n <= 4) return new Response(key,{status:402});
+    if (n <= 6) return new Response('{');
     throw new Error('Connection failed.');
   });
   const legacy = {...audio,api_connection}, selected = {...audio,stt_routing:local('openai')};
-  for (const [body,status] of [[legacy,503],[selected,403],[legacy,504],[selected,502],[legacy,504],[selected,503]]) {
+  for (const [body,status] of [[legacy,503],[selected,403],[legacy,402],[selected,402],[legacy,504],[selected,502],[legacy,504],[selected,503]]) {
     const response = await send(body);
     assert.equal(response.status,status);
-    assert.ok(!(await response.text()).includes(key));
+    const result = await response.json();
+    assert.ok(!JSON.stringify(result).includes(key));
+    if (status===402) {
+      assert.equal(result.code,'stt_billing');
+      assert.match(result.detail,/Billing/);
+    }
   }
-  assert.equal(calls.length,6);
+  assert.equal(calls.length,8);
 });
 
 test('STT bounds streamed request and response bodies and never reflects upstream secrets',async t => {
@@ -255,7 +261,7 @@ test('STT bounds streamed request and response bodies and never reflects upstrea
   await reject(await worker.fetch(requestFor(oversize,headers()),env),413);
   assert.equal(requestCancelled,true);
   assert.equal(usage(),0);
-  for (const status of [429,503,403,403,403,503,502,502,502,502,502]) {
+  for (const status of [429,503,403,402,403,503,502,502,502,502,502]) {
     const response = await send({...audio,stt_routing});
     assert.equal(response.status,status);
     assert.doesNotMatch(await response.text(),/private upstream echo|synthetic-stt-voice-key/);
