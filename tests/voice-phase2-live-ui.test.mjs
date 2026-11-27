@@ -125,6 +125,31 @@ test('streams Batch 0 before completion, fetches both batches independently, and
   assert.equal(f.errors.length,0);f.engine.stop();assert.equal(f.timers.size,0);
 });
 
+test('long summaries keep two personal requests and split managed continuation without reordering audio',async()=>{
+  for (const [count,routing,sizes] of [
+    [12,{...routeSingle,primary:{speed:1,profile:{scope:'server',id:'personal'}}},[1,11]],
+    [16,{version:2,mode:'dual_same_api',primary:{speed:1,profile:{scope:'platform',id:'openai'}},ja:{},vi:{}},[1,8,7]]
+  ]) {
+    const parts=Array.from({length:count},(_,i)=>({lang:i%2?'vi':'ja',boundary:i?'inline':'start',text:i%2?'Em nghe nhé.':'聞いてください。'}));
+    const first=deferred();
+    const f=fixture({route:async()=>routing,fetch(call){
+      if(call.body.command==='summary') return turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts));
+      if(call.path==='/api/tts' && call.body.text==='<ja>聞いてください。</ja>') return first.promise;
+    }});
+    await f.engine.start();
+    const before=f.clips.length, issued=f.calls.length;
+    const summary=f.engine.sendCommand('summary');await cycle();
+    const batches=f.calls.slice(issued).filter(call=>call.path==='/api/tts');
+    assert.deepEqual(batches.map(call=>Array.from(call.body.text.matchAll(/<(ja|vi)>/g)).length),sizes);
+    assert.equal(f.clips.length,before,'continuation responses cannot overtake batch zero');
+    first.resolve(audioResponse('ja'));await summary;
+    assert.deepEqual(f.clips.slice(before).map(clip=>clip.lang),parts.map(part=>part.lang));
+    assert.equal(f.states.at(-1).phase,'listening');
+    assert.equal(f.errors.length,0);
+    f.engine.stop();
+  }
+});
+
 test('commands carry canonical context; repeat is RAM only; slower changes Japanese but never Vietnamese speed in single mode',async()=>{
   const f=fixture();await f.engine.start();
   const openingClips=f.clips.slice(), openingCalls=f.calls.length;
@@ -189,6 +214,47 @@ test('blocked STT does not switch sources, while browser PTT skips STT and mutin
   f.engine.setMuted(false);f.engine.toggleTalk();f.advance(400);f.recognizers[1].result('猫です。');f.engine.toggleTalk();await cycle();
   assert(!f.calls.some(call=>call.path==='/api/stt'));
   assert.deepEqual(f.captions.filter(caption=>caption.role==='user').map(caption=>caption.text),['猫です。']);
+  f.engine.stop();assert.equal(f.timers.size,0);
+});
+
+test('intentional short push-to-talk keeps はい for either STT while tiny recordings remain local',async()=>{
+  for (const source of ['chat','browser']) {
+    const f=fixture({live:{stt_source:source},fetch(call){
+      if(call.path==='/api/stt' && !call.body.action) return Response.json({text:'はい'});
+    }});
+    await f.engine.start();f.engine.toggleTalk();f.advance(250);
+    if(source==='browser') f.recognizers[0].result('はい');
+    else f.recorders[0].data(1024);
+    f.engine.toggleTalk();await cycle();
+    const learner=f.calls.filter(call=>call.path==='/api/live/turn').at(-1);
+    assert.equal(learner.body.transcript,'はい');
+    assert.equal(f.calls.filter(call=>call.path==='/api/stt' && !call.body.action).length,source==='chat'?1:0);
+    const count=f.calls.length;
+    if(source==='chat') {
+      f.engine.toggleTalk();f.recorders[1].data(511);f.advance(400);f.engine.toggleTalk();await cycle();
+      assert.equal(f.calls.length,count);
+    }
+    f.engine.stop();
+  }
+});
+
+test('automatic browser STT ignores two noise pulses and recognizes a short confirmed reply',async()=>{
+  const f=fixture({worklet:true,live:{turn_mode:'vad'}});await f.engine.start();
+  const port=f.nodes.find(node=>node.port).port;
+  const emit=(rms,count)=>{for(let i=0;i<count;i++){f.advance(30);port.onmessage({data:{rms}});}};
+  emit(0,10);
+  for (let i=0;i<2;i++){emit(0.06,2);emit(0,3);}
+  assert.equal(f.recognizers.length,0);
+  assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').length,1);
+  emit(0.06,4);
+  assert.equal(f.recognizers.length,0);
+  emit(0.06,1);
+  assert.equal(f.recognizers.length,1);
+  assert.equal(f.states.at(-1).phase,'recording');
+  f.recognizers[0].result('はい');emit(0,25);await cycle();
+  assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.transcript,'はい');
+  assert.equal(f.recognizers.length,1);
+  assert(!f.calls.some(call=>call.path==='/api/stt'));
   f.engine.stop();assert.equal(f.timers.size,0);
 });
 

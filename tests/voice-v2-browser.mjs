@@ -353,6 +353,11 @@ async function runLiveBrowser(debuggerUrl,origin){
         document.querySelector('.live-turn.user')?.textContent.includes('昨日映画を見ました。') &&
         keyboardClicks.includes('live-start') && keyboardClicks.filter(id=>id==='live-talk').length===2;
     }),'Trusted Start/PTT actions, captured transcript, or reply playback missing');
+    await tabTo('[data-command="summary"]');
+    await press('Enter');
+    await until('long bilingual summary',async()=>await playing()===20 && await turn()==='you');
+    assert.deepEqual(await observe(()=>window.voiceSmoke.output.slice(8).map(item=>item.frequency)),
+      summaryReply.map((_,i)=>400+i*40),'The browser must play all twelve summary segments in order');
     await tabTo('#live-mute',{shift:true});
     await press('Enter');
     assert.ok(await observe(()=>window.voiceSmoke.microphone.getAudioTracks().every(track=>!track.enabled) &&
@@ -434,6 +439,7 @@ const replyEvents = segments => [
   ['done',{count:segments.length,full_text:segments.map(([,text])=>text).join(' '),japanese_only:false}]
 ].map(([name,item])=>`event: ${name}\ndata: ${JSON.stringify(item)}\n\n`).join('');
 const opener = [['ja','最初です。'],['vi','Chào em.'],['ja','続けましょう。']];
+const summaryReply = Array.from({length:12},(_,i)=>i%2 ? ['vi',`Ôn thêm mục ${i}.`] : ['ja',`まとめの例${i}です。`]);
 const platform={configured:true};
 const appResponses={
   '/api/auth/session':{user:{user_id:'browser-fixture',name:'Học viên kiểm thử',is_admin:true}},
@@ -491,7 +497,8 @@ const server = createServer(async (req,res)=>{
     if(req.url==='/api/live/turn'){
       const {command,transcript}=data;
       liveRequests.push(['turn',command ?? transcript]);
-      const utterance=command==='start'?opener:command==='hint'?[['ja','ゆっくり話しましょう。']]:[['ja','映画ですね。']];
+      const utterance=command==='start'?opener:command==='hint'?[['ja','ゆっくり話しましょう。']]
+        :command==='summary'?summaryReply:[['ja','映画ですね。']];
       return res.writeHead(200,{'Content-Type':'text/event-stream'}).end(replyEvents(utterance));
     }
     const records = (pairs,long=false)=>[
@@ -509,6 +516,12 @@ const server = createServer(async (req,res)=>{
       liveBatches.push('rest');send(records([['vi',550],['ja',660]]));
       if(releaseFirstBatch)releaseFirstBatch();
       return;
+    }
+    if(text?.includes('まとめの例') || text?.includes('Ôn thêm mục')){
+      const first=text.includes(summaryReply[0][1]);
+      const parts=Array.from(text.matchAll(/<(ja|vi)>.*?(\d+).*?<\/\1>/gu),([,lang,i])=>[lang,400+Number(i)*40]);
+      liveRequests.push(['speak',first?'summary-first':'summary-rest',parts.length]);
+      return send(records(parts));
     }
     if(text?.includes('ゆっくり話しましょう。') || text?.includes('映画ですね。')){
       const hint=text.includes('ゆっくり話しましょう。');
@@ -570,8 +583,9 @@ try {
   const sttProfile={scope:'server',id:'fixture'};
   assert.deepEqual(liveRequests,[['stt','capabilities','mistral',sttProfile,true],['turn','start'],['speak','opening-first'],
     ['speak','opening-rest'],['turn','hint'],['speak','hint'],['stt','transcribe','mistral',sttProfile,true],['turn','昨日映画を見ました。'],
-    ['speak','answer'],['stt','capabilities','mistral',sttProfile,true]],'STT must use the selected profile and replay must not call the network');
-  console.log('Chromium full Classroom shell: 390/768/1024/1440px, reduced motion, trusted keyboard, ordered TTS, local replay and synthetic STT.');
+    ['speak','answer'],['turn','summary'],['speak','summary-first',1],['speak','summary-rest',11],
+    ['stt','capabilities','mistral',sttProfile,true]],'STT must use the selected profile and replay must not call the network');
+  console.log('Chromium full Classroom shell: 390/768/1024/1440px, reduced motion, trusted keyboard, ordered TTS, 12-segment summary, local replay and synthetic STT.');
 } catch(error) {
   failure=error;
   throw error;

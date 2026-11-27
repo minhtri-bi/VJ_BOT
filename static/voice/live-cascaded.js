@@ -1,5 +1,5 @@
 (function () {
-  const maxAudio=2*1024*1024, maxText=4000, maxSegments=8;
+  const maxAudio=2*1024*1024, maxText=4000, maxSegments=16, managedTtsSegments=8;
   const minSpeech=350, maxRecording=30000, hangover=750;
   // The Worker limits the request to 20 KiB; reserve room for a device connection and its JSON escaping.
   const maxTurnBytes=18*1024;
@@ -261,6 +261,11 @@
     }
     function commitCapture(record) {
       if (!ownsSession() || capture!==record) return;
+      if (record.browser) {
+        try { startBrowserRecognition(record); }
+        catch {captureErrorFor(record,captureError);return;}
+        if (!ownsSession() || capture!==record) return;
+      }
       record.turn=beginTurn();state('recording');
     }
     function recordEnded(record) {
@@ -268,9 +273,8 @@
       const {turn,browser,start,lastLoud}=record, end=record.end ?? time();
       releaseCapture(record);
       if (!turn || !owns(turn)) return;
-      if ((record.auto ? lastLoud : end)-start<minSpeech) {
+      if (record.auto && !browser && lastLoud-start<minSpeech) {
         completeTurn(turn);
-        if (!record.auto && ownsSession()) onError(noSpeech);
         return;
       }
       const input=browser ? null : new Blob(record.chunks,{type:record.device.mimeType || record.chunks[0]?.type || record.mime});
@@ -279,32 +283,33 @@
     }
     function endCapture(record) {
       if (capture!==record || record.end!==undefined || !ownsSession()) return;
-      if (!record.turn) {releaseCapture(record);return;}
+      if (!record.turn || !record.device) {releaseCapture(record);return;}
       record.end=time();clearTimeout(record.timer);
       record.timer=setTimeout(()=>captureErrorFor(record,captureError),4000);
       try {record.device.stop();} catch {captureErrorFor(record,captureError);}
+    }
+    function startBrowserRecognition(record) {
+      const recognizer=record.device=new Recognition();
+      recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
+      recognizer.onresult=event=>{
+        if (capture!==record || !ownsSession()) return;
+        let text='';
+        for (let i=0;i<event.results.length;i++) {
+          if (!event.results[i].isFinal) continue;
+          text+=(text?' ':'')+event.results[i][0].transcript.trim();
+          if (text.length>1500) {captureErrorFor(record,'Câu nói quá dài. Em thử nói ngắn hơn nhé.');return;}
+        }
+        record.text=text;
+      };
+      recognizer.onerror=event=>captureErrorFor(record,event.error==='no-speech' ? noSpeech : 'Trình duyệt chưa chép được lời. Em kiểm tra micro và nguồn chép lời nhé.');
+      recognizer.onend=()=>recordEnded(record);
+      recognizer.start();
     }
     function beginCapture(auto,now) {
       if (!ownsSession() || muted) return;
       const browser=sttProvider==='browser', record=capture={auto,browser,start:now,lastLoud:now,text:'',chunks:[],size:0};
       try {
-        if (browser) {
-          const recognizer=record.device=new Recognition();
-          recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
-          recognizer.onresult=event=>{
-            if (capture!==record || !ownsSession()) return;
-            let text='';
-            for (let i=0;i<event.results.length;i++) {
-              if (!event.results[i].isFinal) continue;
-              text+=(text?' ':'')+event.results[i][0].transcript.trim();
-              if (text.length>1500) {captureErrorFor(record,'Câu nói quá dài. Em thử nói ngắn hơn nhé.');return;}
-            }
-            record.text=text;
-          };
-          recognizer.onerror=event=>captureErrorFor(record,event.error==='no-speech' ? noSpeech : 'Trình duyệt chưa chép được lời. Em kiểm tra micro và nguồn chép lời nhé.');
-          recognizer.onend=()=>recordEnded(record);
-          recognizer.start();
-        } else {
+        if (!browser) {
           const Recorder=window.MediaRecorder;
           const mime=record.mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type=>Recorder.isTypeSupported?.(type));
           const recorder=record.device=new Recorder(microphone,mime?{mimeType:mime}:{});
@@ -336,7 +341,7 @@
       const nearSpeaker=phase==='speaking' || now-speakerEndedAt<250;
       const threshold=nearSpeaker ? 0.035 : 0.022;
       if (!record) {
-        // Start capturing on the first loud window; confirm before interrupting the teacher.
+        // Record server STT at onset. Start browser recognition only after confirmation.
         if (rms>=threshold && (phase==='listening' && !nearSpeaker || live.barge_in && ['listening','thinking','speaking'].includes(phase)))
           beginCapture(true,now);
         return;
@@ -415,8 +420,8 @@
       function batch(parts) {
         const before=appendChain;
         prepared??=route(signal);
-        // Start both HTTP requests independently. Limit the second reader to one pending
-        // record until every record from batch zero has been appended and validated.
+        // Start requests independently, but append only after the preceding batch has
+        // validated and appended every record.
         appendChain=(async()=>{
           const routing=await prepared;
           if (!current()) return;
@@ -457,7 +462,15 @@
       });
       if (!result || !current()) return;
       deadline(turn,90000,'Âm thanh tải hoặc phát quá lâu. Em thử lại nhé.');
-      if (result.segments.length>1) batch(result.segments.slice(1));
+      if (result.segments.length>1) {
+        const routing=await prepared;
+        if (!current()) return;
+        const remaining=result.segments.slice(1);
+        const managed=remaining.some(({lang})=>(routing.mode==='single'
+          ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
+        const limit=managed ? managedTtsSegments : maxSegments-1;
+        for(let i=0;i<remaining.length;i+=limit) batch(remaining.slice(i,i+limit));
+      }
       await appendChain;
       if (!current()) return;
       await turn.audio.finish();
