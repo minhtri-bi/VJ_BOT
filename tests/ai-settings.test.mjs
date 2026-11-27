@@ -19,11 +19,11 @@ function settings({consent = true, models = ['paid', 'denied', 'working'], saved
       addEventListener(name, handler) { this.events[name] = handler; },
       showModal() {
         this.open = true;
-        if (consent !== null) queueMicrotask(() => this.close(consent ? 'start' : 'cancel'));
+        if (id === 'ai-confirm-dialog' && consent !== null) queueMicrotask(() => this.close(consent ? 'start' : 'cancel'));
       },
       close(value = '') { this.open = false; this.returnValue = value; this.events.close?.(); },
       click() { return this.events.click?.(); },
-      focus() {},
+      focus() { context.document.activeElement = this; },
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
       removeAttribute(name) { delete this.attributes[name]; },
@@ -589,10 +589,27 @@ test('unified chooser groups API and OAuth accounts without duplicating profile 
   assert.equal(ui.requests.some(request => request.path.includes('/models')), false);
 });
 
+test('empty API settings hide the redundant hint but still warn about a missing selected connection', async () => {
+  const activeChoice = {value:{scope:'none', id:''}}, ui = settings({activeChoice});
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, true);
+  activeChoice.value = {scope:'server', id:'missing'};
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, false);
+  assert.match(ui.element('ai-source').textContent, /không khả dụng/);
+  activeChoice.value = {scope:'server', id:'saved-profile'};
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, true);
+  assert.equal(ui.element('ai-source').textContent, '');
+});
+
 test('adding an API draft preserves the selected saved connection and unsaved fields on reopen', async () => {
   const ui = settings();
   await ui.context.renderAiPanels('settings');
   ui.element('ai-profile-new').click();
+  ui.element('ai-key-toggle').click();
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Ẩn');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'true');
   ui.element('ai-profile-name').value = 'Unsaved draft';
   ui.element('ai-key').value = 'unsaved-secret';
   await ui.context.renderAiPanels('settings');
@@ -601,11 +618,94 @@ test('adding an API draft preserves the selected saved connection and unsaved fi
   assert.equal(ui.element('ai-key').value, 'unsaved-secret');
   assert.equal(JSON.stringify([...ui.storage]).includes('unsaved-secret'), false);
   await ui.element('ai-api-back').click();
+  assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.context.document.activeElement, ui.element('ai-add-connection'));
+  assert.equal(ui.element('ai-key').type, 'password');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Hiện');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'false');
   assert.equal(ui.element('ai-profile-list').value, 'server:saved-profile');
   assert.equal(ui.element('ai-profile-name').value, 'Saved provider');
   assert.equal(ui.element('ai-key').value, '');
   assert.equal(ui.element('ai-current-model').textContent, 'paid');
   assert.equal(ui.requests.some(request => request.path.includes('/models')), false);
+});
+
+test('canceling API edits focuses the edit button or the connection list if it disappeared', async () => {
+  const ui = settings();
+  await ui.context.renderAiPanels('settings');
+  const opener = ui.element('ai-edit-connection');
+  opener.click();
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.context.document.activeElement, opener);
+  opener.click();
+  opener.hidden = true;
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.context.document.activeElement, ui.element('ai-profile-list'));
+});
+
+test('canceling connection edits keeps unsaved model scan results and scrubs typed credentials', async () => {
+  const deviceProfiles = new Map([['device-1', {
+    id: 'device-1', owner: 'test:owner', name: 'Device Gemini', protocol: 'gemini',
+    base_url: 'https://generativelanguage.googleapis.com', api_key: 'sk-device-4321',
+    key_last4: '4321', model: '', models: [], connection_id: null, checked_at: null
+  }]]);
+  const ui = settings({
+    deviceProfiles,
+    activeChoice: {value: {scope: 'local', id: 'device-1'}},
+    models: ['working'],
+    savedModel: ''
+  });
+  await ui.context.renderAiPanels('settings');
+  await ui.element('ai-fetch-models').click();
+  assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working']);
+  assert.equal(ui.element('ai-save').disabled, false);
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-key').value = 'typed-replacement-key';
+  ui.element('ai-key').events.input();
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.element('ai-key').value, '');
+  assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working']);
+  assert.equal(ui.element('ai-model-list').value, 'working');
+  assert.equal(ui.element('ai-save').disabled, false);
+});
+
+test('API editor dismissal and account changes scrub keys without scanning or changing the active connection', async () => {
+  const ui = settings();
+  await ui.context.renderAiPanels('settings');
+  ui.element('ai-edit-connection').click();
+  assert.equal(ui.element('ai-edit-dialog').open, true);
+  ui.element('ai-key').value = 'synthetic-unsaved-key';
+  ui.element('ai-key-toggle').click();
+  assert.equal(ui.element('ai-key').type, 'text');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Ẩn');
+  ui.context.dispatchEvent(new Event('hashchange'));
+  assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.element('ai-key').value, '');
+  assert.equal(ui.element('ai-key').type, 'password');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Hiện');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-label'), 'Hiện khóa API');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'false');
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.activeChoice.value)), {scope:'server', id:'saved-profile'});
+  await ui.context.renderAiPanels('settings');
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-key').value = 'second-synthetic-key';
+  ui.context.signedInUser = {user_id:'other:owner'};
+  ui.context.dispatchEvent(new Event('vjbot-voice-changed'));
+  assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.element('ai-key').value, '');
+  assert.equal(ui.requests.some(r => r.path.includes('/models') || r.body.api_key), false);
+});
+
+test('history navigation closes a pending scan cost prompt without probing', async () => {
+  const ui = settings({models:['working'], consent:null});
+  await ui.context.renderAiPanels('settings');
+  const scan = ui.element('ai-fetch-models').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.element('ai-confirm-dialog').open, true);
+  ui.context.dispatchEvent(new Event('hashchange'));
+  await scan;
+  assert.equal(ui.element('ai-confirm-dialog').open, false);
+  assert.equal(ui.requests.some(request => request.path === '/api/ai/models/test'), false);
 });
 
 test('selecting OAuth delegates explicit activation and leaves the API voice profile unchanged', async () => {

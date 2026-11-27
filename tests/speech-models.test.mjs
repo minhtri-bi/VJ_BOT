@@ -7,11 +7,12 @@ const base = 'https://generativelanguage.googleapis.com';
 const profileRow = (id, scope = 'local', patch = {}) => ({id,scope,name:id,protocol:'gemini',base_url:base,...patch});
 function fixture(apiFetch, {store = new Map(), voices = new Map([['alice',{scope:'local',id:'gemini-one'}]]), admin = false, unavailable = false} = {}) {
   const nodes = new Map(['speech-model','speech-model-status','speech-model-refresh','speech-profile','ai-oauth-voice-hint',
-    'speech-key-form','speech-key-add','speech-key','speech-key-name','speech-key-storage','speech-key-save',
+    'speech-key-form','speech-key-add','speech-key-dialog','speech-key','speech-key-name','speech-key-storage','speech-key-save',
     'speech-key-toggle','speech-key-status','speech-test','speech-key-cancel','speech-key-server','speech-key-provider','speech-model-label',
     'speech-account-controls','speech-personal-setup','speech-managed-summary'].map(id => [id, {
     value:'', textContent:'', children:[], events:{}, disabled:false, hidden:true,
     focus() {}, setAttribute() {}, reportValidity() {return true;},
+    showModal() {this.open = true;}, close() {this.open = false;},
     reset() {for(const id of ['speech-key','speech-key-name'])nodes.get(id).value='';},
     addEventListener(name, action) {this.events[name] = action;},
     replaceChildren() {this.children = [];}, append(option) {this.children.push(option);}
@@ -75,6 +76,20 @@ test('a removed selected model stays explicit instead of silently changing to th
   assert.equal(select.value,alternate);
   assert.equal(f.window.selectedSpeechModel(),alternate);
   assert.deepEqual(select.children.map(o => o.value),[alternate,defaultModel]);
+});
+
+test('leaving Sound closes the default voice key dialog and discards a revealed key', () => {
+  const f = fixture();
+  const field = f.nodes.get('speech-key'), dialog = f.nodes.get('speech-key-dialog');
+  f.nodes.get('speech-key-add').events.click();
+  field.value = 'synthetic-draft';
+  field.type = 'text';
+  assert.equal(dialog.open, true);
+  f.window.dispatchEvent(new Event('hashchange'));
+  assert.equal(dialog.open, false);
+  assert.equal(field.value, '');
+  assert.equal(field.type, 'password');
+  assert.equal(f.nodes.get('speech-key-form').hidden, true);
 });
 
 test('catalog responses from another voice profile or owner cannot overwrite the current selection', async () => {

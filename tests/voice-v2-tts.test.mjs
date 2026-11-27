@@ -270,18 +270,55 @@ test('voice catalog and playback distinguish billing from a rejected key and cat
   }
 });
 
+test('ElevenLabs catalog distinguishes restricted credentials from invalid keys in bounded 401 replies', async t => {
+  let failedPath, rejected, cancelled;
+  intercept(t,async (url,init)=>{
+    if (init.method==='POST' || url.includes(failedPath)) return rejected();
+    return url.includes('/v1/models') ? Response.json([]) : Response.json({voices:[]});
+  });
+  const routing = {version:2,mode:'single',primary:slot('elevenlabs','manual_voice')};
+  const denial = status => () => Response.json({detail:{status,message:`Private provider response ${key}`}},{status:401});
+  for (failedPath of ['/v1/models','/v2/voices']) {
+    for (const [make,code] of [
+      [denial('missing_permissions'),'tts_catalog_permission'],
+      [denial('invalid_api_key'),'tts_key_rejected'],
+      [() => new Response(null,{status:401}),'tts_key_rejected'],
+      [() => new Response('<html>Private provider response</html>',{status:401}),'tts_key_rejected'],
+      [() => new Response(new ReadableStream({
+        start(controller){controller.enqueue(new Uint8Array(8193));},
+        cancel(){cancelled = true;}
+      }),{status:401}),'tts_key_rejected']
+    ]) {
+      rejected = make;
+      const response = await tts({action:'catalog',routing});
+      assert.equal(response.status,403);
+      const body = await response.json();
+      assert.equal(body.code,code);
+      assert.doesNotMatch(JSON.stringify(body),/Private provider response|missing_permissions|invalid_api_key/);
+    }
+    assert.equal(cancelled,true);
+    cancelled=false;
+  }
+  rejected=denial('missing_permissions');
+  const [record]=await lines(await tts({text:'こんにちは',mode:'ja',stream:true,routing}));
+  assert.equal(record.type,'error');
+  assert.equal(record.code,'tts_key_rejected','synthesis must not apply the catalog classification');
+});
+
 test('ElevenLabs catalog prioritizes billing even when a permissions failure arrives first', async t => {
-  let first;
+  let first, permissionStatus;
   intercept(t, async url => {
-    const status = url.includes('/v1/models') ? 402 : 403;
+    const status = url.includes('/v1/models') ? 402 : permissionStatus;
     if (status !== first) await new Promise(resolve => setImmediate(resolve));
-    return new Response(null,{status});
+    return status===401 ? Response.json({detail:{status:'missing_permissions'}},{status:401}) : new Response(null,{status});
   });
   const routing = {version:2,mode:'single',primary:slot('elevenlabs','')};
-  for (first of [402,403]) {
-    const response = await tts({action:'catalog',routing});
-    assert.equal(response.status,402);
-    assert.equal((await response.json()).code,'tts_billing');
+  for (permissionStatus of [401,403]) {
+    for (first of [402,permissionStatus]) {
+      const response = await tts({action:'catalog',routing});
+      assert.equal(response.status,402);
+      assert.equal((await response.json()).code,'tts_billing');
+    }
   }
 });
 

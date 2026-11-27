@@ -259,7 +259,7 @@ async function runLiveBrowser(debuggerUrl,origin){
   };
   const visible=selector=>observe(s=>document.querySelector(s)?.checkVisibility(),selector);
   const press=async (key,{shift=false}={})=>{
-    const keys={Tab:9,Enter:13,Escape:27,Home:36,ArrowUp:38,ArrowDown:40,' ':32};
+    const keys={Tab:9,Enter:13,Escape:27,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,' ':32};
     const text=key==='Enter'?'\r':key===' '?' ':undefined;
     const params={key,code:key===' '?'Space':key,windowsVirtualKeyCode:keys[key],modifiers:shift?8:0};
     await send('Input.dispatchKeyEvent',{...params,type:text?'keyDown':'rawKeyDown',text});
@@ -329,16 +329,35 @@ async function runLiveBrowser(debuggerUrl,origin){
       .filter(link=>new URL(link.href).origin===location.origin && !link.sheet).map(link=>link.href)),[],
       'A local stylesheet from the original app shell did not load');
     await observe(observeLiveMedia);
-    await click('#voice-v2-settings > summary');
-    await choose('#voice-v2-source','personal');
+    await click('#voice-v2-default-tab');
+    assert.ok(await visible('#speech-test'));
+    await press('ArrowLeft');
+    assert.ok(!await visible('#speech-test'),'Selecting the bilingual view must hide the default voice panel');
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-bilingual-tab');
+    await click('#voice-v2-add');
+    assert.ok(await visible('#voice-v2-key'));
+    assert.ok(!await visible('#voice-v2-url'),'Official providers do not expose a URL field');
+    await choose('#voice-v2-kind','openai_compatible');
+    assert.ok(await visible('#voice-v2-url') && await observe(()=>document.querySelector('#voice-v2-url').required));
+    await press('Escape');
+    assert.ok(!await visible('#voice-v2-key'));
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-add');
     await until('loopback voice profile metadata',()=>observe(()=>Boolean(document.querySelector('#voice-v2-primary-profile option[value="server:fixture"]'))));
     await choose('#voice-v2-primary-profile','server:fixture');
-    const catalogButton='#voice-v2-slots fieldset:first-child > button';
-    const catalogNotice='#voice-v2-primary-catalog-status';
+    assert.ok(!await visible('#voice-v2-key') && !await visible('#voice-v2-live-turn'),
+      'Choosing a saved account must not open connection setup or Live options');
+    await choose('#voice-v2-mode','dual_same_api');
+    assert.ok(!await visible('#voice-v2-primary-model') && !await visible('#voice-v2-ja-speed'),'Advanced and fallback fields are hidden by default');
+    assert.ok(!await visible('#voice-v2-ja-catalog') && await visible('#voice-v2-primary-catalog'),'The shared connection has one catalog action');
+    assert.ok(await visible('#voice-v2-ja-preset-hint') && await visible('#voice-v2-vi-preset-hint'),
+      'Blank shared Mistral voice IDs should show the two preset defaults');
+    assert.deepEqual(await observe(()=>['ja','vi'].map(lang=>
+      document.getElementById('voice-v2-'+lang+'-preset-hint').textContent.match(/Haruto|Huong/)?.[0])),['Haruto','Huong']);
+    const catalogButton='#voice-v2-primary-catalog', catalogNotice='#voice-v2-primary-catalog-status';
     const {root}=await send('DOM.getDocument',{depth:0});
     const {nodeId}=await send('DOM.querySelector',{nodeId:root.nodeId,selector:catalogNotice});
     const {nodes:[emptyNotice]}=await send('Accessibility.getPartialAXTree',{nodeId,fetchRelatives:false});
-    assert.equal(emptyNotice.ignored,false,'The catalog status must be available to assistive technology before the first update');
+    assert.equal(emptyNotice.ignored,false,'The catalog status must be available before its first update');
     assert.equal(emptyNotice.role.value,'status');
     await tabTo(catalogButton);await press('Enter');
     await until('Mistral preset catalog shows Haruto',()=>observe(()=>document.querySelector('#voice-v2-voices-primary option')?.textContent==='Haruto · Tiếng Nhật (nam)'));
@@ -349,23 +368,72 @@ async function runLiveBrowser(debuggerUrl,origin){
       const notice=document.querySelector(selector), rect=notice.getBoundingClientRect();
       return rect.top<innerHeight && rect.bottom>0 && /quyền đọc giọng và model.*nhập tay ID giọng/.test(notice.textContent);
     },catalogNotice));
+    assert.ok(!await visible('#voice-v2-primary-model'),'Catalog guidance must be visible even when primary fields are collapsed');
     await choose('#voice-v2-primary-profile','server:fixture');
     assert.equal(await observe(selector=>document.querySelector(selector).textContent,catalogNotice),'',
       'ElevenLabs guidance must not follow the Mistral profile');
-    await choose('#voice-v2-mode','dual_same_api');
-    assert.ok(await visible('#voice-v2-ja-preset-hint') && await visible('#voice-v2-vi-preset-hint'),
-      'Blank shared Mistral voice IDs should show the two preset defaults');
-    assert.deepEqual(await observe(()=>['ja','vi'].map(lang=>
-      document.getElementById('voice-v2-'+lang+'-preset-hint').textContent.match(/Haruto|Huong/)?.[0])),['Haruto','Huong']);
+    await click('#voice-v2-primary-fallback');
+    assert.ok(await visible('#voice-v2-primary-model'));
+    await click('#voice-v2-primary-fallback');
+    assert.ok(!await visible('#voice-v2-primary-model'));
+    const slotPositions=()=>observe(()=>{
+      const rect=id=>document.getElementById(`voice-v2-${id}-voice`).getBoundingClientRect();
+      const ja=rect('ja'),vi=rect('vi');
+      const card=document.getElementById('settings-sound-card').getBoundingClientRect();
+      return {sameRow:Math.abs(ja.top-vi.top)<1,sameColumn:Math.abs(ja.left-vi.left)<1,
+        fits:Math.min(ja.left,vi.left)>=card.left && Math.max(ja.right,vi.right)<=card.right};
+    });
+    const splitProfilesVisible=()=>observe(()=>['ja','vi'].map(lang=>{
+      const profile=document.querySelector(`#voice-v2-${lang}-profile`);
+      return !profile.disabled && profile.checkVisibility();
+    }));
+    assert.deepEqual(await splitProfilesVisible(),[false,false],'Shared mode uses the main connection');
+    assert.deepEqual(await slotPositions(),{sameRow:true,sameColumn:false,fits:true});
+    await width(390);
+    assert.deepEqual(await slotPositions(),{sameRow:false,sameColumn:true,fits:true});
+    await choose('#voice-v2-mode','dual_split_api');
+    assert.deepEqual(await splitProfilesVisible(),[true,true],'Split mode must expose both language connections');
+    const clippedControls=selector=>observe(s=>{
+      const container=document.querySelector(s), bounds=container.getBoundingClientRect();
+      return [...container.querySelectorAll('input,select,button,summary')].filter(control=>{
+        if (!control.checkVisibility()) return false;
+        const rect=control.getBoundingClientRect();
+        return rect.left<bounds.left || rect.right>bounds.right;
+      }).map(control=>control.id || control.textContent.trim());
+    },selector);
+    assert.deepEqual(await clippedControls('#voice-v2-reading-settings'),[]);
+    await click('#voice-v2-live-tab');
+    await choose('#voice-v2-live-stt','voice');
+    assert.ok(await visible('#voice-v2-live-stt-slot'));
+    assert.deepEqual(await clippedControls('#voice-v2-live-settings'),[]);
+    await choose('#voice-v2-live-stt','chat');
+    await click('#voice-v2-reading-tab');
+    await click('#voice-v2-add');
+    await choose('#voice-v2-kind','openai_compatible');
+    assert.ok(await visible('#voice-v2-url'));
+    assert.deepEqual(await clippedControls('#voice-v2-account-dialog'),[]);
+    await press('Escape');
+    await width(1440);
     await choose('#voice-v2-mode','single');
+    assert.ok(!await visible('#voice-v2-ja-voice') && !await visible('#voice-v2-vi-voice'));
     assert.ok(!await visible('#voice-v2-ja-preset-hint') && !await visible('#voice-v2-vi-preset-hint'),
       'The default-preset warnings must not describe single-voice routing');
     await tabTo('#voice-v2-primary-voice');
     await send('Input.insertText',{text:'fixture-voice'});
+    await tabTo('#voice-v2-reading-tab',{shift:true});
+    await press('ArrowRight');
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-live-tab');
     await choose('#voice-v2-live-turn','ptt');
     await choose('#voice-v2-live-stt','voice');
     await click('#voice-v2-routing button[type="submit"]');
     await until('saved routing through Sound settings',()=>observe(()=>document.querySelector('#voice-v2-status').textContent.includes('Đã lưu')));
+    const activeVoice=()=>observe(()=>document.querySelector('#voice-v2-active').textContent);
+    assert.match(await activeVoice(),/Đang dùng: Giọng song ngữ/);
+    await click('#voice-v2-default-tab');
+    assert.ok(await visible('#voice-v2-use-default'));
+    assert.match(await activeVoice(),/Đang dùng: Giọng song ngữ/,'Viewing default voice must not alter the saved route');
+    await click('#voice-v2-bilingual-tab');
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-live-turn').value),'ptt');
     await click('#tab-btn-classroom');
     await until('Classroom chat ready',()=>observe(()=>document.querySelector('.classroom-chat-window').dataset.ai==='ready'));
     await width(390);
@@ -501,7 +569,7 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.deepEqual(consoleErrors,[],'Unexpected JavaScript errors in the Classroom app shell');
     const sttNavigation=await send('Page.navigate',{url:origin+'/browser-stt'});
     assert.equal(sttNavigation.errorText,undefined);
-    await until('real Browser STT fixture',()=>visible('#recognize'));
+    await until('real Browser STT fixture initialized',()=>observe(()=>Boolean(window.browserSttProof && document.querySelector('#recognize')?.onclick)));
     await click('#recognize');
     await until('recorded Browser STT speech and teardown',()=>observe(()=>window.browserSttProof.done || window.browserSttProof.errors.length));
     const proof=await observe(()=>{

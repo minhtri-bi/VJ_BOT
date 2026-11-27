@@ -105,6 +105,11 @@ async function send(provider, path, signal, body) {
   const response = await fetch(provider.baseUrl + path, {method:body ? 'POST' : 'GET', headers, redirect:'manual',
     cache:'no-store', signal:AbortSignal.any([signal,AbortSignal.timeout(20000)]), body:body && JSON.stringify(body)});
   if (response.ok) return response;
+  if (response.status === 401 && provider.kind === 'elevenlabs' && !body) {
+    const error = await readJson(response,8192).catch(() => null);
+    if (error?.detail?.status === 'missing_permissions') throw new VoiceError('tts_catalog_permission',403);
+    throw new VoiceError('tts_key_rejected',403);
+  }
   await response.body?.cancel();
   if (response.status === 402) throw new VoiceError('tts_billing',402);
   if (response.status === 403 && provider.kind === 'elevenlabs' && !body) throw new VoiceError('tts_catalog_permission',403);
