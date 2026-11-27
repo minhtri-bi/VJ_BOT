@@ -160,7 +160,7 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     const reading = mode === 'ja' ? authoredVoiceReading(body.reading) : '';
     const mixLanguages = routing.mode === 'single' && routing.primary.provider === 'mistral';
     const chunks = reading ? [{lang:'ja',text:reading,boundary:'start'}]
-      : segmentVoiceText(normalizeVoiceText(body.text,{kanjiMode}),mode,{mixLanguages});
+      : segmentVoiceText(normalizeVoiceText(body.text,{kanjiMode,speakBlanks:true}),mode,{mixLanguages});
     if (!chunks) throw new VoiceError('tts_segment_limit',413,`Đoạn cần đọc có quá ${MAX_SEGMENTS} phần. Hãy chọn đoạn ngắn hơn.`);
     if (!chunks.length) throw new VoiceError('tts_no_text',400,'Không có chữ để đọc.');
     const routes = new Map();

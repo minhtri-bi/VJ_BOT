@@ -8,7 +8,7 @@ test('voice and chat prompts treat the teacher name as a vocative and take answe
     for (const part of ['ラム先生', 'never call the learner by them', 'TAKE ANSWERS AT FACE VALUE', 'Never doubt, challenge or re-ask'])
       assert.ok(prompt.includes(part), part);
   }
-  assert.match(voiceInstructions('N5'), /Conversation itself is Japanese practice/);
+  assert.match(voiceInstructions('N5'), /when the learner is actually practising conversation in Japanese/);
 });
 
 // The chat chips (start, hint, explain, situation, check, summary) must each have a spoken counterpart.
@@ -20,7 +20,7 @@ test('every fixed chat command has a voice command and the voice prompt document
 
 test('voice prompt keeps the reversed-classroom turn rules, level rules and input boundary', () => {
   const prompt = voiceInstructions('N5');
-  for (const part of ['reversed classroom', 'ONE short question', 'at most two errors', 'microphone is closed while you speak',
+  for (const part of ['reversed classroom', 'ONE short question', 'Never assume an answer or invent errors', 'microphone is closed while you speak',
     'LEVEL N5', 'INPUT BOUNDARY', 'do not grade pronunciation']) assert.ok(prompt.includes(part), part);
   assert.match(voiceInstructions('N1'), /LEVEL N1/);
   assert.match(voiceInstructions('bad'), /Hiragana/);
@@ -36,4 +36,42 @@ test('teacher prompts explain the requested form without language leakage or unr
   }
   assert.match(protectedStream, /Use only <ja> tags/);
   assert.match(protectedStream, /PRE-ANSWER CANONICAL TASK:.*Never solve the task/);
+});
+
+test('Live and Chat use brief Vietnamese feedback, with a Japanese pattern and a cue for the same sentence', () => {
+  for (const prompt of [reversedPrompt('N5'), voiceInstructions('N5'), voiceStreamingInstructions('N5')]) {
+    assert.match(prompt, /one or two short sentences of everyday Vietnamese unless Japanese-only practice applies/);
+    assert.match(prompt, /Expand only when the learner asks for more detail/);
+    assert.match(prompt, /show the relevant grammar pattern in Japanese, then offer one cue to repair the same sentence/);
+    assert.match(prompt, /if the learner asks for the full correction or still needs help after trying the cue/);
+    assert.match(prompt, /Preserve the learner's intended meaning/);
+    assert.match(prompt, /Do not switch topics or add a new conversation question to a correction turn/);
+  }
+  const live = voiceStreamingInstructions('N5');
+  assert.match(live, /An explicit request for a detailed explanation allows up to six short sentences/);
+  assert.match(live, /BILINGUAL TURN: Use Vietnamese for explanations and correction reasons/);
+  assert.doesNotMatch(live, /reason for a conversation correction stay in simple Japanese|always end the turn by saying the Japanese question/);
+});
+
+test('Chat and Voice prompts treat a bare greeting as conversation, not an exercise', () => {
+  for (const system of [reversedPrompt('N5'), voiceInstructions('N5'), voiceStreamingInstructions('N5')]) {
+    assert.match(system, /A selected lesson supplies a topic, not permission to start a drill/);
+    assert.match(system, /A standalone greeting such as "hi", "chào thầy" or こんにちは gets one brief, natural greeting back\. Do not turn it into an exercise/);
+    assert.match(system, /Do not greet again, reintroduce yourself or add generic praise before continuing/);
+  }
+  assert.match(reversedPrompt('N5'), /If a learning request needs a specific target/);
+  assert.match(voiceInstructions('N5'), /Other commands start directly with the requested help/);
+  assert.match(VOICE_COMMANDS.start, /chào ngắn một lần nếu cần/);
+});
+
+test('Chat, native Voice and streaming Voice allow an explanation with no Japanese filler', () => {
+  for (const system of [reversedPrompt('N5'), voiceInstructions('N5'), voiceStreamingInstructions('N5')]) {
+    assert.match(system, /A teaching reply may be entirely Vietnamese/);
+    assert.match(system, /Do not insert Japanese just to make a reply bilingual, add a second acknowledgment, or translate what is already clear/);
+    assert.match(system, /Do not ask the same question in both languages/);
+    assert.match(system, /End the turn after the repair cue or requested correction/);
+  }
+  const stream = voiceStreamingInstructions('N5');
+  assert.match(stream, /A Vietnamese-only explanation needs only <vi> tags/);
+  assert.match(stream, /unless the learner explicitly chooses Japanese only/);
 });

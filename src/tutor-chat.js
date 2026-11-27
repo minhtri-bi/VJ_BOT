@@ -90,7 +90,7 @@ async function generateTurn(env, userId, request, session, token) {
   envelope.reference.learning_retrieval = retrieval;
   if(JSON.stringify(envelope).length>16000)return {response:failure('Em chọn một từ, một ví dụ hoặc một câu hỏi cụ thể để thầy giải thích nhé.',413)};
   const asked = await askAI(env, userId, {
-    system: reversedPrompt(request.level, history.length) + '\n' + learningBoundary
+    system: reversedPrompt(request.level, request.intent) + '\n' + learningBoundary
       +(focus?.kind==='question'?'\nThis is a pre-answer canonical task. Offer only a small strategy or clarification. Never solve it, name the correct option, eliminate choices, reveal a transcript or accepted answers, or claim the source key is reviewed. No overview or examples are available as task evidence.':''),
     schema: tutorSchema(request.intent), schemaName: 'tutor_reply',
     turns: [{role: 'user', content: JSON.stringify(envelope)}]

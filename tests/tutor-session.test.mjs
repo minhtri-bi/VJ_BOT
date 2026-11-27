@@ -752,6 +752,32 @@ test('explicit start creates a durable greeting probe in the normal chat session
   assert.equal(snapshot.session.revision, 2);
 });
 
+test('the tutor distinguishes a bare greeting from opening the lesson and from practice chips', async t => {
+  const {env, send} = await authenticated(t);
+  const probe = 'Em hãy giới thiệu mình bằng tiếng Nhật.';
+  const cases = [
+    [{message:'hi'}, structured('Chào em!'), null],
+    [{intent:'start', message:''}, structured('Em thử tự giới thiệu nhé.', 'probe', probe), 'SESSION OPENING'],
+    [{message:'hi'}, structured('Chào em!'), null],
+    [{intent:'explain', message:'Em muốn tự giải thích mẫu câu này.'},
+      structured('Khi nào em dùng mẫu này?', 'probe', 'Khi nào em dùng mẫu này?'), 'PRACTICE ACTION'],
+    [{intent:'situation', message:'Thầy cho em một tình huống mới.'},
+      structured('Em vừa gặp một bạn cùng lớp. Em sẽ giới thiệu tên thế nào?', 'probe', probe), 'PRACTICE ACTION']
+  ];
+  const captured = provider(t, (_call, index) => providerResponse(cases[index - 1][1]));
+  for (const [index, [body, reply, expectedPolicy]] of cases.entries()) {
+    await successful(await send(body), reply.reply);
+    const call = captured[index], system = call.body.messages[0].content;
+    assert.equal(call.envelope.reference.teaching.intent, body.intent ?? 'message');
+    assert.equal(system.match(/^(SESSION OPENING|PRACTICE ACTION):/m)?.[1] ?? null, expectedPolicy);
+    if (index === 0) assert.deepEqual(call.envelope.reference.history, []);
+    if (index === 2) {
+      assert.equal(call.envelope.message, 'hi');
+      assert.equal(teachingState(await saved(env)).probe, probe, 'greeting did not reopen or replace the exercise');
+    }
+  }
+});
+
 test('the retired greeting endpoint cannot append history or bypass an active chat generation', async t => {
   const {env, request, send} = await authenticated(t);
   const paused = pausedProvider(t);

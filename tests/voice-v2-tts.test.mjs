@@ -162,6 +162,29 @@ test('shared romaji cleanup preserves reading preference, annotations and gramma
     '「わ」と「え」。私はがっこうへ行きます。 パーティーと日々。','Nhắc lại (N5).']);
 });
 
+test('Japanese fill-in blanks are spoken as くうらん without choosing an answer',async t=>{
+  const inputs=[];
+  intercept(t,async (_url,init)=>{
+    const {language_code,text,input}=JSON.parse(init.body);
+    inputs.push([language_code,text ?? input]);return mp3();
+  });
+  const primary={...slot('elevenlabs','clone'),model:'eleven_v3'};
+  const routing={version:2,mode:'single',primary};
+  const text='Giải thích mẫu này nhé. はじめまして。わたしは＿＿＿です。';
+  const rendered=await lines(await tts({text,mode:'bilingual',stream:true,routing}));
+  assert.deepEqual(rendered.map(row=>row.lang ?? row.type),['vi','ja','done']);
+  await lines(await tts({text:'<ja>＿＿＿は鉛筆です。答えは{学生|がくせい}＿＿＿。</ja>',mode:'ja',stream:true,routing}));
+  await lines(await tts({text:'<ja>わたしは ___学生___ です。</ja>',mode:'ja',stream:true,routing}));
+  await lines(await tts({text:'Ví dụ ＿＿＿です。',stream:true,routing:{...routing,primary:slot('mistral','clone')}}));
+  assert.deepEqual(inputs,[
+    ['vi','Giải thích mẫu này nhé.'],
+    ['ja','はじめまして。わたしは、くうらん、です。'],
+    ['ja','くうらん、は鉛筆です。答えは学生、くうらん。'],
+    ['ja','わたしは 学生 です。'],
+    [undefined,'Ví dụ くうらん、です。']
+  ]);
+});
+
 test('Mistral mixed mode enforces text, segment, connection and admin limits before synthesis', async t => {
   let calls=0;
   intercept(t, async () => {calls++;return mp3();});

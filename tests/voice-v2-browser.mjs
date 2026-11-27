@@ -65,10 +65,13 @@ document.getElementById('playback-check').addEventListener('click',async event=>
     const replay=location.search==='?replay';
     const japanese='DVDを見ます。';
     const existingBilingual='Xin chào. おはよう。';
+    const withBlank='わたしは＿＿＿です。';
+    const existingVietnamese='Mã là ABC___123.';
     if (!replay) {
       const prior=await fetch('/prior-cache').then(response=>response.json());
-      for (const [mode,text] of [['ja',japanese],['bilingual',existingBilingual]]) {
-        const parts=['synthesis-3','fixture',text,{mode}];
+      for (const [version,mode,text] of [['synthesis-3','ja',japanese],['synthesis-3','bilingual',existingBilingual],
+        ['synthesis-4','ja',withBlank],['synthesis-4','bilingual',existingVietnamese]]) {
+        const parts=[version,'fixture',text,{mode}];
         const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(parts)));
         const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
         await VJVoiceCache.put(oldKey,prior[mode],true);
@@ -81,6 +84,8 @@ document.getElementById('playback-check').addEventListener('click',async event=>
       ['bilingual','Chào em. こんにちは。','ended:660@1.0,ended:440@1.0,idle'],
       ['bilingual',existingBilingual,'ended:550@1.0,ended:880@1.0,idle'],
       ['ja',japanese,'ended:770@1.0,idle'],
+      ['ja',withBlank,'ended:770@1.0,idle'],
+      ['bilingual',existingVietnamese,'ended:660@1.2,ended:440@1.2,idle'],
       ['bilingual','Đọc qua MP3.','mp3:1.0,idle']
     ]) {
       mp3Playback=text==='Đọc qua MP3.';
@@ -466,7 +471,9 @@ async function runLiveBrowser(debuggerUrl,origin){
       return [output.map(item=>item.frequency),output.every(item=>item.context===a.context),b.when>=a.until,resumes.get(a.context)];
     }),[[440,550],true,true,{startGesture:true,activation:true,hasMicrophone:false}],
     'The playing AudioContext must resume during the trusted Start action; synthesized audio must play in order without overlap');
-    assert.ok(await observe(()=>document.querySelector('.live-turn.assistant')?.textContent.includes('最初')),'Opening caption did not reach the transcript');
+    const openingCaption=await observe(()=>document.querySelector('.live-turn.assistant')?.textContent);
+    assert.ok(openingCaption?.includes('最初'),'Opening caption did not reach the transcript');
+    assert.ok(openingCaption.includes('わたしは＿＿＿です。'),'The fill-in blank must stay visible in the Live caption');
 
     // Exact widths in docs/CONTRIBUTING.md; check the same live call without reconnecting.
     for(const w of [390,768,1024,1440]){
@@ -617,7 +624,7 @@ const replyFrames = segments => [
   ...segments.map(([lang,text,boundary],index)=>['segment',{index,lang,text,boundary:boundary ?? (index?'sentence':'start')}]),
   ['done',{count:segments.length,full_text:segments.map(([,text])=>text).join(' '),japanese_only:false}]
 ].map(([name,item])=>`event: ${name}\ndata: ${JSON.stringify(item)}\n\n`);
-const opener = [['ja','最初'],['vi','em nghe nhé.','inline'],['ja','続けましょう。'],['vi','Chào em.']];
+const opener = [['ja','最初'],['vi','em nghe nhé.','inline'],['ja','わたしは＿＿＿です。'],['vi','Em thử nói nhé.']];
 const summaryReply = Array.from({length:12},(_,i)=>i%2 ? ['vi',`Ôn thêm mục ${i}.`] : ['ja',`まとめの例${i}です。`]);
 const platform={configured:true};
 const appResponses={
@@ -705,7 +712,7 @@ const server = createServer(async (req,res)=>{
       releaseOpener?.();
       return;
     }
-    if(text?.includes('続けましょう。')){
+    if(text?.startsWith('<ja>わたしは＿＿＿です。</ja>')){
       liveRequests.push(['speak','opening-rest',text]);
       liveBatches.push('rest');send(records([['ja',550]]));
       if(releaseFirstBatch)releaseFirstBatch();
@@ -770,14 +777,14 @@ try {
     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Browser smoke timed out (pages ${pages}; synthesis ${requests}; live ${liveRequests}): ${diagnostics}`)),45000);})]);
   assert.deepEqual(pages,['/','/?replay','/?live'],'Replay must survive navigation before the Live browser smoke');
   assert.deepEqual(requests,[['bilingual','Chào em. こんにちは。'],['bilingual','Xin chào. おはよう。'],
-    ['ja','DVDを見ます。'],['bilingual','Đọc qua MP3.']],
+    ['ja','DVDを見ます。'],['ja','わたしは＿＿＿です。'],['bilingual','Đọc qua MP3.']],
     'Old synthesis revisions must miss once; every new recording must replay from disk after reload');
   console.log('Chromium played WAV, PCM with retained padding, and MP3 without metadata; refreshed stale recordings and replayed them from IndexedDB.');
   assert.deepEqual(liveBatches,['rest','first'],'The second HTTP response must finish before the first');
   const sttProfile={scope:'server',id:'fixture'};
   assert.deepEqual(liveRequests,[['stt','capabilities','mistral',sttProfile,true],['turn','start'],
     ['speak','opening-first','<ja>最初</ja> <vi>em nghe nhé.</vi>'],
-    ['speak','opening-rest','<ja>続けましょう。</ja> <vi>Chào em.</vi>'],['turn','hint'],['speak','hint'],
+    ['speak','opening-rest','<ja>わたしは＿＿＿です。</ja> <vi>Em thử nói nhé.</vi>'],['turn','hint'],['speak','hint'],
     ['stt','transcribe','mistral',sttProfile,true],['turn','昨日映画を見ました。'],
     ['speak','answer'],['turn','summary'],['speak','summary-first',[0]],
     ['speak','summary-rest',[1,2,3,4,5,6,7,8,9,10,11]],
