@@ -96,6 +96,10 @@ test('untagged ranges and single numbers follow their Japanese counter in biling
     assert.deepEqual(records.map(({lang})=>lang),['vi','ja',undefined]);
     assert.deepEqual(calls.splice(0),[['api.elevenlabs.io','Ví dụ:'],['api.mistral.ai',counter]]);
   }
+  for(const value of ['20%','10〜20%']) {
+    await lines(await tts({text:`Giảm ${value}\n二割引`,stream:true,routing}));
+    assert.deepEqual(calls.splice(0),[['api.elevenlabs.io',`Giảm ${value}`],['api.mistral.ai','二割引']]);
+  }
 });
 
 test('Japanese-only and dual same-account Mistral keep script routing and preset or explicit voice precedence', async t => {

@@ -5,7 +5,7 @@ const japanese = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u
 const letter = /\p{L}/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
 const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
-const leadingNumber = /(?:^|\s)([\d０-９]+(?:[.,，][\d０-９]+)?[%％]?(?:[\p{Zs}\t]*[〜～][\p{Zs}\t]*[\d０-９]+(?:[.,，][\d０-９]+)?[%％]?)?\s*)$/u;
+const leadingNumber = /(?:^|\s)([\d０-９]+(?:[.,，][\d０-９]+)?[%％]?(?:[\p{Zs}\t]*[〜～][\p{Zs}\t]*[\d０-９]+(?:[.,，][\d０-９]+)?[%％]?)?[\p{Zs}\t]*)$/u;
 const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
 const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
 const numeral = /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u;
