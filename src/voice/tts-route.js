@@ -4,25 +4,34 @@ import {authoredVoiceReading, normalizeVoiceText} from './normalizer.js';
 import {MAX_SEGMENTS, segmentVoiceText} from './segmenter.js';
 import {MAX_AUDIO, VOICE_BASES, VoiceError, synthesizeVoice, voiceCatalog, voiceSettings} from './tts-adapters.js';
 
+export const MAX_VOICE_TEXT = 4000;
+
 const json = (body,status=200) => Response.json(body,{status,headers:{'Cache-Control':'no-store'}});
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const profileId = /^[\w-]{1,128}$/;
 const bad = () => new VoiceError('tts_invalid_routing',400,'Cấu hình điều hướng giọng nói không hợp lệ.');
 const denied = () => new VoiceError('tts_profile_unavailable',403,'Kết nối giọng nói đã chọn không dùng được. Hệ thống không dùng khóa thay thế.');
 
-export async function readVoiceBody(request) {
+export async function readVoiceBody(request, maxBytes = 32768, signal) {
   if (!request.body) return '';
   const reader = request.body.getReader(), decoder = new TextDecoder();
   let bytes = 0, text = '';
+  const cancel = () => {void reader.cancel().catch(() => {});};
+  signal?.addEventListener('abort',cancel,{once:true});
+  if (signal?.aborted) cancel();
   try {
     for (;;) {
       const {done,value} = await reader.read();
+      signal?.throwIfAborted();
       if (done) return text + decoder.decode();
       bytes += value.byteLength;
-      if (bytes > 32768) {await reader.cancel();return null;}
+      if (bytes > maxBytes) {cancel();return null;}
       text += decoder.decode(value,{stream:true});
     }
-  } finally {reader.releaseLock();}
+  } finally {
+    signal?.removeEventListener('abort',cancel);
+    reader.releaseLock();
+  }
 }
 
 export function voiceBase(kind, raw, env) {
@@ -48,7 +57,7 @@ function storedKind(row) {
   return row.protocol;
 }
 
-async function selectConnection(slot, env, userId, admin, override) {
+export async function selectConnection(slot, env, userId, admin, override) {
   const profile = slot.profile, kind = slot.provider;
   if (!object(profile) || !Object.hasOwn(VOICE_BASES,kind)) throw bad();
   if (profile.scope === 'platform') {
@@ -139,7 +148,7 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     }
     if (body.action !== undefined || body.stream !== true || typeof body.text !== 'string' || !body.text.trim()
       || !['ja','bilingual'].includes(body.mode ?? 'bilingual')) throw bad();
-    if (body.text.length > 4000 || typeof body.reading === 'string' && body.reading.length > 4000)
+    if (body.text.length > MAX_VOICE_TEXT || typeof body.reading === 'string' && body.reading.length > MAX_VOICE_TEXT)
       throw new VoiceError('tts_text_limit',413,'Đoạn cần đọc không được dài quá 4000 ký tự.');
     const ja = routeSlot(routing,'ja');
     const kanjiMode = ja.kanji_mode ?? 'kanji_native';

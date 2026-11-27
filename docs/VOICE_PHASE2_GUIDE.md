@@ -60,14 +60,14 @@ sequenceDiagram
 
     Turn-->>Core: event: segment { index: 1, lang: "vi", text: "Em kể tên phim bằng tiếng Nhật nhé." }
     Turn-->>Core: event: done { full_text, count: 2, japanese_only: false }
-    Core->>TTS: Gom các câu còn lại (#1..#N) vào 1 request POST /api/tts duy nhất!
+    Core->>TTS: Batch remaining segments after done (personal: 1 batch; managed: up to 2)
     TTS-->>Stitch: Khâu nối tiếp (trim + 15ms/25ms pad + RMS match + pause 200ms)
 ```
 
-> **Lưu ý quan trọng về Rate Limit (`ai_usage`: 20 req/phút):**
-> Với chiến lược **1 request TTS cho câu #0 (để mở tiếng sớm) + 1 request TTS gom tất cả câu còn lại `#1..#N`**, mỗi lượt hội thoại tiêu thụ:
-> - **4 request** (1 STT + 1 Live Turn + 2 TTS batch) khi câu trả lời có `>= 2` câu/segment → tối đa **5 lượt/phút** (`5 × 4 = 20`) không chạm trần 429.
-> - **3 request** (1 STT + 1 Live Turn + 1 TTS duy nhất khi câu trả lời chỉ 1 câu, hoặc bỏ bước `/api/stt` khi dùng Web Speech API) → tối đa **6 lượt/phút** (`6 × 3 = 18`).
+> **Rate limit (`ai_usage`: 20 requests/minute per account):**
+> - Send segment `#0` immediately. Send the remaining segments after `done`: one batch for personal voices (up to 15 segments), or batches of at most 8 if the batch uses a `platform` voice.
+> - With server STT, a transcript turn uses 3 requests for a one-segment reply, normally 4 for a multi-segment reply, and 5 if a managed voice needs two continuation batches.
+> - Browser STT saves one server request. These counts exclude other requests sharing the account's budget.
 > Đặc biệt, lệnh **Nhắc lại** phát lại trực tiếp từ bộ nhớ lượt vừa rồi (**0 API call**) và lệnh **Nói chậm** chỉ gọi lại TTS (không gọi STT/LLM).
 
 ---
@@ -96,7 +96,7 @@ sequenceDiagram
 - **Quy ước output bắt buộc trong system prompt:**
   - Bọc mỗi câu hoặc đoạn đơn ngôn ngữ trong thẻ `<ja>...</ja>` hoặc `<vi>...</vi>`.
   - **Mỗi câu chỉ chứa 1 ngôn ngữ**, không trộn từ Việt vào trong `<ja>...</ja>` (tránh lặp lại lỗi `#73`).
-  - Tổng độ dài tối đa **3 câu ngắn** (tối đa ~250 ký tự trừ khi `command === 'summary'`).
+  - Use at most **three short sentences** (aim for about 250 characters), or up to **five short sentences** for `command === 'summary'`. Both use at most **16 tagged segments**.
   - Không Markdown, không danh sách gạch đầu dòng, không số thứ tự, không lộ ID bài học hay tên thẻ cho người học.
   - Khi `japanese_only === true`: chỉ xuất thẻ `<ja>...</ja>`, chỉ dùng `<vi>` nếu học viên chủ động hỏi lại bằng tiếng Việt hoặc nói không hiểu.
 - **Ràng buộc chống Prompt Injection:**
@@ -128,12 +128,13 @@ sequenceDiagram
   - Bắt buộc có `transcript` (1–1500 ký tự) **hoặc** `command` ∈ `['start','hint','explain','situation','check','slower','summary']` (`repeat` xử lý ở client từ cache, không cần gọi server).
   - Nếu có `lesson` / `focus` / `task`: dùng đúng `validLessonReference`, `validFocusReference`, `catalogLesson`, `processingAllowed`, `resolveTaskReference`, `groundLesson` từ [`src/tutor-context.js`](../src/tutor-context.js) (tuyệt đối không để lộ đáp án bài tập chưa làm!).
   - `history`: tối đa **12 lượt**, chỉ chấp nhận `role ∈ ['user','assistant']`, `text` string `<= 600` ký tự; strip thẻ `<ja>`/`<vi>` khỏi history nếu có.
+  - While a canonical multiple-choice task is focused, the Worker gives answer-safe strategy guidance, or a closing reminder for `summary`, without calling a Chat provider. Live does not verify a choice submission. Model-based conversation resumes after leaving the choice.
   - Phân giải Chat provider bằng [`resolveProvider(env, userId, body.api_connection, profileId)`](../src/providers.js#L34-L41) → tự động hoạt động cho Admin (server OpenAI), Learner (API key local/server hoặc Antigravity OAuth!).
 - **Incremental Tag & Sentence Chunker (trong `src/voice/live-turn.js`):**
   - Đọc từng delta từ `streamLLM()` vào buffer:
     1. Nếu phát hiện cặp thẻ hoàn chỉnh `<(ja|vi)>([\s\S]*?)<\/\1>`: emit ngay `event: segment` (chạy `normalizeVoiceText` + `particleReading` cho `ja`).
     2. Nếu model quên thẻ (plain text không có `<ja>`/`<vi>`): cắt tại dấu kết thúc câu `[。！？.!?]\s*` rồi chạy [`segmentVoiceText()`](../src/voice/segmenter.js) để gán đúng `lang`.
-    3. Giới hạn tối đa **8 segment** mỗi lượt Live Turn để giữ câu trả lời ngắn gọn như hội thoại thật.
+    3. Allow at most **16 ordered segments** per Live Turn. Exceeding that limit or the 4,000-character playable text budget ends the stream with `live_reply_too_long`, not `done`.
   - Khi kết thúc stream: flush phần buffer còn lại, phát `event: done` `{ full_text, count, japanese_only }`. Nếu lỗi giữa chừng, phát `event: error` `{ code, detail }` rồi đóng stream.
 
 #### Task 4: Nâng cấp `POST /api/stt` (`src/voice/stt-route.js`, thay/bọc [`src/transcription.js`](../src/transcription.js))
@@ -205,8 +206,8 @@ sequenceDiagram
        - Gửi ngay segment `#0` sang `/api/tts` (`{ text: '<ja>...</ja>', mode: 'bilingual', stream: true, routing }`) và đẩy từng audio chunk vào hàng đợi tuần tự của `VJVoiceStitcher` để phát ngay.
      - Thu gom các segment `#1..#N` cho tới `event: done`:
        - Cập nhật caption realtime khi từng segment về.
-       - Khi `event: done` về (hoặc đủ batch): gửi gộp `#1..#N` trong **1 request `/api/tts`** (truyền thẻ `<ja>`/`<vi>` đã chuẩn hóa sẵn).
-       - **Ràng buộc thứ tự phát bắt buộc (tránh đảo câu):** [`VJVoiceStitcher.append()`](../static/voice/audio-stitcher.js#L24-L69) chỉ xếp lịch lên `AudioContext` *sau khi* `decodeAudioData()` hoàn tất, nên gọi song song 2 batch vào cùng một stitcher có thể làm batch `#1..#N` nhảy lên phát trước câu `#0`. Vì vậy, HTTP fetch của batch `#1..#N` có thể chạy song song với quá trình phát câu `#0`, **nhưng** toàn bộ bước `stitcher.append(...)` phải đi qua **một hàng đợi tuần tự duy nhất** (`appendChain = appendChain.then(...)`) sao cho toàn bộ chunk của batch `#0` hoàn tất `append()` trước khi bất kỳ chunk nào của batch `#1..#N` được đưa vào `stitcher.append()`.
+       - On `done`, send segments `#1..#N` with their normalized language tags. Personal routing uses one continuation request (up to 15 segments). If the selected routing uses a `platform` voice, split the remaining segments into batches of at most 8. Do not raise the managed TTS limit.
+       - HTTP requests can overlap, but every [`VJVoiceStitcher.append()`](../static/voice/audio-stitcher.js) must go through one ordered queue. Complete each batch's appends before the next batch appends its first chunk, even if the later HTTP response arrives first.
      - Lưu mảng `lastAssistantSegments` (audio encoded của lượt Thầy vừa nói) trong RAM phiên để lệnh **`Nhắc lại`** phát lại tức thì (0ms, không gọi LLM/TTS).
      - Lệnh **`Nói chậm`**: giảm hệ số tốc độ tiếng Nhật cho phiên hiện tại (`sessionJaRate = Math.max(0.75, current - 0.12)`) và gọi phát lại câu cuối (hoặc gửi `command: 'slower'`).
   4. **Giữ lịch sử ngắn trong phiên:**

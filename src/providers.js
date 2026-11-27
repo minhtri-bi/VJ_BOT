@@ -31,19 +31,19 @@ const ownedProfile = (env, userId, id) => env.DB.prepare('SELECT * FROM ai_provi
 const voiceOnly = protocol => ['elevenlabs','mistral','openai_compatible'].includes(protocol);
 
 // Admin inference is server-managed; supplied private selections are never repurposed.
-export async function resolveProvider(env, userId, override, profileId) {
+export async function resolveProvider(env, userId, override, profileId, {signal} = {}) {
   if (await isAdmin(env, userId)) {
     if (override !== undefined || (profileId !== undefined && profileId !== 'platform_openai')) return {error:'invalid_connection'};
     return platformProvider(env, userId);
   }
   if (profileId === 'platform_openai') return {error:'invalid_connection'};
-  return resolveConnection(env, userId, override, profileId);
+  return resolveConnection(env, userId, override, profileId, false, signal);
 }
-async function resolveConnection(env, userId, override, profileId, speech = false) {
+async function resolveConnection(env, userId, override, profileId, speech = false, signal) {
   if (typeof profileId === 'string' && (profileId === ANTIGRAVITY_PROFILE || profileId.startsWith(ANTIGRAVITY_PROFILE + ':'))) {
     const id = profileId.slice(ANTIGRAVITY_PROFILE.length + 1);
     if (override !== undefined || !connectionIdOk(id)) return {error:'invalid_connection'};
-    return antigravityProvider(env, userId, id);
+    return antigravityProvider(env, userId, id, signal);
   }
   if (profileId !== undefined && (typeof profileId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(profileId)
     || override !== undefined)) return {error: 'invalid_connection'};
