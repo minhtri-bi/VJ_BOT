@@ -60,14 +60,14 @@ sequenceDiagram
 
     Turn-->>Core: event: segment { index: 1, lang: "vi", text: "Em kể tên phim bằng tiếng Nhật nhé." }
     Turn-->>Core: event: done { full_text, count: 2, japanese_only: false }
-    Core->>TTS: Gom các câu còn lại (#1..#N) vào 1 request POST /api/tts duy nhất!
+    Core->>TTS: Batch remaining segments after done (personal: 1 batch; managed: up to 2)
     TTS-->>Stitch: Khâu nối tiếp (trim + 15ms/25ms pad + RMS match + pause 200ms)
 ```
 
-> **Lưu ý quan trọng về Rate Limit (`ai_usage`: 20 req/phút):**
-> Với chiến lược **1 request TTS cho câu #0 (để mở tiếng sớm) + 1 request TTS gom tất cả câu còn lại `#1..#N`**, mỗi lượt hội thoại tiêu thụ:
-> - **4 request** (1 STT + 1 Live Turn + 2 TTS batch) khi câu trả lời có `>= 2` câu/segment → tối đa **5 lượt/phút** (`5 × 4 = 20`) không chạm trần 429.
-> - **3 request** (1 STT + 1 Live Turn + 1 TTS duy nhất khi câu trả lời chỉ 1 câu, hoặc bỏ bước `/api/stt` khi dùng Web Speech API) → tối đa **6 lượt/phút** (`6 × 3 = 18`).
+> **Rate limit (`ai_usage`: 20 requests/minute per account):**
+> - Send segment `#0` immediately. Send the remaining segments after `done`: one batch for personal voices (up to 15 segments), or batches of at most 8 if the batch uses a `platform` voice.
+> - With server STT, a transcript turn uses 3 requests for a one-segment reply, normally 4 for a multi-segment reply, and 5 if a managed voice needs two continuation batches.
+> - Browser STT saves one server request. These counts exclude other requests sharing the account's budget.
 > Đặc biệt, lệnh **Nhắc lại** phát lại trực tiếp từ bộ nhớ lượt vừa rồi (**0 API call**) và lệnh **Nói chậm** chỉ gọi lại TTS (không gọi STT/LLM).
 
 ---
@@ -205,8 +205,8 @@ sequenceDiagram
        - Gửi ngay segment `#0` sang `/api/tts` (`{ text: '<ja>...</ja>', mode: 'bilingual', stream: true, routing }`) và đẩy từng audio chunk vào hàng đợi tuần tự của `VJVoiceStitcher` để phát ngay.
      - Thu gom các segment `#1..#N` cho tới `event: done`:
        - Cập nhật caption realtime khi từng segment về.
-       - Khi `event: done` về (hoặc đủ batch): gửi gộp `#1..#N` trong **1 request `/api/tts`** (truyền thẻ `<ja>`/`<vi>` đã chuẩn hóa sẵn).
-       - **Ràng buộc thứ tự phát bắt buộc (tránh đảo câu):** [`VJVoiceStitcher.append()`](../static/voice/audio-stitcher.js#L24-L69) chỉ xếp lịch lên `AudioContext` *sau khi* `decodeAudioData()` hoàn tất, nên gọi song song 2 batch vào cùng một stitcher có thể làm batch `#1..#N` nhảy lên phát trước câu `#0`. Vì vậy, HTTP fetch của batch `#1..#N` có thể chạy song song với quá trình phát câu `#0`, **nhưng** toàn bộ bước `stitcher.append(...)` phải đi qua **một hàng đợi tuần tự duy nhất** (`appendChain = appendChain.then(...)`) sao cho toàn bộ chunk của batch `#0` hoàn tất `append()` trước khi bất kỳ chunk nào của batch `#1..#N` được đưa vào `stitcher.append()`.
+       - On `done`, send segments `#1..#N` with their normalized language tags. Personal routing uses one continuation request (up to 15 segments). If the selected routing uses a `platform` voice, split the remaining segments into batches of at most 8. Do not raise the managed TTS limit.
+       - HTTP requests can overlap, but every [`VJVoiceStitcher.append()`](../static/voice/audio-stitcher.js) must go through one ordered queue. Complete each batch's appends before the next batch appends its first chunk, even if the later HTTP response arrives first.
      - Lưu mảng `lastAssistantSegments` (audio encoded của lượt Thầy vừa nói) trong RAM phiên để lệnh **`Nhắc lại`** phát lại tức thì (0ms, không gọi LLM/TTS).
      - Lệnh **`Nói chậm`**: giảm hệ số tốc độ tiếng Nhật cho phiên hiện tại (`sessionJaRate = Math.max(0.75, current - 0.12)`) và gọi phát lại câu cuối (hoặc gửi `command: 'slower'`).
   4. **Giữ lịch sử ngắn trong phiên:**
