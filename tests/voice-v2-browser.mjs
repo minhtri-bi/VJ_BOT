@@ -325,12 +325,39 @@ async function runLiveBrowser(debuggerUrl,origin){
       .filter(link=>new URL(link.href).origin===location.origin && !link.sheet).map(link=>link.href)),[],
       'A local stylesheet from the original app shell did not load');
     await observe(observeLiveMedia);
+    await click('#speech-legacy-settings > summary');
+    assert.ok(await visible('#speech-test'));
     await click('#voice-v2-settings > summary');
+    assert.ok(!await visible('#speech-test'),'Opening bilingual settings must fold the default voice panel');
     await choose('#voice-v2-source','personal');
     await until('loopback voice profile metadata',()=>observe(()=>Boolean(document.querySelector('#voice-v2-primary-profile option[value="server:fixture"]'))));
     await choose('#voice-v2-primary-profile','server:fixture');
+    assert.ok(!await visible('#voice-v2-key') && !await visible('#voice-v2-live-turn'),
+      'Choosing a saved account must not open connection setup or Live options');
+    await choose('#voice-v2-mode','dual_same_api');
+    const slotPositions=()=>observe(()=>{
+      const rect=id=>document.getElementById(`voice-v2-${id}-voice`).getBoundingClientRect();
+      const ja=rect('ja'),vi=rect('vi');
+      return {sameRow:Math.abs(ja.top-vi.top)<1,sameColumn:Math.abs(ja.left-vi.left)<1,
+        fits:Math.max(ja.right,vi.right)<=innerWidth};
+    });
+    const splitProfilesVisible=()=>observe(()=>['ja','vi'].map(lang=>{
+      const profile=document.querySelector(`#voice-v2-${lang}-profile`);
+      return !profile.disabled && profile.checkVisibility();
+    }));
+    assert.deepEqual(await splitProfilesVisible(),[false,false],'Shared mode uses the main connection');
+    assert.deepEqual(await slotPositions(),{sameRow:true,sameColumn:false,fits:true});
+    await width(390);
+    assert.deepEqual(await slotPositions(),{sameRow:false,sameColumn:true,fits:true});
+    await choose('#voice-v2-mode','dual_split_api');
+    assert.deepEqual(await splitProfilesVisible(),[true,true],'Split mode must expose both language connections');
+    await width(1440);
+    await choose('#voice-v2-mode','single');
+    assert.ok(!await visible('#voice-v2-ja-voice') && !await visible('#voice-v2-vi-voice'));
     await tabTo('#voice-v2-primary-voice');
     await send('Input.insertText',{text:'fixture-voice'});
+    await tabTo('#voice-v2-live-settings > summary');
+    await press('Enter');
     await choose('#voice-v2-live-turn','ptt');
     await choose('#voice-v2-live-stt','voice');
     await click('#voice-v2-routing button[type="submit"]');
@@ -465,7 +492,7 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.deepEqual(consoleErrors,[],'Unexpected JavaScript errors in the Classroom app shell');
     const sttNavigation=await send('Page.navigate',{url:origin+'/browser-stt'});
     assert.equal(sttNavigation.errorText,undefined);
-    await until('real Browser STT fixture',()=>visible('#recognize'));
+    await until('real Browser STT fixture initialized',()=>observe(()=>Boolean(window.browserSttProof && document.querySelector('#recognize')?.onclick)));
     await click('#recognize');
     await until('recorded Browser STT speech and teardown',()=>observe(()=>window.browserSttProof.done || window.browserSttProof.errors.length));
     const proof=await observe(()=>{

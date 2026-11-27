@@ -114,16 +114,19 @@
   for (const [slot,title] of Object.entries(titles)) {
     const section=document.createElement('fieldset'), legend=document.createElement('legend');
     legend.textContent=title;section.append(legend);slots.append(section);
-    const profile=input(section,'Kết nối',slot+'-profile','select');
-    const model=input(section,'ID model (để trống nếu dùng mặc định)',slot+'-model');model.maxLength=100;
-    const voice=input(section,'ID giọng (để trống nếu dùng mặc định)',slot+'-voice');voice.maxLength=100;
+    const fields=document.createElement('div');fields.className='sound-fields';section.append(fields);
+    const profile=input(fields,'Kết nối',slot+'-profile','select');
+    profile.parentElement.className='sound-full';
+    const model=input(fields,'ID model',slot+'-model');model.maxLength=100;
+    const voice=input(fields,'ID giọng',slot+'-voice');voice.maxLength=100;
     const modelList=document.createElement('datalist'), voiceList=document.createElement('datalist');
     modelList.id='voice-v2-models-'+slot;voiceList.id='voice-v2-voices-'+slot;
     model.setAttribute('list',modelList.id);voice.setAttribute('list',voiceList.id);section.append(modelList,voiceList);
-    const speed=input(section,'Tốc độ phát',slot+'-speed','number');
+    const speed=input(fields,'Tốc độ phát',slot+'-speed','number');
     Object.assign(speed,{min:'0.5',max:'2',step:'0.01',value:'1'});
-    const nativeSpeed=input(section,'Máy chủ tùy chỉnh hỗ trợ chỉnh tốc độ',slot+'-native-speed','checkbox');
-    const reading=slot!=='vi' ? input(section,'Cách đọc Kanji',slot+'-reading','select') : null;
+    const reading=slot!=='vi' ? input(fields,'Cách đọc Kanji',slot+'-reading','select') : null;
+    const nativeSpeed=input(fields,'Máy chủ tùy chỉnh hỗ trợ chỉnh tốc độ',slot+'-native-speed','checkbox');
+    nativeSpeed.parentElement.className='sound-full';
     reading?.append(option('kanji_native','Giữ Kanji'),option('kana_first','Ưu tiên kana'));
     const catalog=document.createElement('button');catalog.type='button';catalog.className='stage-btn';catalog.textContent='Tải giọng & model';section.append(catalog);
     controls.set(slot,{section,profile,model,voice,speed,nativeSpeed,reading,catalog,modelList,voiceList});
@@ -161,7 +164,14 @@
       config[slot]=settings;
     }
     const live=config.live;
-    if (live.engine==='cascaded' && live.stt_source==='voice') sttProfileName(config,live.stt_slot);
+    if (live.engine==='cascaded' && live.stt_source==='voice') {
+      try {sttProfileName(config,live.stt_slot);}
+      catch (error) {
+        el('live-settings').open=true;
+        liveStt.focus();
+        throw error;
+      }
+    }
     for (const [lang,slot] of Object.entries(config.mode==='single' ? {ja:config.primary,vi:config.primary} : {ja:config.ja,vi:config.vi})) {
       const effective=slot.profile ? slot : {...config.primary,...slot,provider:config.primary.provider};
       if (['elevenlabs','openai_compatible'].includes(effective.provider) || effective.provider==='mistral' && config.mode==='single') {
@@ -393,18 +403,20 @@
   liveEngine?.addEventListener('change',layoutLive);
   liveStt?.addEventListener('change',layoutLive);
   kind.addEventListener('change',()=>{url.placeholder=bases[kind.value] || 'https://tts.example.com/v1';url.required=kind.value==='openai_compatible';url.value='';});
+  const accountStatus=el('account-status');
   el('account').addEventListener('submit',async event=>{
     event.preventDefault();if (busy) return;
     const user=owner(), role=roleKey(), button=event.submitter;
     busy=true;if (button) button.disabled=true;
+    accountStatus.textContent='';
     try {
       const result=await window.saveVoiceProfile(user,{version:2,name:el('name').value.trim(),protocol:kind.value,
         base_url:url.value.trim() || undefined,api_key:el('key').value.trim()},el('storage').value);
       if (role!==roleKey()) return;
       if (!controls.get('primary').profile.value) controls.get('primary').profile.value=ref(result);
       updateAccounts();
-      el('key').value='';status.textContent='Đã lưu kết nối. Chọn giọng và lưu cấu hình đọc.';
-    } catch (error) {if (role===roleKey()) status.textContent=error.message;}
+      el('key').value='';accountStatus.textContent='Đã lưu kết nối. Chọn giọng và lưu cấu hình đọc.';
+    } catch (error) {if (role===roleKey()) accountStatus.textContent=error.message;}
     finally {busy=false;if (button) button.disabled=false;}
   });
   el('remove').addEventListener('click',async()=>{
@@ -443,6 +455,7 @@
   window.addEventListener('vjbot-account-ready',()=>{
     if (drawnIdentity===roleKey()) return;
     cancelRemoval();
+    accountStatus.textContent='';
     routingRevision++;metadataRole=null;rows=[];catalogs.clear();el('key').value='';drawnIdentity=roleKey();restore();
     if (owner() && source.value==='personal') reloadProfiles();
   });

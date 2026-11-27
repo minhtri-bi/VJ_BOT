@@ -141,6 +141,55 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
   display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:14px;padding:16px;border:2px solid var(--border-dark);border-radius:16px;background:var(--surface-2);
 }
 #panel-settings .setting-toggle-row strong{font-size:15px;font-weight:900}
+
+/* Sound settings: keep connection setup and live controls out of the main route. */
+#settings-sound-card .sound-heading{display:grid;gap:3px;font-size:16px;line-height:1.35}
+#settings-sound-card .sound-heading small{color:var(--pencil);font-size:13px;font-weight:500}
+#settings-sound-card details>summary{margin:0;min-height:48px}
+#settings-sound-card details>summary:focus-visible{outline-offset:-4px}
+#settings-sound-card .sound-stack{display:grid;gap:12px;min-width:0}
+#settings-sound-card :is(.sound-stack,.sound-fields,label,.ai-voice-connect)[hidden]{display:none}
+#settings-sound-card .ai-voice-controls{margin:0;border:0;border-radius:0;background:none}
+#settings-sound-card .ai-voice-controls .ai-section-heading{margin:0}
+#settings-sound-card .ai-voice-help{margin:0;border-width:1px;border-radius:12px}
+#settings-sound-card :is(.ai-disclosure,.ai-voice-help)>:is(div,form){border-top:1px solid var(--line)}
+#settings-sound-card #voice-v2-account{padding:14px 16px}
+#settings-sound-card .sound-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));align-items:end;gap:10px 12px}
+#settings-sound-card .sound-full{grid-column:1/-1}
+#settings-sound-card label{display:grid;gap:5px;min-width:0;line-height:1.4}
+#settings-sound-card :is(input,select){font-weight:600}
+#settings-sound-card label:has(>input[type=checkbox]){display:flex;align-items:center;gap:9px;min-height:44px;cursor:pointer}
+#settings-sound-card input[type=checkbox]{width:18px;height:18px;min-height:0;margin:0;flex:none;accent-color:var(--accent)}
+#settings-sound-card :is(#voice-v2-source,#voice-v2-mode,#voice-v2-live-engine){max-width:24rem}
+#settings-sound-card #voice-v2-personal{container-type:inline-size}
+#settings-sound-card #voice-v2-slots{display:grid;grid-template-columns:minmax(0,1fr);gap:12px}
+@container (min-width:34rem){
+  #settings-sound-card #voice-v2-slots{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #settings-sound-card #voice-v2-slots>fieldset:first-child{grid-column:1/-1}
+}
+#settings-sound-card #voice-v2-slots>fieldset{min-inline-size:0;margin:0;padding:10px 12px 12px;border:1px solid var(--line);border-radius:12px}
+#settings-sound-card #voice-v2-slots legend{padding:0 5px;color:var(--ink);font-size:14px}
+#settings-sound-card #voice-v2-slots>fieldset>.stage-btn{margin-top:10px}
+#panel-settings #settings-sound-card .ai-actions{justify-content:flex-start;margin:0;gap:8px}
+#panel-settings #settings-sound-card .ai-actions>*{min-width:0;white-space:normal}
+#settings-sound-card .sound-footer{display:grid;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
+#settings-sound-card #voice-v2-personal .stage-btn{background:var(--sheet)!important;color:var(--ink)!important;box-shadow:none!important}
+#settings-sound-card #voice-v2-personal .stage-btn:hover:not(:disabled){background:var(--surface-2)!important}
+#settings-sound-card #voice-v2-personal #voice-v2-remove{border-color:transparent!important;background:transparent!important;color:var(--warn)!important}
+#settings-sound-card #voice-v2-personal #voice-v2-remove:hover{background:var(--warn-bg)!important}
+:root[data-theme=dark] #settings-sound-card #voice-v2-personal #voice-v2-remove{color:color-mix(in srgb,var(--warn) 45%,var(--ink))!important}
+#settings-sound-card .sound-status:empty{display:block;height:0}
+#settings-sound-card .sound-status:not(:empty){padding:8px 10px;border-left:2px solid var(--accent);background:var(--surface-2);overflow-wrap:anywhere}
+#settings-sound-card .sound-account .sound-status:not(:empty){margin-top:8px}
+@media(max-width:600px){
+  #settings-sound-card :is(.ai-disclosure,.ai-voice-help)>div,#settings-sound-card #voice-v2-account{padding-inline:12px}
+  #settings-sound-card select{padding-inline:8px}
+}
+@media (360px <= width <= 600px){
+  #settings-sound-card #voice-v2-slots .sound-fields{grid-template-columns:repeat(2,minmax(0,1fr))}
+  #settings-sound-card #voice-v2-slots label:has(>:is(select,input[type=number])){grid-column:1/-1}
+}
+
 #panel-settings .danger-card{border-color:var(--warn)!important;background:linear-gradient(180deg,var(--sheet),color-mix(in srgb,var(--warn) 7%,var(--sheet)))!important}
 #panel-settings .danger-card .card-title,#panel-settings .delete-account-btn{color:var(--warn)!important}
 #panel-settings .delete-account-btn{border-color:var(--warn)!important}

@@ -92,11 +92,13 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
       setAttribute(){}, addEventListener(event,handler){this.events[event]=handler;}};
   }
   const el=id=>nodes.get('voice-v2-'+id);
-  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','remove','routing','preview','settings','key','confirm-title','confirm-description'])
+  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','account-status','remove','routing','preview','settings','key','confirm-title','confirm-description'])
     node('fixture').id='voice-v2-'+id;
   if (withLive) {
     for (const id of ['engine','turn','stt','stt-slot']) node('select').id='voice-v2-live-'+id;
     node('input').id='voice-v2-live-barge';
+    node('details').id='voice-v2-live-settings';
+    el('live-stt').focus=()=>{el('live-stt').focused=true;};
     node('label').id='voice-v2-live-stt-slot-field';
     node('div').id='voice-v2-live-options';
   }
@@ -394,6 +396,8 @@ test('saving cascaded voice STT rejects an unsupported split slot without replac
   assert.deepEqual(saved(),prior);
   assert.equal(changes,0);
   assert.match(el('status').textContent,/OpenAI.*Mistral.*ElevenLabs/);
+  assert.equal(el('live-settings').open,true);
+  assert.equal(el('live-stt').focused,true);
   change('ja-profile','');
   save();
   assert.equal(saved().live.stt_source,'voice');
