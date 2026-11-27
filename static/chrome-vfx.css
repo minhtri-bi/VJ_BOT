@@ -247,7 +247,7 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #panel-settings #settings-sound-card .ai-actions{justify-content:flex-start;margin:0;gap:8px}
 #panel-settings #settings-sound-card .ai-actions>*{min-width:0;white-space:normal}
 #settings-sound-card .sound-footer{display:grid;gap:8px;padding-top:12px;border-top:1px solid var(--line)}
-#panel-settings :is(#ai-remove,#voice-v2-remove){border-color:transparent!important;background:transparent;color:var(--warn);box-shadow:none}
+#panel-settings :is(#ai-remove,#voice-v2-remove){border-color:transparent;background:transparent;color:var(--warn);box-shadow:none}
 #panel-settings :is(#ai-remove,#voice-v2-remove):hover{background:var(--warn-bg)}
 :root[data-theme=dark] #panel-settings :is(#ai-remove,#voice-v2-remove){color:color-mix(in srgb,var(--warn) 45%,var(--ink))}
 #settings-sound-card .sound-status:empty{display:block;height:0}

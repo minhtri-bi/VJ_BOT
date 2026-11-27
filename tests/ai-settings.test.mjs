@@ -643,6 +643,32 @@ test('canceling API edits focuses the edit button or the connection list if it d
   assert.equal(ui.context.document.activeElement, ui.element('ai-profile-list'));
 });
 
+test('canceling connection edits keeps unsaved model scan results and scrubs typed credentials', async () => {
+  const deviceProfiles = new Map([['device-1', {
+    id: 'device-1', owner: 'test:owner', name: 'Device Gemini', protocol: 'gemini',
+    base_url: 'https://generativelanguage.googleapis.com', api_key: 'sk-device-4321',
+    key_last4: '4321', model: '', models: [], connection_id: null, checked_at: null
+  }]]);
+  const ui = settings({
+    deviceProfiles,
+    activeChoice: {value: {scope: 'local', id: 'device-1'}},
+    models: ['working'],
+    savedModel: ''
+  });
+  await ui.context.renderAiPanels('settings');
+  await ui.element('ai-fetch-models').click();
+  assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working']);
+  assert.equal(ui.element('ai-save').disabled, false);
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-key').value = 'typed-replacement-key';
+  ui.element('ai-key').events.input();
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.element('ai-key').value, '');
+  assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working']);
+  assert.equal(ui.element('ai-model-list').value, 'working');
+  assert.equal(ui.element('ai-save').disabled, false);
+});
+
 test('API editor dismissal and account changes scrub keys without scanning or changing the active connection', async () => {
   const ui = settings();
   await ui.context.renderAiPanels('settings');

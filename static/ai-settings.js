@@ -8,7 +8,7 @@
   let activeScan = null, readiness = 0;
   let profileRows = [], selectedProfile = null, profileKey = '', rendering = 0;
   let profilesOwner = null, loadedProfile = null;
-  let editOpener = null;
+  let editOpener = null, editState = null;
   const methodKey = owner => 'vjbot_ai_method:' + owner;
   const managed = () => signedInUser?.is_admin === true;
   const accountIdentity = () => JSON.stringify([signedInUser?.user_id || null, managed()]);
@@ -732,13 +732,28 @@
     showApiKey(false);
     el('ai-edit-status').textContent = '';
     editOpener = null;
+    editState = null;
     dialog.close();
   }
   function dismissApiEditor() {
     if (testing) return;
-    const opener = editOpener;
+    const opener = editOpener, prior = editState;
     closeApiEditor();
     (opener && !opener.hidden ? opener : el('ai-profile-list')).focus();
+    if (prior && savedConnection && prior.profile === selectedProfile) {
+      resetModels();
+      modelSnapshot = prior.snapshot;
+      fillProfile(prior.profile, prior.models.length ? {models: prior.models, checkedAt: prior.snapshot?.checkedAt || prior.profile.checked_at || Date.now()} : null, prior.key);
+      if (prior.selectedModel) {
+        el('ai-model').value = prior.selectedModel;
+        if ([...el('ai-model-list').options].some(option => option.value === prior.selectedModel)) el('ai-model-list').value = prior.selectedModel;
+      }
+      el('ai-model-status').textContent = prior.status;
+      el('ai-selection-hint').textContent = prior.hint;
+      publishModels();
+      scanHint();
+      return;
+    }
     return returnToSavedConnection();
   }
   el('ai-api-back').addEventListener('click', dismissApiEditor);
@@ -769,6 +784,15 @@
     } else if (selectedProfile) {
       if (el('ai-form').hidden) window.showAiConnectionForm?.('key');
       editOpener = el('ai-edit-connection');
+      editState = {
+        profile: selectedProfile,
+        key: profileKey,
+        snapshot: modelSnapshot,
+        models: [...el('ai-model-list').options].map(option => option.value),
+        selectedModel: el('ai-models').hidden ? el('ai-model').value : el('ai-model-list').value,
+        status: el('ai-model-status').textContent,
+        hint: el('ai-selection-hint').textContent
+      };
       el('ai-edit-dialog').showModal();
     }
   });
@@ -820,6 +844,7 @@
     refreshSavedConnections();
     invalidateSelection();
     editOpener = el('ai-add-connection');
+    editState = null;
     el('ai-edit-dialog').showModal();
     el('ai-profile-name').focus();
   });
