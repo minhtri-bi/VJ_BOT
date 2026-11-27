@@ -4,14 +4,14 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {scanner} from './fixtures/model-scan-clock.mjs';
 
-function settings({consent = true, models = ['paid', 'denied', 'working'], savedModel = 'paid', probe,
+function settings({consent = true, models = ['paid', 'denied', 'working'], savedModel = 'paid', savedHistory, probe,
   storage = new Map(), connection = 'bound-connection', draftConnection = connection, deviceProfiles = new Map(), activeChoice = {value: null}} = {}) {
   const elements = new Map(), requests = [], scanRuns = [];
   const events = new EventTarget();
   let clock = Date.now();
   let storedModel = savedModel;
   let savedProfile = {id: 'saved-profile', name: 'Saved provider', protocol: 'openai', base_url: 'https://provider.example/v1',
-    model: storedModel, key_last4: 'test', connection_id: connection, models: [], checked_at: null};
+    model: storedModel, key_last4: 'test', connection_id: connection, models: [], checked_at: null, ...savedHistory};
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       value: '', children: [], events: {}, attributes: {}, dataset: {}, hidden: false, disabled: false,
@@ -742,7 +742,8 @@ test('canceling name and storage edits leaves running probes and their results i
 
 test('saving only the connection name does not activate a hidden partial scan result', async () => {
   const started = Promise.withResolvers(), probes = new Map();
-  const ui = settings({models: ['paid', 'working'], probe: model => {
+  const checkedAt = Date.UTC(2025, 0, 1);
+  const ui = settings({models: ['paid', 'working'], savedHistory: {models: ['paid', 'earlier'], checked_at: checkedAt}, probe: model => {
     const reply = Promise.withResolvers();
     probes.set(model, reply);
     if (probes.size === 2) started.resolve();
@@ -761,8 +762,9 @@ test('saving only the connection name does not activate a hidden partial scan re
   const {body} = ui.requests.find(request => request.path === '/api/ai/profiles/saved-profile');
   assert.equal(body.name, 'Renamed provider');
   assert.equal(body.model, 'paid');
-  assert.deepEqual(body.models, []);
-  assert.equal(body.checked_at, null);
+  assert.deepEqual(body.models, ['paid', 'earlier']);
+  assert.equal(body.checked_at, checkedAt);
+  assert.equal(body.connection_id, 'bound-connection');
   assert.equal(ui.element('ai-current-model').textContent, 'paid');
 });
 
