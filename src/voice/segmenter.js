@@ -5,15 +5,30 @@ const japanese = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}ー々]/u
 const letter = /\p{L}/u;
 const sentenceEnd = /[。！？.!?…][」』”’"')）]*$/u;
 const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
-const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
+const leadingNumber = /(?:^|\s)([\d０-９]+(?:[.,，][\d０-９]+)?[%％]?(?:[\p{Zs}\t]*[〜～][\p{Zs}\t]*[\d０-９]+(?:[.,，][\d０-９]+)?[%％]?)?[\p{Zs}\t]*)$/u;
 const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
 const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
-const numeral = /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u;
+const numeral = /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u;
 const clauseEnd = /[\r\n。！？.!?…]/u;
 
-export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
-  const segments = [];
-  let nextBoundary = 'start';
+export function segmentVoiceText(text, mode = 'bilingual', {hint, mixLanguages = false} = {}) {
+  const segments = [], mixed = mixLanguages && mode === 'bilingual';
+  let nextBoundary = 'start', combined = '', labelledNumber = false, japaneseNumber = false;
+  function finishCombined() {
+    const value = combined.trim();
+    if (labelledNumber || letter.test(value)) {
+      segments.push({lang:japaneseNumber || japanese.test(value) ? 'ja' : 'vi',text:value,
+        boundary:segments.length ? 'arrow' : 'start'});
+    }
+    combined = '';
+    labelledNumber = japaneseNumber = false;
+    return segments.length <= MAX_SEGMENTS;
+  }
+  function arrow() {
+    if (mixed) return finishCombined();
+    if (segments.length) nextBoundary = 'arrow';
+    return true;
+  }
   const add = (lang, raw, labelled = false) => {
     const value = raw.trim();
     if ((!letter.test(value) && !(labelled && numeral.test(value))) || (mode === 'ja' && lang !== 'ja')) return;
@@ -27,6 +42,15 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
     nextBoundary = 'inline';
   };
   function plain(value, explicit) {
+    if (mixed) {
+      if (/[\p{Script=Latin}\p{M}\p{N}]$/u.test(combined) && /^[\p{Script=Latin}\p{N}]/u.test(value)) combined += ' ';
+      combined += value;
+      if (explicit && numeral.test(value.trim())) {
+        labelledNumber = true;
+        japaneseNumber ||= explicit === 'ja';
+      }
+      return;
+    }
     if (explicit) return add(explicit, value, true);
     const trimmed = hint ? value.trim() : '';
     if (hint && numeral.test(trimmed)) return add(hint, trimmed, true);
@@ -72,15 +96,16 @@ export function segmentVoiceText(text, mode = 'bilingual', {hint} = {}) {
     if (lang) add(lang, pending);
   }
   for (const part of text.split(/(<(?:ja|vi)>[\s\S]*?<\/(?:ja|vi)>|→)/gi)) {
-    if (part === '→') {nextBoundary = segments.length ? 'arrow' : 'start'; continue;}
+    if (part === '→') {if (!arrow()) return null;continue;}
     const marked = /^<(ja|vi)>([\s\S]*?)<\/\1>$/i.exec(part);
     const value = marked?.[2] ?? part.replace(/<\/?(?:ja|vi)>/gi, ' ');
     const clauses = value.split('→');
     for (const [index, clause] of clauses.entries()) {
-      if (index && segments.length) nextBoundary = 'arrow';
+      if (index && !arrow()) return null;
       plain(clause, marked?.[1].toLowerCase());
     }
     if (segments.length > MAX_SEGMENTS) return null;
   }
+  if (mixed) return finishCombined() ? segments : null;
   return segments.map(segment => segment.lang === 'ja' ? {...segment,text:particleReading(segment.text)} : segment);
 }

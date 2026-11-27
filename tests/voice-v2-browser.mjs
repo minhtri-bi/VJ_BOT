@@ -66,8 +66,7 @@ document.getElementById('playback-check').addEventListener('click',async event=>
     if (!replay) {
       const prior=await fetch('/prior-cache').then(response=>response.json());
       for (const [mode,text] of [['ja',japanese],['bilingual',existingBilingual]]) {
-        const parts=['fixture',text,{mode}];
-        if (mode==='ja') parts.push('ja-synthesis-2');
+        const parts=['synthesis-3','fixture',text,{mode}];
         const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(parts)));
         const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
         await VJVoiceCache.put(oldKey,prior[mode],true);
@@ -160,7 +159,7 @@ document.querySelector('#recognize').onclick=async()=>{
 </script>`;
 // Observe the real media objects without changing the app's account, navigation, or controls.
 function observeLiveMedia(){
-  const media=window.voiceSmoke={microphone:null,output:[],keyboardClicks:[],resumes:new WeakMap()};
+  const media=window.voiceSmoke={microphone:null,micRequests:0,output:[],keyboardClicks:[],resumes:new WeakMap()};
   let startClick;
   document.addEventListener('click',event=>{
     if(event.isTrusted && event.detail===0 && event.target.closest('button')?.id==='live-start')startClick=event;
@@ -172,7 +171,10 @@ function observeLiveMedia(){
     return resume.call(this);
   };
   const getUserMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
-  navigator.mediaDevices.getUserMedia=async constraints=>(media.microphone=await getUserMedia(constraints));
+  navigator.mediaDevices.getUserMedia=async constraints=>{
+    media.micRequests++;
+    return media.microphone=await getUserMedia(constraints);
+  };
   document.addEventListener('click',event=>{
     if(event.isTrusted && event.detail===0)media.keyboardClicks.push(event.target.closest('button')?.id);
   },true);
@@ -345,6 +347,10 @@ async function runLiveBrowser(debuggerUrl,origin){
     await choose('#voice-v2-mode','dual_same_api');
     assert.ok(!await visible('#voice-v2-primary-model') && !await visible('#voice-v2-ja-speed'),'Advanced and fallback fields are hidden by default');
     assert.ok(!await visible('#voice-v2-ja-catalog') && await visible('#voice-v2-primary-catalog'),'The shared connection has one catalog action');
+    assert.ok(await visible('#voice-v2-ja-preset-hint') && await visible('#voice-v2-vi-preset-hint'),
+      'Blank shared Mistral voice IDs should show the two preset defaults');
+    assert.deepEqual(await observe(()=>['ja','vi'].map(lang=>
+      document.getElementById('voice-v2-'+lang+'-preset-hint').textContent.match(/Haruto|Huong/)?.[0])),['Haruto','Huong']);
     await click('#voice-v2-primary-fallback');
     assert.ok(await visible('#voice-v2-primary-model'));
     await click('#voice-v2-primary-fallback');
@@ -389,6 +395,8 @@ async function runLiveBrowser(debuggerUrl,origin){
     await width(1440);
     await choose('#voice-v2-mode','single');
     assert.ok(!await visible('#voice-v2-ja-voice') && !await visible('#voice-v2-vi-voice'));
+    assert.ok(!await visible('#voice-v2-ja-preset-hint') && !await visible('#voice-v2-vi-preset-hint'),
+      'The default-preset warnings must not describe single-voice routing');
     await tabTo('#voice-v2-primary-voice');
     await send('Input.insertText',{text:'fixture-voice'});
     await tabTo('#voice-v2-reading-tab',{shift:true});
@@ -419,6 +427,8 @@ async function runLiveBrowser(debuggerUrl,origin){
     await press('Enter');
     await until('Voice panel',()=>visible('#classroom-voice'));
     assert.ok(!await visible('#classroom-text'),'Live did not replace text mode');
+    assert.ok(await observe(()=>document.querySelector('#live-status').textContent.includes('Giọng song ngữ · Mistral')),
+      'Classroom did not identify the saved Mistral bilingual engine before Start');
     const motion=()=>observe(()=>{
       const style=getComputedStyle(document.querySelector('.live-orb'));
       return [matchMedia('(prefers-reduced-motion: reduce)').matches,style.animationName,style.transitionProperty];
@@ -429,11 +439,11 @@ async function runLiveBrowser(debuggerUrl,origin){
     await tabTo('#live-start');
     await press('Enter');
     assert.ok(await observe(()=>window.voiceSmoke.keyboardClicks.includes('live-start')),'Playback Start did not receive a trusted keyboard click');
-    await until('opening playback',async()=>await playing()===3 && await turn()==='you');
+    await until('opening playback',async()=>await playing()===2 && await turn()==='you');
     assert.deepEqual(await observe(()=>{
-      const {output,resumes}=window.voiceSmoke,[a,b,c]=output;
-      return [output.map(item=>item.frequency),output.every(item=>item.context===a.context),b.when>=a.until && c.when>=b.until,resumes.get(a.context)];
-    }),[[440,550,660],true,true,{startGesture:true,activation:true,hasMicrophone:false}],
+      const {output,resumes}=window.voiceSmoke,[a,b]=output;
+      return [output.map(item=>item.frequency),output.every(item=>item.context===a.context),b.when>=a.until,resumes.get(a.context)];
+    }),[[440,550],true,true,{startGesture:true,activation:true,hasMicrophone:false}],
     'The playing AudioContext must resume during the trusted Start action; synthesized audio must play in order without overlap');
     assert.ok(await observe(()=>document.querySelector('.live-turn.assistant')?.textContent.includes('最初')),'Opening caption did not reach the transcript');
 
@@ -465,34 +475,34 @@ async function runLiveBrowser(debuggerUrl,origin){
     await width(390);
     await tabTo('[data-command="repeat"]');
     await press('Enter');
-    await until('local replay',async()=>await playing()===6 && await turn()==='you');
-    assert.deepEqual(await observe(()=>window.voiceSmoke.output.slice(3).map(item=>item.frequency)),[440,550,660]);
+    await until('local replay',async()=>await playing()===4 && await turn()==='you');
+    assert.deepEqual(await observe(()=>window.voiceSmoke.output.slice(2).map(item=>item.frequency)),[440,550]);
     await tabTo('[data-command="hint"]',{shift:true});
     await press('Enter');
     await tabTo('#live-talk');
     await until('audible hint',()=>observe(()=>{
-      const item=window.voiceSmoke.output[6];
+      const item=window.voiceSmoke.output[4];
       return item && item.context.currentTime>item.when+0.025;
     }));
-    assert.ok(await observe(()=>{const item=window.voiceSmoke.output[6];return item.context.currentTime<item.until;}),'Hint ended before the interruption');
+    assert.ok(await observe(()=>{const item=window.voiceSmoke.output[4];return item.context.currentTime<item.until;}),'Hint ended before the interruption');
     await press(' ');
     assert.equal(await talkPressed(),'true');
-    assert.ok(await observe(()=>window.voiceSmoke.output[6].stopped && window.voiceSmoke.output[6].context.state==='running'),
+    assert.ok(await observe(()=>window.voiceSmoke.output[4].stopped && window.voiceSmoke.output[4].context.state==='running'),
       'Barge-in did not stop playback and preserve the running context');
     await pause(520);
     await press(' ');
-    await until('transcribed reply',async()=>await playing()===8 && await turn()==='you');
+    await until('transcribed reply',async()=>await playing()===6 && await turn()==='you');
     assert.ok(await observe(()=>{
       const {output,keyboardClicks}=window.voiceSmoke;
-      return output[7].frequency===770 && output[7].context===output[0].context &&
+      return output[5].frequency===770 && output[5].context===output[0].context &&
         document.querySelector('.live-turn.user')?.textContent.includes('昨日映画を見ました。') &&
         keyboardClicks.includes('live-start') && keyboardClicks.filter(id=>id==='live-talk').length===2;
     }),'Trusted Start/PTT actions, captured transcript, or reply playback missing');
     await tabTo('[data-command="summary"]');
     await press('Enter');
-    await until('long bilingual summary',async()=>await playing()===20 && await turn()==='you');
-    assert.deepEqual(await observe(()=>window.voiceSmoke.output.slice(8).map(item=>item.frequency)),
-      summaryReply.map((_,i)=>400+i*40),'The browser must play all twelve summary segments in order');
+    await until('long bilingual summary',async()=>await playing()===8 && await turn()==='you');
+    assert.deepEqual(await observe(()=>window.voiceSmoke.output.slice(6).map(item=>item.frequency)),
+      [400,440],'The browser must play both single-voice summary batches in order');
     await tabTo('#live-mute',{shift:true});
     await press('Enter');
     assert.ok(await observe(()=>window.voiceSmoke.microphone.getAudioTracks().every(track=>!track.enabled) &&
@@ -527,11 +537,14 @@ async function runLiveBrowser(debuggerUrl,origin){
     await click('#btn-voice-input');
     await click('#live-start');
     await until('held STT capability request',()=>liveRequests.filter(([,action])=>action==='capabilities').length===2);
+    assert.equal(await observe(()=>window.voiceSmoke.micRequests),1,
+      'A pending STT compatibility check must not request a second microphone stream');
     const general='#chat-lesson-context > button:nth-of-type(2)';
     assert.equal(await observe(s=>document.querySelector(s).textContent,general),'Trò chuyện chung');
     await click(general);
     await until('lesson change cancelled setup',()=>observe(()=>window.voiceSmoke.microphone.getTracks().every(track=>track.readyState==='ended') &&
       !document.querySelector('#live-start').disabled && /đã thay đổi/.test(document.querySelector('#live-status').textContent)));
+    assert.equal(await observe(()=>window.voiceSmoke.micRequests),1,'Cancelled preflight must not start a microphone stream');
     assert.deepEqual(consoleErrors,[],'Unexpected JavaScript errors in the Classroom app shell');
     const sttNavigation=await send('Page.navigate',{url:origin+'/browser-stt'});
     assert.equal(sttNavigation.errorText,undefined);
@@ -578,12 +591,12 @@ const profile = await mkdtemp(join(tmpdir(),'vjbot-voice-browser-'));
 const {promise: completed, resolve: result} = Promise.withResolvers();
 const requests = [], pages = [];
 const liveRequests = [], liveBatches = [];
-let releaseFirstBatch;
-const replyEvents = segments => [
-  ...segments.map(([lang,text],index)=>['segment',{index,lang,text,boundary:index?'sentence':'start'}]),
+let releaseOpener, releaseFirstBatch;
+const replyFrames = segments => [
+  ...segments.map(([lang,text,boundary],index)=>['segment',{index,lang,text,boundary:boundary ?? (index?'sentence':'start')}]),
   ['done',{count:segments.length,full_text:segments.map(([,text])=>text).join(' '),japanese_only:false}]
-].map(([name,item])=>`event: ${name}\ndata: ${JSON.stringify(item)}\n\n`).join('');
-const opener = [['ja','最初です。'],['vi','Chào em.'],['ja','続けましょう。']];
+].map(([name,item])=>`event: ${name}\ndata: ${JSON.stringify(item)}\n\n`);
+const opener = [['ja','最初'],['vi','em nghe nhé.','inline'],['ja','続けましょう。'],['vi','Chào em.']];
 const summaryReply = Array.from({length:12},(_,i)=>i%2 ? ['vi',`Ôn thêm mục ${i}.`] : ['ja',`まとめの例${i}です。`]);
 const platform={configured:true};
 const appResponses={
@@ -643,31 +656,38 @@ const server = createServer(async (req,res)=>{
     if(req.url==='/api/live/turn'){
       const {command,transcript}=data;
       liveRequests.push(['turn',command ?? transcript]);
-      const utterance=command==='start'?opener:command==='hint'?[['ja','ゆっくり話しましょう。']]
+      const utterance=command==='hint'?[['ja','ゆっくり話しましょう。']]
         :command==='summary'?summaryReply:[['ja','映画ですね。']];
-      return res.writeHead(200,{'Content-Type':'text/event-stream'}).end(replyEvents(utterance));
+      res.writeHead(200,{'Content-Type':'text/event-stream'});
+      if(command!=='start')return res.end(replyFrames(utterance).join(''));
+      const frames=replyFrames(opener);
+      // The first Mistral clip must be requested after the first full sentence, before done.
+      releaseOpener=()=>{releaseOpener=null;res.end(frames.slice(2).join(''));};
+      res.write(frames.slice(0,2).join(''));
+      return;
     }
     const records = (pairs,long=false)=>[
       ...pairs.map(([lang,frequency],index)=>({...rows[1],lang,index,boundary:index?'sentence':'start',
         audioBase64:(long?Buffer.concat(Array.from({length:20},()=>tone(frequency))):tone(frequency)).toString('base64')})),
       {type:'done',count:pairs.length}];
     const send=segments=>res.writeHead(200,{'Content-Type':'application/x-ndjson'}).end(segments.map(row=>JSON.stringify(row)+'\n').join(''));
-    if(text?.includes('最初です。')){
-      liveRequests.push(['speak','opening-first']);
+    if(text?.includes('最初')){
+      liveRequests.push(['speak','opening-first',text]);
       releaseFirstBatch=()=>{liveBatches.push('first');send(records([['ja',440]]));};
+      releaseOpener?.();
       return;
     }
     if(text?.includes('続けましょう。')){
-      liveRequests.push(['speak','opening-rest']);
-      liveBatches.push('rest');send(records([['vi',550],['ja',660]]));
+      liveRequests.push(['speak','opening-rest',text]);
+      liveBatches.push('rest');send(records([['ja',550]]));
       if(releaseFirstBatch)releaseFirstBatch();
       return;
     }
     if(text?.includes('まとめの例') || text?.includes('Ôn thêm mục')){
       const first=text.includes(summaryReply[0][1]);
-      const parts=Array.from(text.matchAll(/<(ja|vi)>.*?(\d+).*?<\/\1>/gu),([,lang,i])=>[lang,400+Number(i)*40]);
-      liveRequests.push(['speak',first?'summary-first':'summary-rest',parts.length]);
-      return send(records(parts));
+      const indices=Array.from(text.matchAll(/<(?:ja|vi)>.*?(\d+).*?<\/(?:ja|vi)>/gu),([,i])=>Number(i));
+      liveRequests.push(['speak',first?'summary-first':'summary-rest',indices]);
+      return send(records([['ja',400+(indices[0]??0)*40]]));
     }
     if(text?.includes('ゆっくり話しましょう。') || text?.includes('映画ですね。')){
       const hint=text.includes('ゆっくり話しましょう。');
@@ -727,11 +747,14 @@ try {
   console.log('Chromium played WAV, PCM with retained padding, and MP3 without metadata; refreshed stale recordings and replayed them from IndexedDB.');
   assert.deepEqual(liveBatches,['rest','first'],'The second HTTP response must finish before the first');
   const sttProfile={scope:'server',id:'fixture'};
-  assert.deepEqual(liveRequests,[['stt','capabilities','mistral',sttProfile,true],['turn','start'],['speak','opening-first'],
-    ['speak','opening-rest'],['turn','hint'],['speak','hint'],['stt','transcribe','mistral',sttProfile,true],['turn','昨日映画を見ました。'],
-    ['speak','answer'],['turn','summary'],['speak','summary-first',1],['speak','summary-rest',11],
+  assert.deepEqual(liveRequests,[['stt','capabilities','mistral',sttProfile,true],['turn','start'],
+    ['speak','opening-first','<ja>最初</ja> <vi>em nghe nhé.</vi>'],
+    ['speak','opening-rest','<ja>続けましょう。</ja> <vi>Chào em.</vi>'],['turn','hint'],['speak','hint'],
+    ['stt','transcribe','mistral',sttProfile,true],['turn','昨日映画を見ました。'],
+    ['speak','answer'],['turn','summary'],['speak','summary-first',[0]],
+    ['speak','summary-rest',[1,2,3,4,5,6,7,8,9,10,11]],
     ['stt','capabilities','mistral',sttProfile,true]],'STT must use the selected profile and replay must not call the network');
-  console.log('Chromium full Classroom shell: 390/768/1024/1440px, reduced motion, keyboard, ordered 12-segment summary, replay, and recorded Browser STT track with preserved onset.');
+  console.log('Chromium full Sound and Classroom shells: preset guidance, four viewport widths, keyboard, ordered mixed Mistral playback and replay, 12-part summary, and Browser STT onset.');
 } catch(error) {
   failure=error;
   throw error;

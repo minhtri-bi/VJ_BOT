@@ -8,12 +8,17 @@
   const invalidReply='Phản hồi hội thoại không hợp lệ.';
   const noSpeech='Chưa nghe rõ lời nói. Em thử nói lại nhé.';
   const captureError='Không ghi được âm thanh. Em kiểm tra micro rồi thử lại nhé.';
-  const explicitUnavailable='Kết nối chép lời giọng nói đã chọn không dùng được. Hệ thống không dùng nguồn khác.';
+  const sttSettings='Trong Cài đặt → Âm thanh → Nguồn chép lời, em chọn nguồn khác.';
+  const explicitUnavailable='Kết nối chép lời giọng nói đã chọn không dùng được. Hệ thống không dùng nguồn khác. '+sttSettings;
+  const firstSentenceEnd=/[。！？!?…][。！？.!?…]*[」』”’"')）]*|\.+[」』”’"')）]*(?=\s|$)/gu;
+  // Mirror the TTS check for spoken text and explicitly labelled numbers.
+  const hasSpokenText=text=>/\p{L}/u.test(text) || /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u.test(text);
   const message=(error,fallback)=>error instanceof SyntaxError ? invalidReply : error?.message || fallback;
   const detail=(body,fallback)=>typeof body?.detail==='string' && body.detail.trim() ? body.detail.slice(0,600) : fallback;
   const cancelBody=response=>{void response.body?.cancel().catch(()=>{});};
   function post(path,body,signal,options) {
-    return apiFetch(path,{method:'POST',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body),...options});
+    return apiFetch(path,{method:'POST',signal,body:JSON.stringify(body),...options,
+      headers:{'Content-Type':'application/json',...options?.headers}});
   }
   async function readStream(response,signal,current,maxBytes,readText) {
     if (!response.body || !current()) {cancelBody(response);return false;}
@@ -47,7 +52,38 @@
     if (!response.ok) throw new Error(detail(result,fallback));
     return result;
   }
-  async function liveEvents(response,signal,current,onSegment) {
+  const chatRequest=(chatBinding,chatProfile)=>chatBinding ? {chatBinding}
+    : chatProfile ? {headers:{'X-VJBot-Profile':chatProfile},redirect:'error'} : {};
+  const sttOptions=(live,chatBinding,chatProfile)=>live.stt_source==='voice'
+    ? {voiceRouting:true} : {...chatRequest(chatBinding,chatProfile),cascadedStt:true};
+  async function routingForStt(live,stt,signal) {
+    if (live.stt_source!=='voice') return {};
+    let routing;
+    try {routing=await stt(signal);}
+    catch (error) {
+      if (signal.aborted) throw error;
+      throw new Error(`${error.message} ${sttSettings}`);
+    }
+    if (!routing) throw new Error(explicitUnavailable);
+    return {stt_routing:routing};
+  }
+  async function selectStt({live,stt,chatBinding,chatProfile,signal,current}) {
+    if (live.stt_source==='browser') {
+      if (!window.SpeechRecognition && !window.webkitSpeechRecognition)
+        throw new Error('Trình duyệt không hỗ trợ chép lời. '+sttSettings);
+      return 'browser';
+    }
+    if (!window.MediaRecorder) throw new Error('Trình duyệt không hỗ trợ ghi âm. '+sttSettings);
+    const routing=await routingForStt(live,stt,signal);
+    if (!current()) return null;
+    const response=await post('/api/stt',{action:'capabilities',...routing},signal,sttOptions(live,chatBinding,chatProfile));
+    const result=await jsonResponse(response,signal,current,'Không kiểm tra được kết nối chép lời.');
+    if (!current()) return null;
+    if (result?.supported===true && ['openai','mistral','elevenlabs'].includes(result.provider)) return result.provider;
+    if (live.stt_source==='voice') throw new Error(explicitUnavailable);
+    throw new Error('Kết nối trò chuyện đã chọn không hỗ trợ chép lời. '+sttSettings);
+  }
+  async function liveEvents(response,signal,current,onSegment,onDone) {
     if (!current()) {cancelBody(response);return null;}
     if (!response.ok) return jsonResponse(response,signal,current,invalidReply);
     if (!response.headers.get('Content-Type')?.startsWith('text/event-stream') || !response.body) {
@@ -71,13 +107,14 @@
         if (event==='done' && segments.length && row?.count===segments.length && typeof row.full_text==='string'
           && row.full_text===segments.map(part=>part.text).join(' ') && typeof row.japanese_only==='boolean') {
           reply=row;
+          onDone(segments);
         } else if (event==='segment' && row?.index===segments.length && row.index<maxSegments
           && ['ja','vi'].includes(row.lang) && (row.index ? ['inline','sentence'].includes(row.boundary) : row.boundary==='start')
           && typeof row.text==='string' && row.text.trim() && !/<\/?(?:ja|vi)>/i.test(row.text)) {
           length+=row.text.length+9+Number(row.index>0);
           if (length>maxText) throw new Error('Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.');
           segments.push(row);
-          onSegment(row);
+          onSegment(row,segments);
           if (!current()) return;
         } else throw new Error(invalidReply);
         event='';
@@ -88,11 +125,10 @@
     return {segments,reply};
   }
 
-  function create({audioContext,microphone,sink,live,route,stt,context,current,chatBinding,onState,onCaption,onError}) {
+  function create({audioContext,microphone,sink,live,route,stt,context,current,chatBinding,chatProfile,sttProvider:preflightStt,onState,onCaption,onError}) {
     const session=new AbortController(), epoch=performance.now();
-    const explicit=live.stt_source==='voice';
-    const chatOptions=chatBinding ? {chatBinding} : {};
-    const sttOptions=explicit ? {voiceRouting:true} : {...chatOptions,cascadedStt:true};
+    const chatOptions=chatRequest(chatBinding,chatProfile);
+    const transcriptionOptions=sttOptions(live,chatBinding,chatProfile);
     const Recognition=window.SpeechRecognition || window.webkitSpeechRecognition;
     // Desktop Chromium shipped audio-track input in 135, before the unprefixed API.
     const agent=globalThis.navigator?.userAgent || '';
@@ -162,29 +198,6 @@
       source=detector=vadMute=null;
       history=[];lastAudio=null;
     }
-    async function routingForStt(signal) {
-      if (!explicit) return {};
-      const routing=await stt(signal);
-      if (!routing) throw new Error(explicitUnavailable);
-      return {stt_routing:routing};
-    }
-    async function selectStt(signal) {
-      if (live.stt_source!=='browser') {
-        const routing=await routingForStt(signal);
-        if (!ownsSession()) return null;
-        const response=await post('/api/stt',{action:'capabilities',...routing},signal,sttOptions);
-        const result=await jsonResponse(response,signal,ownsSession,'Không kiểm tra được kết nối chép lời.');
-        if (!ownsSession()) return null;
-        if (result?.supported===true && ['openai','mistral','elevenlabs'].includes(result.provider)) {
-          if (!window.MediaRecorder) throw new Error('Trình duyệt không hỗ trợ ghi âm cho kết nối chép lời đã chọn.');
-          return result.provider;
-        }
-        if (explicit) throw new Error(explicitUnavailable);
-        throw new Error('Kết nối trò chuyện đã chọn không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
-      }
-      if (!Recognition) throw new Error('Trình duyệt không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
-      return 'browser';
-    }
     async function initVad() {
       // Use a silent output connection so the graph keeps processing without monitoring the microphone.
       if (audioContext.audioWorklet && window.AudioWorkletNode) {
@@ -233,7 +246,7 @@
       started=true;state();
       setupTimer=setTimeout(()=>fatal(new Error('Mở hội thoại quá lâu. Em kiểm tra kết nối rồi thử lại nhé.')),15000);
       try {
-        const provider=await selectStt(session.signal);
+        const provider=preflightStt ?? await selectStt({live,stt,chatBinding,chatProfile,signal:session.signal,current:ownsSession});
         if (!ownsSession()) return;
         sttProvider=provider;
         await initVad();
@@ -446,10 +459,10 @@
           if (!current()) return;
           let binary='';
           for (let i=0;i<bytes.length;i+=32768) binary+=String.fromCharCode(...bytes.subarray(i,i+32768));
-          const routing=await routingForStt(signal);
+          const routing=await routingForStt(live,stt,signal);
           if (!current()) return;
           const {level,lesson}=reference;
-          const response=await post('/api/stt',{audio:btoa(binary),mime_type:blob.type,level,lesson,...routing},signal,sttOptions);
+          const response=await post('/api/stt',{audio:btoa(binary),mime_type:blob.type,level,lesson,...routing},signal,transcriptionOptions);
           const result=await jsonResponse(response,signal,current,'Chưa chép được bản ghi. Em thử lại nhé.');
           if (!current()) return;
           transcript=result?.text;
@@ -464,21 +477,23 @@
     async function generate(turn,reference,command,transcript='') {
       const signal=turn.controller.signal, current=()=>owns(turn);
       deadline(turn,35000,'Thầy phản hồi quá lâu. Em thử lại nhé.');
-      let prepared, appendChain=Promise.resolve(), text='', firstAt;
+      let routing, firstReady, appendChain=Promise.resolve(), text='', firstAt;
+      let mistralSingle=false, firstEnd=0, cut=0, batched=0, tail;
       const audioSegments=[];
       const steps=slowerSteps;
       function batch(parts) {
         const before=appendChain;
-        prepared??=route(signal);
         // Start requests independently, but append only after the preceding batch has
         // validated and appended every record.
         appendChain=(async()=>{
-          const routing=await prepared;
           if (!current()) return;
-          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
-            mode:'bilingual',stream:true,routing},signal,{voiceRouting:true});
           const base=(routing.mode==='single' ? routing.primary.speed : routing.ja?.speed ?? routing.primary.speed) ?? 1;
           const jaScale=Math.min(base,Math.max(0.75,base-0.12*steps))/base;
+          // Separate language clips only when Japanese needs a different pace, using the same voice and connection.
+          const synthesisRouting=mistralSingle && jaScale<1
+            ? {...routing,mode:'dual_same_api',ja:{profile:null},vi:{profile:null}} : routing;
+          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
+            mode:'bilingual',stream:true,routing:synthesisRouting},signal,{voiceRouting:true});
           await window.VJVoice.consume(response,async part=>{
             await before;
             if (!current()) return;
@@ -493,6 +508,20 @@
         })();
         void appendChain.catch(error=>turnError(turn,error));
       }
+      function flushFirstSentence(segments) {
+        if (!mistralSingle || !firstEnd || batched || !current()) return;
+        batched=firstEnd;
+        const parts=segments.slice(0,batched);
+        if (cut) {
+          const last=parts.at(-1);
+          const rest=last.text.slice(cut).trim();
+          if (rest) {
+            parts[parts.length-1]={...last,text:last.text.slice(0,cut)};
+            if (hasSpokenText(rest)) tail={...last,text:rest,boundary:'sentence'};
+          }
+        }
+        batch(parts);
+      }
       const payload={...reference,command,transcript,history:[],japanese_only:japaneseOnly};
       const room=maxTurnBytes-textEncoder.encode(JSON.stringify(payload)).length;
       let first=history.length, bytes=0;
@@ -504,21 +533,43 @@
       if(first)history=history.slice(first);
       payload.history=history;
       const response=await post('/api/live/turn',payload,signal,chatOptions);
-      const result=await liveEvents(response,signal,current,part=>{
+      const result=await liveEvents(response,signal,current,(part,segments)=>{
         const now=time();firstAt??=now;
         text+=(text?' ':'')+part.text;
         caption(turn,'assistant',text,firstAt,now);
-        if (part.index===0 && current()) batch([part]);
+        if (!current() || batched) return;
+        if (!firstEnd) {
+          for (const end of part.text.matchAll(firstSentenceEnd)) {
+            const at=end.index+end[0].length;
+            if (part.index===0 && !hasSpokenText(part.text.slice(0,at).trim())) continue;
+            if (/[」』]$/u.test(end[0]) && /^[\s]*[\p{Script=Hiragana}\p{Script=Han}]/u.test(part.text.slice(at))) continue;
+            firstEnd=part.index+1;cut=at;break;
+          }
+        }
+        if (part.index===0) {
+          firstReady=route(signal).then(value=>{
+            if (!current()) return;
+            routing=value;
+            mistralSingle=routing.mode==='single' && routing.primary.provider==='mistral';
+            if (mistralSingle) flushFirstSentence(segments);
+            else {batched=1;batch([part]);}
+          });
+          void firstReady.catch(error=>turnError(turn,error));
+        } else flushFirstSentence(segments);
+      },segments=>{
+        firstEnd ||= segments.length;
+        flushFirstSentence(segments);
       });
       if (!result || !current()) return;
       deadline(turn,90000,'Âm thanh tải hoặc phát quá lâu. Em thử lại nhé.');
-      if (result.segments.length>1) {
-        const routing=await prepared;
-        if (!current()) return;
-        const remaining=result.segments.slice(1);
+      await firstReady;
+      if (!current()) return;
+      if (tail || result.segments.length>batched) {
+        const remaining=result.segments.slice(batched);
+        if (tail) remaining.unshift(tail);
         const managed=remaining.some(({lang})=>(routing.mode==='single'
           ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
-        const limit=managed ? managedTtsSegments : maxSegments-1;
+        const limit=managed ? managedTtsSegments : mistralSingle ? maxSegments : maxSegments-1;
         for(let i=0;i<remaining.length;i+=limit) batch(remaining.slice(i,i+limit));
       }
       await appendChain;
@@ -565,5 +616,5 @@
     }
     return {start,stop,toggleTalk,setMode,setMuted,sendCommand};
   }
-  window.VJLiveCascaded=Object.freeze({create});
+  window.VJLiveCascaded=Object.freeze({create,selectStt});
 })();

@@ -132,6 +132,24 @@ test('chunker consumes split and empty tags and keeps actual sentence boundaries
   assert.deepEqual(items.map(({lang,boundary}) => [lang,boundary]), [['ja','start'],['vi','inline'],['ja','sentence']]);
 });
 
+test('live tagged numeric ranges retain both endpoints in captions', () => {
+  const items=[], chunker=createSegmentChunker({onSegment:part=>items.push(part)});
+  chunker.push('<ja>10〜20%</ja><vi>２０％　～　３０％</vi><ja>〜ます</ja>');
+  assert.equal(chunker.flush().fullText,'10〜20% ２０％　～　３０％ ます');
+  assert.deepEqual(items.map(({lang,text})=>[lang,text]),[
+    ['ja','10〜20%'],['vi','２０％　～　３０％'],['ja','ます']
+  ]);
+});
+
+test('live captions keep a Vietnamese percentage separate from Japanese on a new line', () => {
+  const items=[], chunker=createSegmentChunker({onSegment:part=>items.push(part)});
+  chunker.push('Giảm 20%\n二割引');
+  assert.equal(chunker.flush().fullText,'Giảm 20% 二割引');
+  assert.deepEqual(items.map(({lang,text})=>[lang,text]),[
+    ['vi','Giảm 20%'],['ja','二割引']
+  ]);
+});
+
 test('chunker emits plain text early, separates wrong-language text inside tags, and caps the turn', () => {
   const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
   chunker.push('いいですね。');

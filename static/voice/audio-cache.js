@@ -76,8 +76,8 @@
     } catch { /* A full or disabled IndexedDB does not interrupt playback. */ }
   }
   async function key(identity,text,reference) {
-    // Native speed and authored readings change synthesis output across both modes.
-    const bytes=new TextEncoder().encode(JSON.stringify(['synthesis-3',identity,text.normalize('NFC'),reference]));
+    // Mixed Mistral synthesis and shared text normalization change the cached audio.
+    const bytes=new TextEncoder().encode(JSON.stringify(['synthesis-4',identity,text.normalize('NFC'),reference]));
     const digest=new Uint8Array(await crypto.subtle.digest('SHA-256',bytes));
     return Array.from(digest,byte=>byte.toString(16).padStart(2,'0')).join('');
   }

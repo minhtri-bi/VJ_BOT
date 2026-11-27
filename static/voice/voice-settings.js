@@ -3,6 +3,7 @@
   const prefix='vjbot_voice_routing_v2:';
   const bases={elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai:'https://api.openai.com/v1',gemini:'https://generativelanguage.googleapis.com',openai_compatible:''};
   const titles={primary:'Kết nối chính',ja:'Tiếng Nhật',vi:'Tiếng Việt'};
+  const mistralPresets={ja:'Haruto · Tiếng Nhật (nam)',vi:'Huong · Tiếng Việt (nữ)'};
   const mode=el('mode'), slots=el('slots'), status=el('status'), kind=el('kind'), url=el('url');
   const liveEngine=el('live-engine'), liveTurn=el('live-turn'), liveBarge=el('live-barge'),
     liveStt=el('live-stt'), liveSlot=el('live-stt-slot'), liveSlotField=el('live-stt-slot-field'), liveOptions=el('live-options');
@@ -146,6 +147,16 @@
         [control.model.value,control.voice.value,control.nativeSpeed.checked]);
     }
   }
+  function updateMistralHints() {
+    const primary=controls.get('primary');
+    const defaults=mode.value==='dual_same_api' && !primary.voice.value.trim()
+      && rows.some(row=>ref(row)===primary.profile.value && provider(row)==='mistral');
+    for (const lang of ['ja','vi']) {
+      const {voice,presetHint}=controls.get(lang);
+      presetHint.hidden=!defaults || Boolean(voice.value.trim());
+      voice.setAttribute('aria-describedby',presetHint.hidden ? '' : presetHint.id);
+    }
+  }
   function updateAccounts(reset=false,modeSwitch=false) {
     for (const [slot,control] of controls) {
       if (!reset && control.section.hidden) continue;
@@ -175,6 +186,7 @@
     }
     const row=rows.find(row=>ref(row)===controls.get('primary').profile.value);
     el('remove').hidden=!row || Boolean(row.model);
+    updateMistralHints();
   }
   for (const [slot,title] of Object.entries(titles)) {
     const section=document.createElement('fieldset'), legend=document.createElement('legend');
@@ -190,6 +202,12 @@
     const modelList=document.createElement('datalist'), voiceList=document.createElement('datalist');
     modelList.id='voice-v2-models-'+slot;voiceList.id='voice-v2-voices-'+slot;
     model.setAttribute('list',modelList.id);voice.setAttribute('list',voiceList.id);section.append(modelList,voiceList);
+    const presetHint=slot==='primary' ? null : document.createElement('p');
+    if (presetHint) {
+      presetHint.id='voice-v2-'+slot+'-preset-hint';presetHint.className='ai-field-hint';presetHint.hidden=true;
+      presetHint.textContent=`Chưa nhập ID giọng. Mistral sẽ dùng ${mistralPresets[slot]} mặc định.`;
+      section.append(presetHint);
+    }
     const tuning=document.createElement('details'), summary=document.createElement('summary'), advanced=document.createElement('div');
     tuning.className='sound-tuning';advanced.className='sound-fields';
     summary.textContent=slot==='vi'?'Tinh chỉnh tốc độ':'Tinh chỉnh tốc độ và Kanji';
@@ -216,7 +234,9 @@
     reading?.append(option('kanji_native','Giữ Kanji'),option('kana_first','Ưu tiên kana'));
     const catalog=document.createElement('button');catalog.type='button';catalog.id='voice-v2-'+slot+'-catalog';catalog.className='settings-link';catalog.textContent='Tải danh mục';header.append(catalog);
     if (fallback) header.append(fallback);
-    controls.set(slot,{section,header,headerText,fields,tuning,profile,model,voice,speed,nativeSpeed,reading,catalog,modelList,voiceList,fallback,fallbackOpen:false});
+    controls.set(slot,{section,header,headerText,fields,tuning,profile,model,voice,speed,nativeSpeed,reading,catalog,modelList,voiceList,presetHint,fallback,fallbackOpen:false});
+    voice.addEventListener('input',updateMistralHints);
+    voice.addEventListener('change',updateMistralHints);
     catalog.addEventListener('click',()=>loadCatalog(slot));
     profile.addEventListener('change',()=>{layout();updateAccounts();});
   }
@@ -439,7 +459,10 @@
       all.cursor=data.next_cursor;
       catalogs.set(slot,all);
       control.modelList.replaceChildren(...[...all.models.values()].map(row=>option(row.id,row.languages ? row.languages.join(' · ') : row.id)));
-      control.voiceList.replaceChildren(...[...all.voices.values()].map(row=>option(row.id,row.name)));
+      control.voiceList.replaceChildren(...[...all.voices.values()].map(row=>{
+        const preset=config.primary.provider==='mistral' ? mistralPresets[row.lang] : null;
+        return option(row.id,row.category==='cloned' ? `${row.name} · Giọng nhân bản` : preset || row.name);
+      }));
       control.catalog.textContent=all.cursor?'Tải thêm giọng':'Tải danh mục';
       status.textContent=`${all.models.size} model · ${all.voices.size} giọng${all.cursor?' · còn kết quả':''}. Chưa thử tạo âm thanh.`;
     } catch (error) {if (role===roleKey()) status.textContent=error.message;}
