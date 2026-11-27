@@ -23,7 +23,7 @@ Tài liệu này là bản hướng dẫn kỹ thuật chi tiết để triển 
 
 ### Chiến lược tách PR khuyến nghị (tránh PR quá lớn, dễ review & test)
 
-- **PR 2A (Backend Core & Unified STT):** Tasks 1 → 4 (`streamLLM`, `voiceStreamingInstructions`, `POST /api/live/turn`, nâng cấp `POST /api/stt` + unit tests).
+- **PR 2A (Backend Core & Unified STT):** Tasks 1 → 4 (`streamLLM`, `voiceStreamingInstructions`, `POST /api/live/turn`, nâng cấp `POST /api/stt` + unit tests) — xem đặc tả thực thi chi tiết tại [VOICE_PHASE2A_SPEC.md](VOICE_PHASE2A_SPEC.md).
 - **PR 2B (Frontend Cascaded Live Engine & Settings):** Tasks 5 → 8 (`vad-worklet`, `live-core`, `live-cascaded`, nối Settings & UI Classroom Voice + unit & Chromium tests).
 
 ---
@@ -149,7 +149,7 @@ sequenceDiagram
      - Gửi `context_bias` (JSON array / repeated form fields theo spec Mistral `/v1/audio/transcriptions`), nếu nhận `422` thì retry 1 lần không kèm `context_bias` (giống [`src/live.js`](../src/live.js#L140-L151)).
   3. **Tùy chọn nguồn STT tường minh (`stt_routing`):**
      - Mặc định (`stt_routing` vắng mặt): giữ nguyên hành vi cũ — dùng Chat connection (OpenAI / Mistral) hoặc server OpenAI cho Admin.
-     - Khi client gửi `stt_routing: { scope, id | connection, provider, admin_override }` (từ hồ sơ giọng nói Voice v2 đã chọn tường minh trong Settings): xác thực bằng đúng hàm `selectConnection` trong [`tts-route.js`](../src/voice/tts-route.js#L51-L74) (chỉ chấp nhận `mistral`, `openai`, `elevenlabs`, fail-closed, không bao giờ fallback sang Chat hay tài khoản khác).
+     - Khi client gửi `stt_routing: { version: 2, admin_override?, provider, profile: { scope, id?, connection? } }` (từ hồ sơ giọng nói Voice v2 đã chọn tường minh trong Settings — xem schema đầy đủ tại [VOICE_PHASE2A_SPEC.md](VOICE_PHASE2A_SPEC.md#62-nh%C3%A1nh-ch%E1%BB%8Dn-k%E1%BA%BFt-n%E1%BB%91i-stt-hai-ch%E1%BA%BF-%C4%91%E1%BB%99-t%C3%A1ch-bi%E1%BB%87t-tuy%E1%BB%87t-%C4%91%E1%BB%91i)): xác thực bằng đúng hàm `selectConnection` trong [`tts-route.js`](../src/voice/tts-route.js#L51-L74) (chỉ chấp nhận `mistral`, `openai`, `elevenlabs`, fail-closed, không bao giờ fallback sang Chat hay tài khoản khác).
      - `{ action: 'capabilities', stt_routing? }` trả `{ supported, provider, model }` để UI hiển thị rõ đang dùng STT nào trước khi thu âm.
 
 ---
