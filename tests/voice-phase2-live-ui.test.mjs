@@ -179,7 +179,7 @@ test('blocked STT does not switch sources, while browser PTT skips STT and mutin
   for (const source of ['chat','voice']) {
     const f=fixture({live:{stt_source:source},fetch:()=>Response.json({supported:false,provider:null})});
     await f.engine.start();
-    assert.equal(f.calls.length,1);assert.equal(f.errors[0].fatal,true);assert.match(f.errors[0].message,source==='chat'?/Chat/:/không dùng nguồn khác/);
+    assert.equal(f.calls.length,1);assert.equal(f.errors[0].fatal,true);assert.match(f.errors[0].message,source==='chat'?/Kết nối trò chuyện/:/không dùng nguồn khác/);
     assert.equal(f.recognizers.length,0);assert.equal(f.timers.size,0);
   }
   const f=fixture();await f.engine.start();
@@ -200,9 +200,14 @@ test('AudioWorklet VAD captures at onset, blocks echo during teacher playback, a
   const port=f.nodes.find(node=>node.port).port;
   const emit=(rms,count)=>{for (let i=0;i<count;i++){f.advance(30);port.onmessage({data:{rms}});}};
   emit(0.025,8);assert.equal(f.recorders.length,0);
-  emit(0.042,1);assert.equal(f.recorders[0].state,'recording');assert.equal(f.audio[0].stopped,undefined);
-  emit(0.042,6);assert.equal(f.audio[0].stopped,true);assert.equal(f.states.at(-1).phase,'recording');
-  f.recorders[0].data(1024);emit(0.042,7);emit(0,25);await cycle();
+  emit(0.042,9);emit(0,25);await cycle();
+  assert.equal(f.audio[0].stopped,undefined,'a 240 ms interjection must not cut off the tutor');
+  assert.equal(f.calls.filter(call=>call.path==='/api/stt').length,1);
+  assert.equal(f.errors.length,0);
+  emit(0.042,1);assert.equal(f.recorders[1].state,'recording');assert.equal(f.audio[0].stopped,undefined);
+  emit(0.042,11);assert.equal(f.audio[0].stopped,undefined);
+  emit(0.042,1);assert.equal(f.audio[0].stopped,true);assert.equal(f.states.at(-1).phase,'recording');
+  f.recorders[1].data(1024);emit(0,25);await cycle();
   assert.equal(f.calls.filter(call=>call.path==='/api/stt').length,2);
   f.engine.stop();await opening;
   assert.equal(port.onmessage,null);assert(f.nodes.every(node=>node.disconnected));assert.equal(f.timers.size,0);

@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
+import {createHash,webcrypto} from 'node:crypto';
 
 const script=readFileSync('static/voice/voice-player.js','utf8');
 const vi={type:'segment',index:0,lang:'vi',boundary:'start',speed:1,audioBase64:'SUQzBA==',mimeType:'audio/mpeg'};
@@ -108,8 +109,8 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
   const window = new EventTarget();
   window.removeVoiceProfile=async (...args)=>{removed.push(args);};
   const profiles = [
-    {id:'a',scope:'local',name:'ElevenLabs',protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',revision:'1'},
-    {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',revision:'1'},
+    {id:'a',scope:'local',name:'ElevenLabs',protocol:'elevenlabs',base_url:'https://api.elevenlabs.io',key_last4:'e123',revision:'1'},
+    {id:'b',scope:'local',name:'Gemini',protocol:'gemini',base_url:'https://generativelanguage.googleapis.com',key_last4:'g123',revision:'1'},
     {id:'c',scope:'local',name:'Custom',protocol:'openai_compatible',base_url:'https://tts.example/v1',revision:'1'}
   ];
   const context = vm.createContext({window, signedInUser:{user_id:owner}, Event, CustomEvent, AbortController, AbortSignal, apiFetch,
@@ -127,6 +128,86 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
     save:()=>el('routing').events.submit({preventDefault(){}}),
     catalog:()=>el('slots').children[0].children.find(child=>child.tag==='button').events.click()};
 }
+
+// Keep IndexedDB records across page contexts; load the real routing, cache and player in each.
+function persistentCache() {
+  const records=new Map();
+  const db={transaction(){
+    let pending=0;
+    const tx={objectStore:()=>({
+      get:key=>request(()=>structuredClone(records.get(key))),
+      put:(value,key)=>request(()=>records.set(key,structuredClone(value))),
+      delete:key=>request(()=>records.delete(key))
+    })};
+    function request(action) {
+      const req={};
+      pending++;
+      queueMicrotask(()=>{
+        req.result=action();
+        req.onsuccess?.();
+        if (!--pending) tx.oncomplete();
+      });
+      return req;
+    }
+    return tx;
+  }};
+  return {records,indexedDB:{open(){
+    const req={result:db};
+    queueMicrotask(()=>req.onsuccess());
+    return req;
+  }}};
+}
+
+test('Phase 1 disk audio replays after upgrade and reload without synthesis or key decryption',async()=>{
+  const oldConfig={version:2,mode:'dual_split_api',admin_override:false,
+    primary:{profile:{scope:'local',id:'a'},provider:'elevenlabs',model:'reader',voice_id:'voice',speed:0.9,kanji_mode:'kana_first'},
+    ja:{profile:null,speed:0.8,kanji_mode:'kanji_native'},
+    vi:{profile:{scope:'local',id:'b'},provider:'gemini',speed:1.1}};
+  const text='Xin chào. こんにちは。', options={cacheAudio:true,lesson:{id:'lesson',level:'N5'}};
+  const reference={mode:'bilingual',lesson:options.lesson,focus:null,view:'checks'};
+  const oldIdentity=JSON.stringify([JSON.stringify(['learner',false]),oldConfig,
+    ['https://api.elevenlabs.io',null,'e123','1'],['https://generativelanguage.googleapis.com',null,'g123','1']]);
+  const oldKey=createHash('sha256').update(JSON.stringify(['synthesis-3',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
+  const storage=new Map([['vjbot_voice_routing_v2:learner',JSON.stringify({...oldConfig,live:{engine:'cascaded',stt_source:'browser'}})]]);
+  const {records,indexedDB}=persistentCache(), reads=[], requests=[];
+  function loadPage() {
+    const {window,context}=settingsFixture(path=>{requests.push(path);throw new Error('Unexpected API request');},reads,storage);
+    const audio=[], statuses=[];
+    window.VJVoiceStitcher={create:()=>({append:async part=>{audio.push(part);},finish:async()=>{},stop(){}})};
+    Object.assign(context,{indexedDB,crypto:webcrypto,TextEncoder,TextDecoder,mascotMgr:{setState(){}},
+      stopSpeech:()=>window.VJVoice.stop(),speechStatus:message=>statuses.push(message)});
+    vm.runInContext(readFileSync('static/voice/audio-cache.js','utf8'),context);
+    vm.runInContext(script,context);
+    return {window,context,audio,statuses};
+  }
+  const {window:seed}=loadPage();
+  await seed.VJVoiceCache.put(oldKey,[vi,ja],true);
+  assert.equal(records.has(oldKey),true);
+  const routing=seed.VJVoiceRouting, identity=routing.identity(routing.stored());
+  assert.doesNotMatch(identity,/e123|g123|synthetic-fixture-key/);
+  const newKey=await seed.VJVoiceCache.key(identity,text,reference);
+  assert.notEqual(newKey,oldKey);
+
+  const revoked=loadPage(), metadata=revoked.context.VJProfiles.metadata;
+  revoked.context.VJProfiles.metadata=async (...args)=>({...await metadata(...args),revision:'revoked'});
+  await revoked.window.VJVoice.speak(text,options);
+  assert.match(revoked.statuses.at(-1),/đã đổi/);
+  assert.deepEqual(revoked.audio,[]);
+  assert.equal(records.has(newKey),false);
+
+  const upgraded=loadPage();
+  await upgraded.window.VJVoice.speak(text,options);
+  assert.deepEqual(upgraded.audio,[vi,ja]);
+  await new Promise(setImmediate);
+  assert.equal(records.has(newKey),true);
+
+  records.delete(oldKey);
+  const reloaded=loadPage();
+  await reloaded.window.VJVoice.speak(text,options);
+  assert.deepEqual(reloaded.audio,[vi,ja]);
+  assert.deepEqual(requests,[]);
+  assert.deepEqual(reads,Array(5).fill('metadata'));
+});
 
 test('saved dual routing preserves single speed across reload without changing either dual speed',()=>{
   const storage=new Map();
@@ -232,7 +313,7 @@ test('prepared replay reads local metadata but not the key, and rejects a rotate
   assert.deepEqual(reads,['metadata','key','metadata']);
 });
 
-test('legacy live defaults are immutable; settings change live identity but preserve audio identity',()=>{
+test('Phase 1 routes restore native Live; settings change live identity but preserve audio identity',()=>{
   const storage=new Map();
   const key='vjbot_voice_routing_v2:learner';
   storage.set(key,JSON.stringify({version:2,mode:'single',admin_override:false,
@@ -243,11 +324,15 @@ test('legacy live defaults are immutable; settings change live identity but pres
   const defaults={engine:'cascaded',turn_mode:'vad',barge_in:true,stt_source:'chat',stt_slot:'primary'};
   assert.ok(Object.isFrozen(routing));
   assert.ok(Object.isFrozen(routing.liveConfig(saved())));
-  assert.deepEqual({...routing.liveConfig(saved())},defaults);
+  assert.deepEqual({...routing.liveConfig(saved())},{...defaults,engine:'native'});
+  assert.deepEqual({...routing.liveConfig(null)},defaults);
   assert.deepEqual({...routing.liveConfig({live:{engine:'unknown',turn_mode:1,barge_in:'false',stt_source:'unknown',stt_slot:'xx'}})},defaults);
+  assert.equal(el('live-engine').value,'native');
+  assert.equal(el('live-options').hidden,true);
   assert.equal(el('live-stt-slot-field').hidden,true);
   assert.equal(el('live-stt-slot').disabled,true);
   window.addEventListener('vjbot-voice-changed',event=>events.push(event.detail));
+  change('live-engine','cascaded');
   change('live-stt','voice');
   assert.equal(el('live-stt-slot-field').hidden,false);
   assert.equal(el('live-stt-slot').disabled,false);
@@ -273,6 +358,23 @@ test('legacy live defaults are immutable; settings change live identity but pres
   assert.equal(again.el('live-options').hidden,false);
   assert.ok(['turn','barge','stt','stt-slot'].every(name=>!again.el('live-'+name).disabled));
   assert.equal(again.el('live-stt-slot').value,'ja');
+});
+
+test('new routes default to Cascaded and explicit Cascaded preferences survive reload',()=>{
+  const storage=new Map(), first=settingsFixture(undefined,[],storage,true);
+  assert.equal(first.el('live-engine').value,'cascaded');
+  first.change('primary-profile','local:b');
+  first.change('live-stt','browser');
+  first.el('live-turn').value='ptt';
+  first.el('live-barge').checked=false;
+  first.save();
+  const reloaded=settingsFixture(undefined,[],storage,true);
+  assert.equal(reloaded.el('live-engine').value,'cascaded');
+  assert.equal(reloaded.el('live-stt').value,'browser');
+  assert.equal(reloaded.el('live-turn').value,'ptt');
+  assert.equal(reloaded.el('live-barge').checked,false);
+  reloaded.save();
+  assert.deepEqual(reloaded.saved().live,{engine:'cascaded',turn_mode:'ptt',barge_in:false,stt_source:'browser',stt_slot:'primary'});
 });
 
 test('saving cascaded voice STT rejects an unsupported split slot without replacing the saved route',()=>{

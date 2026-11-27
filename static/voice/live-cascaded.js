@@ -171,7 +171,7 @@
           return result.provider;
         }
         if (explicit) throw new Error(explicitUnavailable);
-        throw new Error('Kết nối Chat đã chọn không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
+        throw new Error('Kết nối trò chuyện đã chọn không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
       }
       if (!Recognition) throw new Error('Trình duyệt không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
       return 'browser';
@@ -346,7 +346,8 @@
         if (rms>=threshold) {
           if (now-record.lastLoud>=60) record.start=now;
           record.lastLoud=now;
-          if (now-record.start>=(nearSpeaker ? 180 : 120)) commitCapture(record);
+          // Do not cut off the tutor for an utterance we would discard as too short.
+          if (now-record.start>=(nearSpeaker ? minSpeech : 120)) commitCapture(record);
         } else if (now-record.lastLoud>=60 || nearSpeaker && !live.barge_in) releaseCapture(record);
       } else {
         if (rms>=0.012) record.lastLoud=now;

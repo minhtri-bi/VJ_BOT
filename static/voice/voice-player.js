@@ -95,8 +95,17 @@
       if (!current()) return;
       const cache=window.VJVoiceCache, persist=options.cacheAudio===true && !options.privateAudio && !options.preview && !config.admin_override;
       const cacheKey=await cache.key(identity,text,reference).catch(()=>null);
-      const hit=cacheKey ? await cache.get(cacheKey,persist) : null;
+      let hit=cacheKey ? await cache.get(cacheKey,persist) : null, fromLegacy=false;
       if (!current()) return;
+      if (!hit && cacheKey && persist) {
+        const legacyKey=await window.VJVoiceRouting.legacyCacheKey?.(config,text,reference).catch(()=>null);
+        if (!current()) return;
+        if (legacyKey && legacyKey!==cacheKey) {
+          hit=await cache.get(legacyKey,true);
+          fromLegacy=Boolean(hit);
+        }
+        if (!current()) return;
+      }
       // Keep profile revocation checks on replay; only a cache miss needs local key decryption.
       const routing=await window.VJVoiceRouting.prepared(config,controller.signal,{replay:Boolean(hit)});
       if (!current()) return;
@@ -105,6 +114,7 @@
         if (current()) {mascotMgr.setState('speaking');speechStatus('Đang đọc · '+(segment.lang==='ja'?'Tiếng Nhật':'Tiếng Việt'),true);}
       }
       if (hit) {
+        if (fromLegacy) void cache.put(cacheKey,hit,persist);
         for (const segment of hit) {if (!current()) return;await append(segment);}
       } else {
         const response=await apiFetch('/api/tts',{voiceRouting:true,method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},

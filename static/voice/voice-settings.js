@@ -22,7 +22,8 @@
   function liveConfig(config) {
     const live=config?.live;
     return Object.freeze({
-      engine:live?.engine==='native'?'native':'cascaded',
+      // Phase 1 routing predates Live settings and must stay on the native path.
+      engine:live?.engine==='native' || config!=null && live===undefined ? 'native' : 'cascaded',
       turn_mode:live?.turn_mode==='ptt'?'ptt':'vad',
       barge_in:live?.barge_in!==false,
       stt_source:['voice','browser'].includes(live?.stt_source)?live.stt_source:'chat',
@@ -294,7 +295,7 @@
     if (saved!==localStorage.getItem(prefix+user)) throw changed();
     return {version:2,admin_override:override,provider:kind,profile:profiles.get(name)};
   }
-  function identity(config) {
+  function audioIdentity(config,legacy=false) {
     assertRole(config);
     const profiles=profileRows(config,names);
     const audio={version:config.version,mode:config.mode,admin_override:config.admin_override};
@@ -305,8 +306,12 @@
       const profile=profiles.find(item=>item.name===name)?.profile ?? slot.profile;
       audio[name]={profile,provider,model,voice_id,native_speed,speed,kanji_mode};
     }
-    // Keep the legacy fingerprint shape, without retaining the credential suffix.
-    return JSON.stringify([roleKey(),audio,...profiles.map(({row})=>[row.base_url,row.connection_id,null,row.revision])]);
+    return JSON.stringify([roleKey(),audio,...profiles.map(({row})=>[row.base_url,row.connection_id,legacy?row.key_last4:null,row.revision])]);
+  }
+  const identity=config=>audioIdentity(config);
+  async function legacyCacheKey(config,text,reference) {
+    // Only the digest leaves this compatibility lookup; the suffix is not part of the current identity.
+    return window.VJVoiceCache.key(audioIdentity(config,true),text,reference);
   }
   const liveIdentity=config=>JSON.stringify([identity(config),liveConfig(config)]);
   async function loadCatalog(slot) {
@@ -446,6 +451,6 @@
       restore();voiceChanged({live:restoredLive});
     }
   });
-  window.VJVoiceRouting=Object.freeze({stored,prepared,identity,liveIdentity,liveConfig,preparedStt});
+  window.VJVoiceRouting=Object.freeze({stored,prepared,identity,legacyCacheKey,liveIdentity,liveConfig,preparedStt});
   restore();
 })();
