@@ -109,6 +109,25 @@ test('Japanese-only and dual same-account Mistral keep script routing and preset
   assert.deepEqual(calls.map(row=>row[1]),['shared_clone','custom_ja','custom_ja','shared_clone']);
 });
 
+test('Mistral keeps quoted particle pronunciation when slower Live separates languages', async t => {
+  const calls=[];
+  intercept(t, async (url, init) => {
+    assert.equal(url,'https://api.mistral.ai/v1/audio/speech');
+    const {input,voice_id}=JSON.parse(init.body);
+    calls.push([input,voice_id]);
+    return mp3();
+  });
+  const primary=slot('mistral','voice_clone');
+  const text='<ja>助詞の「は」と「へ」を使います。学校へ行きます。</ja> <vi>Em đọc nhé.</vi>';
+  const japanese='助詞の「わ」と「え」を使います。学校へ行きます。';
+  const single={version:2,mode:'single',primary};
+  const split={...single,mode:'dual_same_api',ja:{profile:null},vi:{profile:null}};
+  await lines(await tts({text,mode:'bilingual',stream:true,routing:single}));
+  assert.deepEqual(calls.splice(0),[[`${japanese} Em đọc nhé.`,'voice_clone']]);
+  await lines(await tts({text,mode:'bilingual',stream:true,routing:split}));
+  assert.deepEqual(calls,[[japanese,'voice_clone'],['Em đọc nhé.','voice_clone']]);
+});
+
 test('shared romaji cleanup preserves reading preference, annotations and grammatical particles', async t => {
   const inputs = [];
   intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
