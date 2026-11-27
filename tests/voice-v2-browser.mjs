@@ -11,6 +11,7 @@ const executable = process.env.BROWSER;
 assert.ok(executable, 'Set BROWSER to a Chromium browser executable.');
 const assets = ['/speech.js','/voice/audio-cache.js','/voice/audio-stitcher.js','/voice/voice-player.js'];
 const scripts = new Map(await Promise.all(assets.map(async path => [path, await readFile(`static${path}`)])));
+scripts.set('/voice/live-cascaded.js',await readFile('static/voice/live-cascaded.js'));
 const appHtml = await readFile('static/index.html');
 const assetTypes = {css:'text/css',js:'application/javascript',json:'application/json',
   svg:'image/svg+xml',png:'image/png',ico:'image/x-icon'};
@@ -92,6 +93,70 @@ document.getElementById('playback-check').addEventListener('click',async event=>
   await fetch('/result',{method:'POST',body:error});
 },{once:true});
 document.getElementById('playback-check').disabled=false;
+</script>`;
+
+const browserSttHtml = `<!doctype html><meta charset="utf-8">
+<button id="recognize">Start automatic recognition check</button>
+<script src="/voice/voice-player.js"></script><script src="/voice/live-cascaded.js"></script>
+<script>
+const proof=window.browserSttProof={frequencies:[],turns:[],errors:[]};
+const apiFetch=async (url,options)=>{
+  if(url==='/api/live/turn'){
+    const {command,transcript}=JSON.parse(options.body);
+    proof.turns.push(command || transcript);
+    return new Response(${JSON.stringify('event: segment\ndata: {"index":0,"lang":"ja","boundary":"start","text":"はい。"}\n\nevent: done\ndata: {"full_text":"はい。","count":1,"japanese_only":false}\n\n')},{headers:{'Content-Type':'text/event-stream'}});
+  }
+  if(url==='/api/tts')return new Response(${JSON.stringify('{"type":"segment","index":0,"lang":"ja","boundary":"start","speed":1,"audioBase64":"SUQzBA==","mimeType":"audio/mpeg"}\n{"type":"done","count":1}\n')},{headers:{'Content-Type':'application/x-ndjson'}});
+  throw Error('Unexpected request: '+url);
+};
+let context;
+window.VJVoiceStitcher={create:()=>({append(){},finish(){},stop(){}})};
+window.SpeechRecognition=class {
+  static available(){throw Error('Must not contact real speech service');}
+  start(track){
+    if(!track || track===proof.microphone || track.kind!=='audio')throw Error('Expected the recorded output track, not the live microphone');
+    this.track=track;
+    this.source=context.createMediaStreamSource(new MediaStream([track]));
+    const meter=context.createAnalyser();meter.fftSize=1024;
+    this.source.connect(meter);
+    const samples=new Float32Array(meter.fftSize);
+    this.scan=setInterval(()=>{
+      meter.getFloatTimeDomainData(samples);
+      let first=-1,last=-1,count=0;
+      for(let i=1;i<samples.length;i++)if(samples[i]>=0.025 && samples[i-1]<0.025){
+        if(first<0)first=i;
+        last=i;count++;
+      }
+      if(count>5)proof.frequencies.push(Math.round((count-1)*context.sampleRate/(last-first)));
+    },10);
+    queueMicrotask(()=>this.onaudiostart?.());
+  }
+  stop(){
+    this.onresult?.({results:[Object.assign([{transcript:'はい'}],{isFinal:true})]});
+    this.onend?.();
+  }
+  abort(){ clearInterval(this.scan);this.source?.disconnect();proof.track=this.track; }
+};
+document.querySelector('#recognize').onclick=async()=>{
+  context=new AudioContext();
+  try {
+    await context.resume();
+    const mic=context.createMediaStreamDestination(), oscillator=context.createOscillator(), level=context.createGain();
+    oscillator.connect(level).connect(mic);level.gain.value=0;oscillator.start();
+    proof.microphone=mic.stream.getAudioTracks()[0];
+    const engine=VJLiveCascaded.create({audioContext:context,microphone:mic.stream,live:{stt_source:'browser',turn_mode:'vad',barge_in:true},
+      route:async()=>({mode:'single',primary:{speed:1}}),context:async()=>({level:'N5'}),current:()=>true,
+      onError:error=>proof.errors.push(error),onCaption(){},onState({phase}){
+        if(phase==='listening' && proof.turns.includes('はい')){
+          oscillator.stop();engine.stop();proof.microphone.stop();void context.close();proof.done=true;
+        }
+      }});
+    await engine.start();
+    const at=context.currentTime+0.35;
+    oscillator.frequency.setValueAtTime(400,at);oscillator.frequency.setValueAtTime(660,at+0.12);
+    level.gain.setValueAtTime(0.4,at);level.gain.setValueAtTime(0,at+0.53);
+  } catch(error){proof.errors.push(error.message);}
+};
 </script>`;
 // Observe the real media objects without changing the app's account, navigation, or controls.
 function observeLiveMedia(){
@@ -398,6 +463,16 @@ async function runLiveBrowser(debuggerUrl,origin){
     await until('lesson change cancelled setup',()=>observe(()=>window.voiceSmoke.microphone.getTracks().every(track=>track.readyState==='ended') &&
       !document.querySelector('#live-start').disabled && /đã thay đổi/.test(document.querySelector('#live-status').textContent)));
     assert.deepEqual(consoleErrors,[],'Unexpected JavaScript errors in the Classroom app shell');
+    const sttNavigation=await send('Page.navigate',{url:origin+'/browser-stt'});
+    assert.equal(sttNavigation.errorText,undefined);
+    await until('real Browser STT fixture',()=>visible('#recognize'));
+    await click('#recognize');
+    await until('recorded Browser STT speech and teardown',()=>observe(()=>window.browserSttProof.done || window.browserSttProof.errors.length));
+    const proof=await observe(()=>{
+      const {errors,frequencies,turns,track}=window.browserSttProof;
+      return {errors,turns,stopped:track?.readyState==='ended',onset:frequencies.some(hz=>Math.abs(hz-400)<25),body:frequencies.some(hz=>Math.abs(hz-660)<25)};
+    });
+    assert.deepEqual(proof,{errors:[],turns:['start','はい'],stopped:true,onset:true,body:true});
   }finally{
     socket.close();
   }
@@ -452,6 +527,7 @@ const appResponses={
   '/api/ai/profiles':{profiles:[voiceProfile],active_id:null,is_admin:true,can_store:false,platform}
 };
 const server = createServer(async (req,res)=>{
+  if(req.url==='/browser-stt')return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(browserSttHtml);
   if (req.url==='/' || req.url==='/?replay') {
     pages.push(req.url);
     return res.writeHead(200,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}).end(html);
@@ -585,7 +661,7 @@ try {
     ['speak','opening-rest'],['turn','hint'],['speak','hint'],['stt','transcribe','mistral',sttProfile,true],['turn','昨日映画を見ました。'],
     ['speak','answer'],['turn','summary'],['speak','summary-first',1],['speak','summary-rest',11],
     ['stt','capabilities','mistral',sttProfile,true]],'STT must use the selected profile and replay must not call the network');
-  console.log('Chromium full Classroom shell: 390/768/1024/1440px, reduced motion, trusted keyboard, ordered TTS, 12-segment summary, local replay and synthetic STT.');
+  console.log('Chromium full Classroom shell: 390/768/1024/1440px, reduced motion, keyboard, ordered 12-segment summary, replay, and recorded Browser STT track with preserved onset.');
 } catch(error) {
   failure=error;
   throw error;

@@ -94,11 +94,15 @@
     const chatOptions=chatBinding ? {chatBinding} : {};
     const sttOptions=explicit ? {voiceRouting:true} : {...chatOptions,cascadedStt:true};
     const Recognition=window.SpeechRecognition || window.webkitSpeechRecognition;
-    // Use the modern audio-track path only; prefixed microphone-only recognition stays PTT.
-    const recordedBrowserStt=typeof window.SpeechRecognition?.available==='function' && Boolean(window.MediaRecorder && audioContext.createMediaStreamDestination);
+    // Desktop Chromium shipped audio-track input in 135, before the unprefixed API.
+    const agent=globalThis.navigator?.userAgent || '';
+    const desktopTrackInput=/\b(?:Windows NT|Macintosh|X11)\b/.test(agent) && !/\b(?:Android|Mobile)\b/.test(agent)
+      && Number(/\bChrome\/(\d+)/.exec(agent)?.[1])>=135;
+    const recordedBrowserStt=Boolean(Recognition && window.MediaRecorder && audioContext.createMediaStreamDestination)
+      && (typeof window.SpeechRecognition?.available==='function' || desktopTrackInput);
     const browserPttOnly='Trình duyệt này không chép được bản ghi ở chế độ tự động. Em dùng Bấm để nói nhé.';
     let mode=live.turn_mode, muted=false, phase='connecting', sttProvider=null;
-    let started=false, ready=false, sequence=0, active=null, capture=null, setupTimer;
+    let started=false, ready=false, sequence=0, active=null, capture=null, pendingBrowser=null, setupTimer;
     let source=null, detector=null, pollTimer, vadMute=null;
     let history=[], lastAudio=null, slowerSteps=0;
     let japaneseOnly=live.japanese_only===true;
@@ -110,6 +114,7 @@
       stop();return false;
     }
     const owns=turn=>active===turn && !turn.controller.signal.aborted && ownsSession();
+    const ownsCapture=record=>record!=null && (capture===record || pendingBrowser===record);
     function state(next=phase) {
       if (phase==='speaking' && next!=='speaking') speakerEndedAt=time();
       phase=next;
@@ -121,6 +126,7 @@
     function releaseTurn() {
       const turn=active;active=null;
       if (!turn) return;
+      releaseCapture(pendingBrowser);
       clearTimeout(turn.timer);
       turn.audio?.stop();
       turn.controller.abort();
@@ -242,8 +248,10 @@
     }
 
     function releaseCapture(record) {
-      if (!record || capture!==record) return;
-      capture=null;clearTimeout(record.timer);
+      if (!ownsCapture(record)) return;
+      if (capture===record) capture=null;
+      else pendingBrowser=null;
+      clearTimeout(record.timer);
       const {recorder,recognizer,bufferSource,track,destination}=record;
       if (recognizer) {
         recognizer.onresult=recognizer.onerror=recognizer.onend=recognizer.onaudiostart=null;
@@ -261,9 +269,9 @@
       track?.stop();destination?.disconnect();
     }
     function captureErrorFor(record,text) {
-      if (capture!==record || !ownsSession()) return;
+      if (!ownsCapture(record) || !ownsSession()) return;
+      if (record.auto && capture===record) waitForQuiet=true;
       releaseCapture(record);
-      if (record.auto) waitForQuiet=true;
       if (record.turn) turnError(record.turn,new Error(text));
       else if (text!==noSpeech || !record.auto) onError(text);
     }
@@ -277,7 +285,7 @@
       record.turn=beginTurn();state('recording');
     }
     function finishTranscript(record) {
-      if (capture!==record || !ownsSession()) return;
+      if (!ownsCapture(record) || !ownsSession()) return;
       const {turn,start,text}=record, end=record.end ?? time();
       releaseCapture(record);
       if (turn && owns(turn)) void learnerTurn(turn,text,null,start,end);
@@ -295,14 +303,15 @@
         releaseCapture(record);void learnerTurn(turn,'',input,start,end);return;
       }
       record.end=end;record.chunks.length=0;
+      capture=null;pendingBrowser=record;
+      state('thinking');
       try {
         const bytes=await input.arrayBuffer();
-        if (!owns(turn) || capture!==record) return;
+        if (!owns(turn) || pendingBrowser!==record) return;
         const audio=await audioContext.decodeAudioData(bytes);
-        if (!owns(turn) || capture!==record) return;
+        if (!owns(turn) || pendingBrowser!==record) return;
         clearTimeout(record.timer);
         record.timer=setTimeout(()=>captureErrorFor(record,captureError),Math.ceil(audio.duration*1000)+8000);
-        state('thinking');
         startBrowserRecognition(record,audio);
       } catch {captureErrorFor(record,captureError);}
     }
@@ -318,7 +327,7 @@
       const recognizer=record.recognizer=new Recognition();
       recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
       recognizer.onresult=event=>{
-        if (capture!==record || !ownsSession()) return;
+        if (!ownsCapture(record) || !ownsSession()) return;
         let text='';
         for (let i=0;i<event.results.length;i++) {
           if (!event.results[i].isFinal) continue;
@@ -336,11 +345,11 @@
       const bufferSource=record.bufferSource=audioContext.createBufferSource();
       bufferSource.buffer=audio;bufferSource.connect(destination);
       bufferSource.onended=()=>{
-        if (capture!==record || !ownsSession()) return;
+        if (pendingBrowser!==record || !ownsSession()) return;
         try {recognizer.stop();} catch {captureErrorFor(record,captureError);}
       };
       recognizer.onaudiostart=()=>{
-        if (capture!==record || !ownsSession()) return;
+        if (pendingBrowser!==record || !ownsSession()) return;
         recognizer.onaudiostart=null;
         try {bufferSource.start();} catch {captureErrorFor(record,captureError);}
       };
@@ -406,7 +415,7 @@
       else if (phase==='listening' || live.barge_in && ['thinking','speaking'].includes(phase)) beginCapture(false,time());
     }
     function discardCapture() {
-      const turn=capture?.turn;
+      const turn=capture?.turn || pendingBrowser?.turn;
       releaseCapture(capture);
       if (turn && active===turn) {releaseTurn();phase='listening';}
     }

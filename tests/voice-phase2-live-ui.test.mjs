@@ -27,7 +27,7 @@ function pushStream(type) {
   return {response,write:text=>controller.enqueue(encoder.encode(text)),close:()=>controller.close(),get cancelled(){return cancelled;}};
 }
 
-function fixture({live={},fetch,route,recognition=true,recordedRecognition=false,playback,worklet=false,chatBinding}={}) {
+function fixture({live={},fetch,route,recognition=true,recordedRecognition=false,userAgent,playback,worklet=false,chatBinding}={}) {
   let now=0,id=0,valid=true,rms=0;
   const timers=new Map(),calls=[],states=[],captions=[],errors=[],clips=[],audio=[],recorders=[],recognizers=[],nodes=[],modules=[],sttSignals=[];
   const decoded=[], bufferedSources=[], track={stop(){this.stopped=true;}};
@@ -80,7 +80,7 @@ function fixture({live={},fetch,route,recognition=true,recordedRecognition=false
       audio.push(result);return result;
     }}};
   const sink={},mic={};
-  const sandbox=vm.createContext({window,AbortController,TextDecoder,TextEncoder,Blob,btoa,performance:{now:()=>now},
+  const sandbox=vm.createContext({window,AbortController,TextDecoder,TextEncoder,Blob,btoa,navigator:{userAgent},performance:{now:()=>now},
     setTimeout:schedule,clearTimeout:clear,setInterval:(fn,delay)=>schedule(fn,delay,delay),clearInterval:clear,
     apiFetch(path,options){
       const call={path,body:JSON.parse(options.body),options};calls.push(call);
@@ -265,6 +265,25 @@ test('automatic Browser STT drops noise and only sends the complete confirmed re
   assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.transcript,'はい');
   assert(!f.calls.some(call=>call.path==='/api/stt'));
   assert.equal(f.track.stopped,true);
+  f.engine.stop();assert.equal(f.timers.size,0);
+});
+
+test('desktop Chrome 137 can replace pending Browser STT with a confirmed spoken correction',async()=>{
+  const f=fixture({worklet:true,userAgent:'Mozilla/5.0 (X11; Linux x86_64) Chrome/137.0.0.0 Safari/537.36',
+    live:{turn_mode:'vad'}});await f.engine.start();
+  assert.equal(f.states.at(-1).mode,'vad');
+  const port=f.nodes.find(node=>node.port).port;
+  const emit=(rms,count)=>{for(let i=0;i<count;i++){f.advance(30);port.onmessage({data:{rms}});}};
+  emit(0,10);emit(0.06,5);f.recorders[0].data(1024);emit(0,25);await cycle();
+  const [old]=f.recognizers;
+  const lateResult=old.onresult, lateEnd=old.onend;
+  emit(0.06,2);emit(0,3);assert.equal(old.aborted,undefined);
+  emit(0.06,5);assert.equal(old.aborted,true);assert.equal(f.states.at(-1).phase,'recording');
+  lateResult({results:[Object.assign([{transcript:'古い答え'}],{isFinal:true})]});lateEnd();
+  f.recorders[2].data(1024);emit(0,25);await cycle();
+  f.recognizers[1].onaudiostart();
+  f.recognizers[1].result('いいえ');f.bufferedSources[1].onended();await cycle();
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').map(call=>call.body.command||call.body.transcript),['start','いいえ']);
   f.engine.stop();assert.equal(f.timers.size,0);
 });
 
