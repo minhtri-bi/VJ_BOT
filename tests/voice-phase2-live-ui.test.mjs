@@ -172,6 +172,20 @@ test('single Mistral skips a nonspoken tail without losing captions or replay',a
   f.engine.stop();
 });
 
+test('single Mistral keeps a formatted numeric tail in the next spoken sentence',async()=>{
+  const parts=[{lang:'vi',boundary:'start',text:'Em đọc giờ này nhé! 3:15'},
+    {lang:'ja',boundary:'inline',text:'です。'}];
+  const f=fixture({route:async()=>({...routeSingle,primary:{provider:'mistral',speed:1}}),fetch(call){
+    if(call.path==='/api/live/turn')return turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts));
+  }});
+  await f.engine.start();
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/tts').map(call=>call.body.text),[
+    '<vi>Em đọc giờ này nhé!</vi>','<vi>3:15</vi> <ja>です。</ja>'
+  ]);
+  assert.deepEqual(f.errors,[]);
+  f.engine.stop();
+});
+
 test('single Mistral flushes an unterminated first sentence on done, and nothing on cancellation',async()=>{
   const parts=[{lang:'vi',boundary:'start',text:'Bài này là'}, {lang:'ja',boundary:'inline',text:'猫'}];
   for(const cancel of [false,true]){

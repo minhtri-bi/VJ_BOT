@@ -8,7 +8,7 @@ const trailingPrefix = /([\s]*[「『“‘（(]+[\s]*)$/u;
 const leadingNumber = /(?:^|\s)([0-9０-９]+(?:[.,][0-9０-９]+)?\s*)$/u;
 const latinWord = /[\p{Script=Latin}][\p{Script=Latin}\p{M}0-9-]*|./gsu;
 const acronym = /^[A-ZＡ-Ｚ][A-ZＡ-Ｚ0-9０-９-]*$/u;
-const numeral = /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u;
+const numeral = /^[\d０-９][\d０-９.,，、:：%％\s]*[。！？!?]?$/u;
 const clauseEnd = /[\r\n。！？.!?…]/u;
 
 export function segmentVoiceText(text, mode = 'bilingual', {hint, mixLanguages = false} = {}) {
