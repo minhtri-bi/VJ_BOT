@@ -4,14 +4,14 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 import {scanner} from './fixtures/model-scan-clock.mjs';
 
-function settings({consent = true, models = ['paid', 'denied', 'working'], savedModel = 'paid', probe,
+function settings({consent = true, models = ['paid', 'denied', 'working'], savedModel = 'paid', savedHistory, probe,
   storage = new Map(), connection = 'bound-connection', draftConnection = connection, deviceProfiles = new Map(), activeChoice = {value: null}} = {}) {
   const elements = new Map(), requests = [], scanRuns = [];
   const events = new EventTarget();
   let clock = Date.now();
   let storedModel = savedModel;
   let savedProfile = {id: 'saved-profile', name: 'Saved provider', protocol: 'openai', base_url: 'https://provider.example/v1',
-    model: storedModel, key_last4: 'test', connection_id: connection, models: [], checked_at: null};
+    model: storedModel, key_last4: 'test', connection_id: connection, models: [], checked_at: null, ...savedHistory};
   const element = id => {
     if (!elements.has(id)) elements.set(id, {
       value: '', children: [], events: {}, attributes: {}, dataset: {}, hidden: false, disabled: false,
@@ -55,7 +55,11 @@ function settings({consent = true, models = ['paid', 'denied', 'working'], saved
       scanRuns.push({mode: options.mode, dispatchedAt: options.dispatchedAt});
       return scanner.run({...options, now: () => clock, sleep: async ms => { clock += ms; }});
     }},
-    document: {body:{dataset:{page:'settings'}}, getElementById: element, querySelectorAll: () => [], querySelector: selector => element(selector),
+    document: {body:{dataset:{page:'settings'}}, getElementById: element,
+      querySelectorAll: selector => selector === '#ai-segments button' ? ['openai','anthropic'].map(protocol => {
+        const button = element(`protocol:${protocol}`); button.dataset.protocol = protocol;
+        return button;
+      }) : [], querySelector: selector => element(selector),
       createElement: () => ({value: '', textContent: '', children: [], append(child) { this.children.push(child); }})},
     apiFetch: async (path, options = {}) => {
       requests.push({path, body: JSON.parse(options.body || '{}'), at: clock});
@@ -667,6 +671,122 @@ test('canceling connection edits keeps unsaved model scan results and scrubs typ
   assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working']);
   assert.equal(ui.element('ai-model-list').value, 'working');
   assert.equal(ui.element('ai-save').disabled, false);
+});
+
+test('canceling a credential edit preserves the checked server model payload', async () => {
+  for (const field of ['ai-key', 'ai-base', 'protocol']) {
+    const started = Promise.withResolvers(), reply = Promise.withResolvers();
+    const ui = settings({models: ['working'], probe: () => { started.resolve(); return reply.promise; }});
+    await ui.context.renderAiPanels('settings');
+    const scan = ui.element('ai-fetch-models').click();
+    await started.promise;
+    ui.element('ai-edit-connection').click();
+    reply.resolve(Response.json({ok: true, model: 'working'}));
+    await scan;
+    const status = ui.element('ai-model-status').textContent;
+    const hint = ui.element('ai-selection-hint').textContent;
+    const aiStatus = ui.element('ai-status').textContent;
+    if (field === 'protocol') ui.element('protocol:anthropic').click();
+    else {
+      ui.element(field).value = field === 'ai-key' ? 'synthetic-replacement' : 'https://replacement.example/v1';
+      ui.element(field).events.input();
+    }
+    await ui.element('ai-api-back').click();
+    assert.equal(ui.element('ai-api-scan').open, true);
+    assert.equal(ui.element('ai-model-status').textContent, status);
+    assert.equal(ui.element('ai-selection-hint').textContent, hint);
+    assert.equal(ui.element('ai-status').textContent, aiStatus);
+    await ui.element('ai-form').events.submit({preventDefault() {}});
+    const {body} = ui.requests.find(request => request.path === '/api/ai/profiles/saved-profile');
+    assert.equal(body.model, 'working');
+    assert.deepEqual(body.models, ['working']);
+    assert.ok(Number.isFinite(body.checked_at) && body.checked_at > 0);
+    assert.equal(body.connection_id, 'bound-connection');
+    assert.equal(body.protocol, 'openai');
+    assert.equal(body.base_url, 'https://provider.example/v1');
+    assert.equal(body.api_key, '');
+  }
+});
+
+test('canceling name and storage edits leaves running probes and their results intact', async () => {
+  const started = Promise.withResolvers(), probes = new Map();
+  const ui = settings({models: ['working', 'second'], probe: (model, {signal}) => {
+    const reply = Promise.withResolvers();
+    probes.set(model, {signal, reply});
+    if (probes.size === 2) started.resolve();
+    return reply.promise;
+  }});
+  await ui.context.renderAiPanels('settings');
+  const scan = ui.element('ai-fetch-models').click();
+  await started.promise;
+  probes.get('working').reply.resolve(Response.json({ok: true, model: 'working'}));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.element('ai-model-list').options.length, 1);
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-profile-name').value = 'Unsaved name';
+  ui.element('ai-profile-storage').value = 'local';
+  ui.element('protocol:openai').click();
+  ui.element('ai-profile-storage').events.change();
+  assert.equal(ui.element('ai-models').hidden, true);
+  await ui.element('ai-api-back').click();
+  const aborted = probes.get('second').signal.aborted;
+  probes.get('second').reply.resolve(Response.json({ok: true, model: 'second'}));
+  await scan;
+  assert.equal(aborted, false);
+  assert.equal(ui.element('ai-api-scan').open, true);
+  assert.equal(ui.element('ai-profile-name').value, 'Saved provider');
+  assert.equal(ui.element('ai-profile-storage').value, 'server');
+  assert.match(ui.element('ai-model-status').textContent, /Hoàn tất: 2\/2/);
+  assert.deepEqual(ui.element('ai-model-list').options.map(option => option.value), ['working', 'second']);
+});
+
+test('saving only the connection name does not activate a hidden partial scan result', async () => {
+  const started = Promise.withResolvers(), probes = new Map();
+  const checkedAt = Date.UTC(2025, 0, 1);
+  const ui = settings({models: ['paid', 'working'], savedHistory: {models: ['paid', 'earlier'], checked_at: checkedAt}, probe: model => {
+    const reply = Promise.withResolvers();
+    probes.set(model, reply);
+    if (probes.size === 2) started.resolve();
+    return reply.promise;
+  }});
+  await ui.context.renderAiPanels('settings');
+  const scan = ui.element('ai-fetch-models').click();
+  await started.promise;
+  probes.get('working').resolve(Response.json({ok: true, model: 'working'}));
+  await new Promise(resolve => setImmediate(resolve));
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-profile-name').value = 'Renamed provider';
+  await ui.element('ai-profile-save').click();
+  probes.get('paid').resolve(Response.json({ok: true, model: 'paid'}));
+  await scan;
+  const {body} = ui.requests.find(request => request.path === '/api/ai/profiles/saved-profile');
+  assert.equal(body.name, 'Renamed provider');
+  assert.equal(body.model, 'paid');
+  assert.deepEqual(body.models, ['paid', 'earlier']);
+  assert.equal(body.checked_at, checkedAt);
+  assert.equal(body.connection_id, 'bound-connection');
+  assert.equal(ui.element('ai-current-model').textContent, 'paid');
+});
+
+test('canceling a credential edit during a scan does not report a stopped probe as running', async () => {
+  const started = Promise.withResolvers(), pending = Promise.withResolvers();
+  const ui = settings({models: ['working'], probe: (_model, {signal}) => {
+    started.resolve(signal);
+    return pending.promise;
+  }});
+  await ui.context.renderAiPanels('settings');
+  const scan = ui.element('ai-fetch-models').click();
+  const signal = await started.promise;
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-key').value = 'synthetic-replacement';
+  ui.element('ai-key').events.input();
+  await ui.element('ai-api-back').click();
+  pending.resolve(Response.json({ok: true, model: 'working'}));
+  await scan;
+  assert.equal(signal.aborted, true);
+  assert.match(ui.element('ai-model-status').textContent, /^Đã dừng/);
+  assert.equal(ui.element('ai-load-progress').hidden, true);
+  assert.equal(ui.element('ai-models').hidden, true);
 });
 
 test('API editor dismissal and account changes scrub keys without scanning or changing the active connection', async () => {
