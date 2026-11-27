@@ -96,7 +96,7 @@ sequenceDiagram
 - **Quy ước output bắt buộc trong system prompt:**
   - Bọc mỗi câu hoặc đoạn đơn ngôn ngữ trong thẻ `<ja>...</ja>` hoặc `<vi>...</vi>`.
   - **Mỗi câu chỉ chứa 1 ngôn ngữ**, không trộn từ Việt vào trong `<ja>...</ja>` (tránh lặp lại lỗi `#73`).
-  - Tổng độ dài tối đa **3 câu ngắn** (tối đa ~250 ký tự trừ khi `command === 'summary'`).
+  - Use at most **three short sentences** (aim for about 250 characters), or up to **five short sentences** for `command === 'summary'`. Both use at most **16 tagged segments**.
   - Không Markdown, không danh sách gạch đầu dòng, không số thứ tự, không lộ ID bài học hay tên thẻ cho người học.
   - Khi `japanese_only === true`: chỉ xuất thẻ `<ja>...</ja>`, chỉ dùng `<vi>` nếu học viên chủ động hỏi lại bằng tiếng Việt hoặc nói không hiểu.
 - **Ràng buộc chống Prompt Injection:**
@@ -133,7 +133,7 @@ sequenceDiagram
   - Đọc từng delta từ `streamLLM()` vào buffer:
     1. Nếu phát hiện cặp thẻ hoàn chỉnh `<(ja|vi)>([\s\S]*?)<\/\1>`: emit ngay `event: segment` (chạy `normalizeVoiceText` + `particleReading` cho `ja`).
     2. Nếu model quên thẻ (plain text không có `<ja>`/`<vi>`): cắt tại dấu kết thúc câu `[。！？.!?]\s*` rồi chạy [`segmentVoiceText()`](../src/voice/segmenter.js) để gán đúng `lang`.
-    3. Giới hạn tối đa **8 segment** mỗi lượt Live Turn để giữ câu trả lời ngắn gọn như hội thoại thật.
+    3. Allow at most **16 ordered segments** per Live Turn. Exceeding that limit or the 4,000-character playable text budget ends the stream with `live_reply_too_long`, not `done`.
   - Khi kết thúc stream: flush phần buffer còn lại, phát `event: done` `{ full_text, count, japanese_only }`. Nếu lỗi giữa chừng, phát `event: error` `{ code, detail }` rồi đóng stream.
 
 #### Task 4: Nâng cấp `POST /api/stt` (`src/voice/stt-route.js`, thay/bọc [`src/transcription.js`](../src/transcription.js))
