@@ -141,9 +141,11 @@ async function runLiveBrowser(debuggerUrl,origin){
     const message=JSON.parse(data);
     if(message.id){
       const request=pending.get(message.id);
+      if(!request)return;
       pending.delete(message.id);
-      if(message.error)request?.reject(new Error(`${request.method}: ${message.error.message}`));
-      else request?.resolve(message.result);
+      clearTimeout(request.timer);
+      if(message.error)request.reject(new Error(`${request.method}: ${message.error.message}`));
+      else request.resolve(message.result);
     }else if(message.sessionId===sessionId){
       if(message.method==='Runtime.exceptionThrown')
         consoleErrors.push(message.params.exceptionDetails.exception?.description || message.params.exceptionDetails.text);
@@ -152,13 +154,21 @@ async function runLiveBrowser(debuggerUrl,origin){
     }
   });
   socket.addEventListener('close',()=>{
-    for(const {method,reject} of pending.values())reject(new Error(`DevTools closed during ${method}`));
+    for(const {method,reject,timer} of pending.values()){
+      clearTimeout(timer);
+      reject(new Error(`DevTools closed during ${method}`));
+    }
     pending.clear();
   });
   const send=(method,params={})=>new Promise((resolve,reject)=>{
     const id=++sequence;
-    socket.send(JSON.stringify({id,method,params,sessionId}));
-    pending.set(id,{method,resolve,reject});
+    const timer=setTimeout(()=>{
+      pending.delete(id);
+      reject(new Error(`Chromium did not answer ${method}`));
+    },3000);
+    pending.set(id,{method,resolve,reject,timer});
+    try{socket.send(JSON.stringify({id,method,params,sessionId}));}
+    catch(error){clearTimeout(timer);pending.delete(id);reject(error);}
   });
   const observe=async (fn,...args)=>{
     const {result,exceptionDetails}=await send('Runtime.evaluate',{
@@ -169,7 +179,9 @@ async function runLiveBrowser(debuggerUrl,origin){
   const until=async (label,predicate)=>{
     const deadline=performance.now()+5000;
     do{
-      const value=await predicate();
+      let value;
+      try{value=await predicate();}
+      catch(error){throw new Error(`${label}: ${error.message}`,{cause:error});}
       if(value)return value;
       await pause(20);
     }while(performance.now()<deadline);
