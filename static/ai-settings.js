@@ -735,21 +735,39 @@
     editState = null;
     dialog.close();
   }
+  function captureCredentialsEdit() {
+    if (!editState || editState.credentialsDirty) return;
+    Object.assign(editState, {
+      credentialsDirty: true,
+      snapshot: modelSnapshot,
+      models: [...el('ai-model-list').options].map(option => option.value),
+      selectedModel: el('ai-models').hidden ? el('ai-model').value : el('ai-model-list').value,
+      status: activeScan ? 'Đã dừng. Chỉ giữ các model đã phản hồi trước khi sửa kết nối.' : el('ai-model-status').textContent,
+      hint: el('ai-selection-hint').textContent,
+      aiStatus: el('ai-status').textContent,
+      scanOpen: el('ai-api-scan').open
+    });
+  }
   function dismissApiEditor() {
     if (testing) return;
     const opener = editOpener, prior = editState;
     closeApiEditor();
     (opener && !opener.hidden ? opener : el('ai-profile-list')).focus();
     if (prior && savedConnection && prior.profile === selectedProfile) {
-      resetModels();
-      modelSnapshot = prior.snapshot;
-      fillProfile(prior.profile, prior.models.length ? {models: prior.models, checkedAt: prior.snapshot?.checkedAt || prior.profile.checked_at || Date.now()} : null, prior.key);
-      if (prior.selectedModel) {
-        el('ai-model').value = prior.selectedModel;
-        if ([...el('ai-model-list').options].some(option => option.value === prior.selectedModel)) el('ai-model-list').value = prior.selectedModel;
+      if (!prior.credentialsDirty) {
+        el('ai-profile-name').value = prior.name;
+        el('ai-profile-storage').value = prior.storage;
+        storageHint();
+        if (!activeScan) publishModels();
+        return;
       }
+      fillProfile(prior.profile, {models: prior.models, checkedAt: prior.snapshot?.checkedAt ?? prior.profile.checked_at}, prior.key);
+      modelSnapshot = prior.snapshot;
+      el('ai-api-scan').open = prior.scanOpen;
+      el('ai-model').value = prior.selectedModel;
       el('ai-model-status').textContent = prior.status;
       el('ai-selection-hint').textContent = prior.hint;
+      el('ai-status').textContent = prior.aiStatus;
       publishModels();
       scanHint();
       return;
@@ -787,11 +805,9 @@
       editState = {
         profile: selectedProfile,
         key: profileKey,
-        snapshot: modelSnapshot,
-        models: [...el('ai-model-list').options].map(option => option.value),
-        selectedModel: el('ai-models').hidden ? el('ai-model').value : el('ai-model-list').value,
-        status: el('ai-model-status').textContent,
-        hint: el('ai-selection-hint').textContent
+        name: el('ai-profile-name').value,
+        storage: el('ai-profile-storage').value,
+        credentialsDirty: false
       };
       el('ai-edit-dialog').showModal();
     }
@@ -802,12 +818,14 @@
   });
 
   document.querySelectorAll('#ai-segments button').forEach(button => button.addEventListener('click', () => {
+    if (el('ai-protocol').value === button.dataset.protocol) return;
+    captureCredentialsEdit();
     el('ai-protocol').value = button.dataset.protocol;
     invalidateSelection();
     syncProtocol();
   }));
   for (const id of ['ai-base', 'ai-key']) {
-    el(id).addEventListener('input', () => { resetModels(); invalidateSelection(); });
+    el(id).addEventListener('input', () => { captureCredentialsEdit(); resetModels(); invalidateSelection(); });
   }
   el('ai-fetch-models').addEventListener('click', () => {
     el('ai-api-scan').open = true;
@@ -834,7 +852,7 @@
   document.querySelectorAll('.settings-nav button').forEach(button => button.addEventListener('click', () => {
     switchTab('settings',{view:button.dataset.settings});
   }));
-  el('ai-profile-storage').addEventListener('change', () => { storageHint(); publishModels(); });
+  el('ai-profile-storage').addEventListener('change', () => { storageHint(); if (!activeScan) publishModels(); });
   el('ai-profile-new').addEventListener('click', () => {
     if (testing || managed()) return;
     ++rendering;
@@ -871,7 +889,10 @@
     });
     refreshSavedConnections();
   });
-  el('ai-profile-save').addEventListener('click', () => profileAction(() => saveProfile(false)));
+  el('ai-profile-save').addEventListener('click', () => {
+    if (activeScan && !testing && !managed()) publishModels();
+    return profileAction(() => saveProfile(false));
+  });
   el('ai-edit-dialog').addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.isComposing || event.target.tagName !== 'INPUT' || !['text', 'url', 'password'].includes(event.target.type)) return;
     event.preventDefault();
