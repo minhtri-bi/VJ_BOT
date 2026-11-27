@@ -95,24 +95,27 @@ function routeSlot(routing, lang) {
 
 const problem = error => error instanceof VoiceError ? error : new VoiceError('tts_unavailable',502);
 
-function streamAudio(segments, signal) {
+function streamAudio(segments, signal, elevenConcurrency) {
   const encoder = new TextEncoder(), abort = new AbortController();
   const combined = AbortSignal.any([signal,abort.signal]);
   const pending = new Map(), inFlight = new Map();
-  let index = 0, bytes = 0;
+  let index = 0, bytes = 0, failedAt = segments.length;
   const line = row => encoder.encode(JSON.stringify(row) + '\n');
   return new Response(new ReadableStream({
     async pull(controller) {
       if (signal.aborted) {controller.error(signal.reason);return;}
       if (index === segments.length) {controller.enqueue(line({type:'done',count:index}));controller.close();return;}
-      for (let candidate = index; candidate < Math.min(index + 4,segments.length); candidate++) {
+      for (let candidate = index; candidate < Math.min(index + 4,failedAt); candidate++) {
         if (pending.has(candidate)) continue;
         const next = segments[candidate], {kind,baseUrl,apiKey} = next.provider;
-        const connection = kind === 'elevenlabs' ? baseUrl + '\0' + apiKey : null;
-        if (connection && (inFlight.get(connection) || 0) >= 2) continue;
+        const connection = kind === 'elevenlabs' ? (elevenConcurrency === 1 ? 'elevenlabs' : baseUrl + '\0' + apiKey) : null;
+        if (connection && (inFlight.get(connection) || 0) >= elevenConcurrency) continue;
         if (connection) inFlight.set(connection,(inFlight.get(connection) || 0) + 1);
         pending.set(candidate,synthesizeVoice(next,next.provider,combined)
-          .then(audio => ({audio}),error => ({error:problem(error)}))
+          .then(audio => ({audio}),error => {
+            failedAt = Math.min(failedAt,candidate);
+            return {error:problem(error)};
+          })
           .finally(() => {if (connection) inFlight.set(connection,inFlight.get(connection) - 1);}));
       }
       const result = await pending.get(index);
@@ -148,7 +151,7 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     }
     const mode = body.mode ?? 'bilingual';
     if (body.action !== undefined || body.stream !== true || typeof body.text !== 'string' || !body.text.trim()
-      || !['ja','bilingual'].includes(mode)) throw bad();
+      || !['ja','bilingual'].includes(mode) || body.serial !== undefined && typeof body.serial !== 'boolean') throw bad();
     if (body.text.length > MAX_VOICE_TEXT || typeof body.reading === 'string' && body.reading.length > MAX_VOICE_TEXT)
       throw new VoiceError('tts_text_limit',413,'Đoạn cần đọc không được dài quá 4000 ký tự.');
     const ja = routeSlot(routing,'ja');
@@ -175,7 +178,7 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     return streamAudio(chunks.map((chunk,index) => ({...chunk,...routes.get(chunk.lang),
       text:!reading && (mixLanguages || chunk.lang === 'ja') ? particleReading(chunk.text,{citations:true}) : chunk.text,
       prevText:chunks[index-1]?.lang === chunk.lang ? chunks[index-1].text : undefined,
-      nextText:chunks[index+1]?.lang === chunk.lang ? chunks[index+1].text : undefined})),signal);
+      nextText:chunks[index+1]?.lang === chunk.lang ? chunks[index+1].text : undefined})),signal,body.serial === true ? 1 : 2);
   } catch (error) {
     const failure = problem(error);
     return json({detail:failure.message,code:failure.code},failure.status);

@@ -80,7 +80,7 @@ function fixture({live={},fetch,route,recognition=true,recordedRecognition=false
       audio.push(result);return result;
     }}};
   const sink={},mic={};
-  const sandbox=vm.createContext({window,AbortController,TextDecoder,TextEncoder,Blob,btoa,navigator:{userAgent},performance:{now:()=>now},
+  const sandbox=vm.createContext({window,AbortController,AbortSignal,TextDecoder,TextEncoder,Blob,btoa,navigator:{userAgent},performance:{now:()=>now},
     setTimeout:schedule,clearTimeout:clear,setInterval:(fn,delay)=>schedule(fn,delay,delay),clearInterval:clear,
     apiFetch(path,options){
       const call={path,body:JSON.parse(options.body),options};calls.push(call);
@@ -128,6 +128,87 @@ test('streams Batch 0 before completion, fetches both batches independently, and
   assert.equal(f.captions[0].key,f.captions.at(-1).key);
   assert.deepEqual(Object.keys(f.captions[0]).sort(),['end_ms','key','role','start_ms','text']);
   assert.equal(f.errors.length,0);f.engine.stop();assert.equal(f.timers.size,0);
+});
+
+const elevenRoute={...routeSingle,primary:{provider:'elevenlabs',speed:1}};
+
+test('ElevenLabs starts the first clip early, then waits for its stream before requesting more',async()=>{
+  const first=pushStream('application/x-ndjson');
+  const f=fixture({route:async()=>elevenRoute,fetch(call,calls){
+    if (call.path==='/api/tts' && calls.length===2) return first.response;
+  }});
+  const opening=f.engine.start();await cycle();
+  assert.equal(f.captions.at(-1).text,segments.map(part=>part.text).join(' '));
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/tts').map(call=>call.body.text),['<ja>こんにちは。</ja>']);
+  const [clip,end]=(await audioResponse('ja').text()).trim().split('\n');
+  first.write(clip+'\n');await cycle();
+  assert.equal(f.clips.length,1);
+  assert.equal(f.calls.length,2);
+  first.write(end+'\n');first.close();await opening;
+  const batches=f.calls.filter(call=>call.path==='/api/tts');
+  assert.deepEqual(batches.map(({body})=>[body.text,body.serial]),[
+    ['<ja>こんにちは。</ja>',true],['<vi>Chào em.</vi> <ja>どうぞ。</ja>',true]]);
+  assert.deepEqual(f.clips.map(({lang})=>lang),['ja','vi','ja']);
+  assert.deepEqual(f.errors,[]);
+  f.engine.stop();
+});
+
+test('an early audio limit does not abort the text stream or lose the completed reply',async()=>{
+  const stream=pushStream('text/event-stream');
+  const error='ElevenLabs đang xử lý quá nhiều yêu cầu đọc cùng lúc.';
+  const f=fixture({route:async()=>elevenRoute,fetch(call,calls){
+    if (call.path==='/api/live/turn' && call.body.command==='start') return stream.response;
+    if (call.path==='/api/tts' && calls.length===2)
+      return new Response(JSON.stringify({type:'error',index:0,code:'tts_concurrency',detail:error})+'\n',
+        {headers:{'Content-Type':'application/x-ndjson'}});
+  }});
+  const opening=f.engine.start();await cycle();
+  stream.write(segment(0));await cycle();
+  assert.equal(f.calls.length,2);
+  assert.equal(f.calls[0].options.signal.aborted,false);
+  stream.write(segment(1)+segment(2)+done());stream.close();await opening;
+  const text=segments.map(part=>part.text).join(' ');
+  assert.equal(f.captions.at(-1).text,text);
+  assert.deepEqual(f.errors,[{message:`${error} Câu trả lời vẫn có trong bản chép lời.`,fatal:false}]);
+  assert.equal(f.states.at(-1).phase,'listening');
+  assert.equal(f.calls.length,2,'do not retry or synthesize the rest of the failed turn');
+  await f.engine.sendCommand('repeat');
+  assert.equal(f.calls.length,2);
+  assert.equal(f.clips.length,0);
+  await f.engine.sendCommand('hint');
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,[{role:'assistant',text}]);
+  f.engine.stop();
+});
+
+test('other providers can prefetch while an ElevenLabs clip remains pending',async()=>{
+  const first=deferred(), parts=segments.slice(0,2);
+  const route={version:2,mode:'dual_split_api',primary:{provider:'openai'},ja:{provider:'elevenlabs'},vi:{provider:'openai'}};
+  const f=fixture({route:async()=>route,fetch(call){
+    if (call.path==='/api/live/turn') return turnResponse(segment(0)+segment(1)+done(parts));
+    if (call.path==='/api/tts' && call.body.text.includes('こんにちは')) return first.promise;
+  }});
+  const opening=f.engine.start();await cycle();
+  const batches=f.calls.filter(call=>call.path==='/api/tts');
+  assert.deepEqual(batches.map(({body})=>[body.text,body.serial]),[['<ja>こんにちは。</ja>',true],['<vi>Chào em.</vi>',undefined]]);
+  assert.equal(f.clips.length,0);
+  first.resolve(audioResponse('ja'));await opening;
+  assert.deepEqual(f.clips.map(({lang})=>lang),['ja','vi']);
+  f.engine.stop();
+});
+
+test('an audio playback timeout stops audio but leaves the valid text in session context',async()=>{
+  const f=fixture({route:async()=>elevenRoute,playback:true});
+  const opening=f.engine.start();await cycle();
+  assert.equal(f.states.at(-1).phase,'speaking');
+  f.advance(90000);await opening;
+  assert.equal(f.states.at(-1).phase,'listening');
+  assert.equal(f.audio[0].stopped,true);
+  assert.match(f.errors.at(-1).message,/Âm thanh tải hoặc phát quá lâu.*bản chép lời/);
+  const followUp=f.engine.sendCommand('hint');await cycle();
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,
+    [{role:'assistant',text:segments.map(part=>part.text).join(' ')}]);
+  f.audio.at(-1).finishPlayback();await followUp;
+  f.engine.stop();
 });
 
 test('single Mistral waits for the first sentence and splits the TTS payload without changing captions',async()=>{

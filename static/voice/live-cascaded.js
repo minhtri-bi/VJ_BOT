@@ -476,37 +476,49 @@
     }
     async function generate(turn,reference,command,transcript='') {
       const signal=turn.controller.signal, current=()=>owns(turn);
+      const audioAbort=new AbortController(), audioSignal=AbortSignal.any([signal,audioAbort.signal]);
       deadline(turn,35000,'Thầy phản hồi quá lâu. Em thử lại nhé.');
-      let routing, firstReady, appendChain=Promise.resolve(), text='', firstAt;
-      let mistralSingle=false, firstEnd=0, cut=0, batched=0, tail;
+      let routing, firstReady, appendChain=Promise.resolve(), elevenChain=appendChain, text='', firstAt;
+      let mistralSingle=false, audioFailure='', firstEnd=0, cut=0, batched=0, tail;
       const audioSegments=[];
       const steps=slowerSteps;
+      const audioCurrent=()=>!audioSignal.aborted && current();
+      function failAudio(error) {
+        if (!audioCurrent()) return;
+        audioFailure=message(error,'Không phát được câu trả lời.');
+        audioAbort.abort();
+        turn.audio?.stop();
+        if (phase==='speaking') state('thinking');
+      }
       function batch(parts) {
-        const before=appendChain;
-        // Start requests independently, but append only after the preceding batch has
-        // validated and appended every record.
+        const before=appendChain, priorEleven=elevenChain;
+        const serialEleven=parts.some(({lang})=>(routing.mode==='single'
+          ? routing.primary.provider : routing[lang]?.provider ?? routing.primary.provider)==='elevenlabs');
+        // Limit ElevenLabs dispatch separately from the playback order.
         appendChain=(async()=>{
-          if (!current()) return;
+          if (serialEleven) await priorEleven;
+          if (!audioCurrent()) return;
           const base=(routing.mode==='single' ? routing.primary.speed : routing.ja?.speed ?? routing.primary.speed) ?? 1;
           const jaScale=Math.min(base,Math.max(0.75,base-0.12*steps))/base;
           // Separate language clips only when Japanese needs a different pace, using the same voice and connection.
           const synthesisRouting=mistralSingle && jaScale<1
             ? {...routing,mode:'dual_same_api',ja:{profile:null},vi:{profile:null}} : routing;
-          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
-            mode:'bilingual',stream:true,routing:synthesisRouting},signal,{voiceRouting:true});
+          const text=parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' ');
+          const response=await post('/api/tts',{...reference,text,mode:'bilingual',stream:true,
+            ...(serialEleven ? {serial:true} : {}),routing:synthesisRouting},audioSignal,{voiceRouting:true});
           await window.VJVoice.consume(response,async part=>{
             await before;
-            if (!current()) return;
+            if (!audioCurrent()) return;
             const clip={...part,boundary:part.index===0 ? parts[0].boundary : part.boundary,
               speed:part.lang==='ja' ? part.speed*jaScale : part.speed};
             turn.audio??=window.VJVoiceStitcher.create({audioContext,sink});
             await turn.audio.append(clip);
-            if (!current()) return;
+            if (!audioCurrent()) return;
             audioSegments.push(clip);
             if (phase!=='speaking') state('speaking');
-          },current,signal);
-        })();
-        void appendChain.catch(error=>turnError(turn,error));
+          },audioCurrent,audioSignal);
+        })().catch(failAudio);
+        if (serialEleven) elevenChain=appendChain;
       }
       function flushFirstSentence(segments) {
         if (!mistralSingle || !firstEnd || batched || !current()) return;
@@ -547,42 +559,50 @@
           }
         }
         if (part.index===0) {
-          firstReady=route(signal).then(value=>{
-            if (!current()) return;
+          firstReady=route(audioSignal).then(value=>{
+            if (!audioCurrent()) return;
             routing=value;
             mistralSingle=routing.mode==='single' && routing.primary.provider==='mistral';
             if (mistralSingle) flushFirstSentence(segments);
             else {batched=1;batch([part]);}
-          });
-          void firstReady.catch(error=>turnError(turn,error));
+          }).catch(failAudio);
         } else flushFirstSentence(segments);
       },segments=>{
         firstEnd ||= segments.length;
         flushFirstSentence(segments);
       });
       if (!result || !current()) return;
-      deadline(turn,90000,'Âm thanh tải hoặc phát quá lâu. Em thử lại nhé.');
-      await firstReady;
+      clearTimeout(turn.timer);
+      const audioTimeout=new Promise(resolve=>{
+        turn.timer=setTimeout(()=>{
+          failAudio(new Error('Âm thanh tải hoặc phát quá lâu. Em thử lại nhé.'));
+          resolve();
+        },90000);
+      });
+      const play=async()=>{
+        await firstReady;
+        if (!audioCurrent()) return;
+        if (tail || result.segments.length>batched) {
+          const remaining=result.segments.slice(batched);
+          if (tail) remaining.unshift(tail);
+          const managed=remaining.some(({lang})=>(routing.mode==='single'
+            ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
+          const limit=managed ? managedTtsSegments : mistralSingle ? maxSegments : maxSegments-1;
+          for(let i=0;i<remaining.length;i+=limit) batch(remaining.slice(i,i+limit));
+        }
+        await appendChain;
+        if (audioCurrent()) await turn.audio.finish();
+      };
+      await Promise.race([play().catch(failAudio),audioTimeout]);
       if (!current()) return;
-      if (tail || result.segments.length>batched) {
-        const remaining=result.segments.slice(batched);
-        if (tail) remaining.unshift(tail);
-        const managed=remaining.some(({lang})=>(routing.mode==='single'
-          ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
-        const limit=managed ? managedTtsSegments : mistralSingle ? maxSegments : maxSegments-1;
-        for(let i=0;i<remaining.length;i+=limit) batch(remaining.slice(i,i+limit));
-      }
-      await appendChain;
-      if (!current()) return;
-      await turn.audio.finish();
-      if (!current()) return;
-      // Stage speculative captions/audio for latency, but commit only a fully played turn.
+      // A validated text reply is still usable when only its speech failed.
       if (transcript) history.push({role:'user',text:trimHistory(transcript)});
       history.push({role:'assistant',text:trimHistory(result.reply.full_text)});
       history=history.slice(-12);
-      lastAudio=audioSegments;
+      lastAudio=audioFailure ? null : audioSegments;
       japaneseOnly=result.reply.japanese_only;
-      completeTurn(turn);
+      if (audioFailure) turnError(turn,new Error(`${audioFailure} Câu trả lời vẫn có trong bản chép lời.`));
+      else completeTurn(turn);
     }
     function trimHistory(text) {
       const short=text.slice(0,600);

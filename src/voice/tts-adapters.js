@@ -18,6 +18,8 @@ const safeMessage = {
   tts_billing:VOICE_BILLING_DETAIL,
   tts_catalog_permission:'ElevenLabs từ chối quyền tải giọng hoặc model.',
   tts_quota:'Nhà cung cấp giọng nói đang giới hạn lượt dùng.',
+  tts_concurrency:'ElevenLabs đang xử lý quá nhiều yêu cầu đọc cùng lúc. Chờ các lượt đang chạy kết thúc rồi thử lại.',
+  tts_rate_limit:'Đã gửi yêu cầu đọc tới ElevenLabs quá nhanh. Hãy đợi rồi thử lại.',
   tts_voice_unavailable:'Không dùng được giọng hoặc model đã chọn với tài khoản này.',
   tts_audio_limit:'Âm thanh trả về vượt giới hạn.',
   tts_language_unsupported:'Model đã chọn không hỗ trợ ngôn ngữ của đoạn cần đọc.'
@@ -109,6 +111,14 @@ async function send(provider, path, signal, body) {
     const error = await readJson(response,8192).catch(() => null);
     if (error?.detail?.status === 'missing_permissions') throw new VoiceError('tts_catalog_permission',403);
     throw new VoiceError('tts_key_rejected',403);
+  }
+  if (response.status === 429 && provider.kind === 'elevenlabs' && body) {
+    const error = await readJson(response,8192).catch(() => null);
+    const code = error?.detail?.code ?? error?.detail?.status;
+    if (code === 'concurrent_limit_exceeded' || code === 'too_many_concurrent_requests')
+      throw new VoiceError('tts_concurrency',429);
+    if (code === 'rate_limit_exceeded') throw new VoiceError('tts_rate_limit',429);
+    throw new VoiceError('tts_quota',429);
   }
   await response.body?.cancel();
   if (response.status === 402) throw new VoiceError('tts_billing',402);

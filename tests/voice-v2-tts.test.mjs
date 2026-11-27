@@ -270,6 +270,27 @@ test('voice catalog and playback distinguish billing from a rejected key and cat
   }
 });
 
+test('ElevenLabs synthesis maps bounded 429 codes without exposing upstream content', async t => {
+  let make;
+  intercept(t,async () => make());
+  const routing={version:2,mode:'single',primary:slot('elevenlabs','demo_voice')};
+  const failure=detail=>()=>Response.json({detail:{...detail,message:`Private upstream ${key}`}},{status:429});
+  for (const [response,code,hint] of [
+    [failure({code:'concurrent_limit_exceeded',status:'rate_limit_exceeded'}),'tts_concurrency',/cùng lúc/],
+    [failure({status:'too_many_concurrent_requests'}),'tts_concurrency',/cùng lúc/],
+    [failure({code:'rate_limit_exceeded'}),'tts_rate_limit',/quá nhanh/],
+    [failure({code:'system_busy'}),'tts_quota',/giới hạn/],
+    [()=>new Response(`<html>${key}</html>`,{status:429}),'tts_quota',/giới hạn/],
+    [failure({code:'rate_limit_exceeded',extra:key.repeat(1024)}),'tts_quota',/giới hạn/]
+  ]) {
+    make=response;
+    const [record]=await lines(await tts({text:'こんにちは。',stream:true,routing}));
+    assert.deepEqual([record.type,record.code],['error',code]);
+    assert.match(record.detail,hint);
+    assert.doesNotMatch(JSON.stringify(record),/Private upstream|synthetic-tts-test-key/);
+  }
+});
+
 test('ElevenLabs catalog distinguishes restricted credentials from invalid keys in bounded 401 replies', async t => {
   let failedPath, rejected, cancelled;
   intercept(t,async (url,init)=>{
@@ -404,6 +425,42 @@ test('same ElevenLabs account never exceeds two concurrent syntheses, even for o
   assert.deepEqual(records.slice(0,-1).map(record=>record.index),[0,1,2,3]);
   assert.equal(records.at(-1).count,4);
   assert.equal(peak,2);
+});
+
+test('serial synthesis allows one ElevenLabs request at a time across split voice profiles', async t => {
+  let active=0,peak=0;
+  const voices=[];
+  intercept(t,async url=>{
+    voices.push(new URL(url).pathname.split('/').at(-1));
+    peak=Math.max(peak,++active);
+    await new Promise(resolve=>setImmediate(resolve));
+    active--;
+    return mp3();
+  });
+  const ja=slot('elevenlabs','ja_voice'),vi=slot('elevenlabs','vi_voice');
+  ja.profile.connection.api_key='another-synthetic-key';
+  const records=await lines(await tts({text:'<ja>学校</ja> <vi>Trường học</vi> <ja>教室</ja>',stream:true,serial:true,routing:split(ja,vi)}));
+  assert.deepEqual(records.map(record=>record.lang ?? record.type),['ja','vi','ja','done']);
+  assert.deepEqual(voices,['ja_voice','vi_voice','ja_voice']);
+  assert.equal(peak,1);
+});
+
+test('a buffered ElevenLabs 429 blocks later requests while a preceding clip finishes', async t => {
+  const first=Promise.withResolvers(), rejected=Promise.withResolvers(), calls=[];
+  intercept(t,async url=>{
+    if (new URL(url).hostname==='api.mistral.ai') return first.promise;
+    calls.push('ElevenLabs');
+    rejected.resolve();
+    return Response.json({detail:{code:'concurrent_limit_exceeded'}},{status:429});
+  });
+  const routing=split(slot('elevenlabs','clone'),slot('mistral','voice_3144'));
+  const reading=lines(await tts({text:'<vi>Chào em.</vi> <ja>学校 → 教室</ja>',stream:true,serial:true,routing}));
+  await rejected.promise;
+  await new Promise(resolve=>setImmediate(resolve));
+  first.resolve(mp3());
+  const records=await reading;
+  assert.deepEqual(records.map(({type,index,code})=>[type,index,code]),[['segment',0,undefined],['error',1,'tts_concurrency']]);
+  assert.deepEqual(calls,['ElevenLabs']);
 });
 
 test('Mistral catalog identifies account clones and known presets without changing IDs or cursor', async t => {
