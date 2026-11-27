@@ -82,6 +82,22 @@ test('Mistral mixed clauses keep tagged numeric text and skip unmarked non-speec
   assert.equal(inputs.length,6);
 });
 
+test('untagged ranges and single numbers follow their Japanese counter in bilingual synthesis', async t => {
+  const calls=[];
+  intercept(t,async (url,init)=>{
+    const body=JSON.parse(init.body);
+    calls.push([new URL(url).hostname,body.input ?? body.text]);
+    return url.includes('mistral.ai') ? Response.json({audio_data:'SUQzBA=='}) : mp3();
+  });
+  const routing=split(slot('mistral','voice_3133'),slot('elevenlabs','vi_voice'));
+  const counters=['10〜20人。','１０　～　２０人。','5人。'];
+  for(const counter of counters) {
+    const records=await lines(await tts({text:`Ví dụ: ${counter}`,stream:true,routing}));
+    assert.deepEqual(records.map(({lang})=>lang),['vi','ja',undefined]);
+    assert.deepEqual(calls.splice(0),[['api.elevenlabs.io','Ví dụ:'],['api.mistral.ai',counter]]);
+  }
+});
+
 test('Japanese-only and dual same-account Mistral keep script routing and preset or explicit voice precedence', async t => {
   const calls = [];
   intercept(t, async (_url,init) => {

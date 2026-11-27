@@ -134,10 +134,10 @@ test('chunker consumes split and empty tags and keeps actual sentence boundaries
 
 test('live tagged numeric ranges retain both endpoints in captions', () => {
   const items=[], chunker=createSegmentChunker({onSegment:part=>items.push(part)});
-  chunker.push('<ja>10〜20%</ja><vi>２０％ ～ ３０％</vi><ja>〜ます</ja>');
-  assert.equal(chunker.flush().fullText,'10〜20% ２０％ ～ ３０％ ます');
+  chunker.push('<ja>10〜20%</ja><vi>２０％　～　３０％</vi><ja>〜ます</ja>');
+  assert.equal(chunker.flush().fullText,'10〜20% ２０％　～　３０％ ます');
   assert.deepEqual(items.map(({lang,text})=>[lang,text]),[
-    ['ja','10〜20%'],['vi','２０％ ～ ３０％'],['ja','ます']
+    ['ja','10〜20%'],['vi','２０％　～　３０％'],['ja','ます']
   ]);
 });
 

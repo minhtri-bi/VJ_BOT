@@ -16,7 +16,7 @@ export function normalizeVoiceText(text, {kanjiMode = 'kanji_native'} = {}) {
   return text.normalize('NFC')
     .replace(/<(?!\/?(?:ja|vi)>)[^>]*>/gi, ' ')
     .replace(/\[([^\]\r\n]+)\]\([^\s)]+\)/g, '$1')
-    .replace(/([\d０-９][%％]?[ \t]*[〜～](?=[ \t]*[\d０-９]))|[#*`_〜～]/gu, '$1')
+    .replace(/([\d０-９][%％]?[\p{Zs}\t]*[〜～](?=[\p{Zs}\t]*[\d０-９]))|[#*`_〜～]/gu, '$1')
     .replace(/\{([^{}|]+)\|([\p{Script=Hiragana}\p{Script=Katakana}ー・\s]+)\}/gu, group)
     .replace(ruby, group)
     .replace(romaji, (annotation, spoken, reading) => /^[A-Z]{2,}$/.test(reading.trim()) ? annotation : spoken)
