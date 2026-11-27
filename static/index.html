@@ -753,7 +753,7 @@
             <div class="settings-card admin-activity"><h2 class="card-title">Hoạt động 7 ngày</h2><div id="admin-top"></div></div>
           </div>
         </section>
-        <section class="tab-panel" id="panel-settings" hidden>
+        <section class="tab-panel" id="panel-settings" data-sakuga-off hidden>
           <div class="settings-container settings-layout"><h1>Cài đặt</h1>
             <nav class="settings-nav" aria-label="Mục cài đặt"><button type="button" data-settings="account" data-target="settings-account-card" aria-current="true">Tài khoản</button><button type="button" data-settings="api" data-target="ai-card" id="settings-api-nav">Kết nối AI</button><button type="button" data-settings="admin" data-target="settings-admin-ai" id="settings-admin-nav" hidden>Mô hình AI và giọng nói</button><button type="button" data-settings="sound" data-target="settings-sound-card">Âm thanh</button><button type="button" data-settings="data" data-target="settings-danger-card">Dữ liệu</button></nav>
             <div class="settings-stack">
@@ -782,12 +782,15 @@
                   <p class="ai-field-hint" id="ai-current-hint">Model trò chuyện đã lưu sẽ hiện ở đây.</p>
                   <button type="button" class="public-cta" id="ai-chat" hidden>Vào lớp với thầy Lâm <span aria-hidden="true">↗</span></button>
                 </section>
+                <div class="settings-connection-grid">
                 <div class="ai-saved-connections">
-                  <div class="ai-section-heading"><label for="ai-profile-list">Kết nối AI cá nhân</label><button type="button" class="stage-btn" id="ai-add-connection">+ Thêm kết nối</button></div>
+                  <div class="settings-control-head"><label for="ai-profile-list">Kết nối AI cá nhân</label></div>
                   <select id="ai-profile-list" aria-describedby="ai-profile-hint"><option value="">Chọn kết nối đã lưu</option></select>
+                  <div class="settings-inline-actions"><button type="button" class="settings-link" id="ai-add-connection" aria-haspopup="dialog">+ Thêm</button><button type="button" class="settings-link" id="ai-edit-connection" hidden>Sửa kết nối</button></div>
                   <p class="ai-field-hint" id="ai-profile-hint" hidden></p>
-                  <p id="ai-connection-status" role="status" aria-live="polite"></p>
+                  <p id="ai-connection-status" class="ai-field-hint" role="status"></p>
                 </div>
+                <div class="settings-chat-controls">
                 <section id="ai-oauth-panel" class="ai-form" aria-label="Tài khoản Antigravity" hidden>
                   <p id="ai-oauth-status" role="status" aria-live="polite"></p>
                   <div id="ai-oauth-pending" class="ai-form" hidden>
@@ -817,17 +820,36 @@
                   <button type="button" class="stage-btn" id="ai-oauth-back" hidden>Quay lại tài khoản đã lưu</button>
                 </section>
                 <form id="ai-form" class="ai-form" autocomplete="off">
-                  <fieldset class="ai-step">
-                    <legend>Model trò chuyện</legend>
-                    <label id="ai-models" hidden>Model đã kiểm tra trước đó<select id="ai-model-list" aria-describedby="ai-selection-hint" disabled></select></label>
+                  <div class="settings-chat-model">
+                    <h3>Model trò chuyện</h3>
+                    <p class="ai-field-hint settings-no-model">Chưa có model đã kiểm tra.</p>
+                    <label id="ai-models" hidden>Model đã kiểm tra<select id="ai-model-list" aria-describedby="ai-selection-hint" disabled></select></label>
                     <input id="ai-model" type="hidden" maxlength="100">
                     <p class="ai-field-hint" id="ai-selection-hint">Chỉ liệt kê model đã thử. Tình trạng có thể thay đổi.</p>
-                    <div class="ai-actions"><button type="submit" class="public-cta" id="ai-save" disabled>Lưu model cho tài khoản này</button></div>
-                    <p id="ai-status" role="status"></p>
-                  </fieldset>
-                  <details id="ai-api-manage" class="ai-disclosure"><summary>Cài đặt kết nối</summary>
+                    <div class="settings-inline-actions"><button type="button" class="settings-link" id="ai-fetch-models" aria-controls="ai-api-scan">Quét model</button><button type="submit" class="public-cta" id="ai-save" disabled hidden>Lưu model</button></div>
+                    <p id="ai-status" class="ai-field-hint" role="status"></p>
+                  </div>
+                  <details id="ai-api-scan" class="ai-disclosure">
+                    <summary>Tiến độ và tùy chọn quét</summary>
+                    <div class="settings-scan-body">
+                      <label class="ai-recheck"><input type="checkbox" id="ai-recheck-all"> Kiểm tra lại mọi model</label>
+                      <p class="ai-field-hint">Kiểm tra model tốn hạn mức và có thể tính phí.</p>
+                      <p class="ai-field-hint" id="ai-resume-hint" role="status"></p>
+                      <progress id="ai-load-progress" aria-label="Tiến độ kiểm tra model" hidden></progress>
+                      <p id="ai-model-status" class="ai-field-hint" role="status"></p>
+                      <button type="button" class="stage-btn" id="ai-stop-models" hidden>Dừng</button>
+                    </div>
+                  </details>
+                </form>
+                <p class="ai-field-hint settings-connect-empty">Chọn hoặc thêm kết nối để cài đặt model trò chuyện.</p>
+                </div>
+                </div>
+                  <dialog id="ai-edit-dialog" class="ai-add-dialog settings-dialog" aria-labelledby="ai-api-editor-title" aria-describedby="ai-edit-description">
+                  <div id="ai-api-manage">
+                  <header class="ai-add-heading"><h2 id="ai-api-editor-title">Thêm kết nối API</h2></header>
+                  <p class="ai-field-hint" id="ai-edit-description">Chọn loại API, địa chỉ và nơi lưu khóa.</p>
                   <fieldset class="ai-step ai-profile-step">
-                    <legend id="ai-api-editor-title">Kết nối bằng khóa API</legend>
+                    <legend>Thông tin kết nối</legend>
                     <div id="ai-profile-edit">
                     <div class="ai-profile-fields">
                       <label>Tên kết nối<input id="ai-profile-name" maxlength="80" autocomplete="off" placeholder="Gemini hoặc Groq của em"></label>
@@ -847,23 +869,11 @@
                     <p class="ai-field-hint" id="ai-key-hint">Khóa được lưu ở nơi em chọn. Đừng dán khóa vào khung trò chuyện.</p>
                     </div>
                   </fieldset>
-                  <div class="ai-actions"><button type="button" class="public-cta" id="ai-profile-save">Lưu kết nối</button><button type="button" class="stage-btn" id="ai-api-back" hidden>Hủy</button></div>
-                  <div class="ai-connection-footer"><span>Sửa thông tin đăng nhập sẽ xóa kết quả kiểm tra model.</span><button type="button" class="stage-btn" id="ai-remove" hidden>Xóa kết nối này</button></div>
-                  </details>
-                  <details id="ai-api-scan" class="ai-disclosure"><summary>Tìm model cho tài khoản này</summary>
-                  <fieldset class="ai-step">
-                    <legend>Model</legend>
-                    <p class="ai-step-description">Việc thử tốn hạn mức và có thể tốn phí.</p>
-                    <details><summary>Tùy chọn quét và tiếp tục</summary>
-                    <label class="ai-field-hint ai-recheck"><input type="checkbox" id="ai-recheck-all"> Kiểm tra lại mọi model (tốn hạn mức lần nữa)</label>
-                    <p class="ai-field-hint" id="ai-resume-hint" role="status">Chỉ tiếp tục các model chưa từng được gửi cho kết nối này. Yêu cầu bị gián đoạn không tự thử lại.</p>
-                    </details>
-                    <div class="ai-actions"><button type="button" class="stage-btn ai-load-button" id="ai-fetch-models">Tìm model dùng được</button><button type="button" class="stage-btn" id="ai-stop-models" hidden>Dừng</button></div>
-                    <progress id="ai-load-progress" aria-label="Tiến độ kiểm tra model" hidden></progress>
-                    <p id="ai-model-status" role="status" aria-live="polite"></p>
-                  </fieldset>
-                  </details>
-                </form>
+                  <p id="ai-edit-status" class="ai-field-hint" role="status"></p>
+                  <div class="settings-inline-actions"><button type="button" class="public-cta" id="ai-profile-save">Lưu kết nối</button><button type="button" class="stage-btn" id="ai-api-back">Hủy</button><button type="button" class="settings-link settings-danger-action" id="ai-remove" hidden>Xóa kết nối</button></div>
+                  <p id="ai-edit-invalidation" class="ai-field-hint" hidden>Đổi URL hoặc khóa sẽ xóa kết quả kiểm tra model của kết nối này.</p>
+                  </div>
+                  </dialog>
                 <dialog id="ai-confirm-dialog" class="ai-confirm-dialog" aria-labelledby="ai-confirm-title" aria-describedby="ai-confirm-description ai-confirm-warning">
                   <form method="dialog">
                     <header><p class="ai-confirm-eyebrow">Kết nối API</p><h2 id="ai-confirm-title">Tìm model em dùng được</h2></header>
@@ -885,31 +895,42 @@
 
               </section>
               <section class="settings-card ai-settings-card" id="settings-sound-card">
-                <header class="card-head"><h2 class="card-title">Âm thanh</h2></header>
+                <header class="card-head"><h2 class="card-title">Âm thanh</h2><div class="sound-toggle"><span id="sound-toggle-label">Âm báo khi học</span><button type="button" class="stage-btn" id="btn-toggle-sound-setting" aria-labelledby="sound-toggle-label btn-toggle-sound-setting" aria-pressed="true">Đang bật</button></div></header>
                 <details class="ai-disclosure" id="speech-legacy-settings" name="sound-voice-settings">
-                  <summary><span class="sound-heading">Đọc thành tiếng<small>Giọng mặc định, tài khoản và model</small></span></summary>
+                  <summary><span class="sound-heading">Giọng mặc định<small>Tài khoản, model và nghe thử</small></span></summary>
                   <div class="ai-voice-controls sound-stack">
                   <p id="speech-managed-summary" class="ai-field-hint" hidden>OpenAI quản trị · gpt-4o-mini-tts · alloy · Tự động dùng cấu hình máy chủ. <a href="#settings/admin">Model văn bản &amp; GPT-Live ↗</a></p>
-                  <div class="ai-section-heading ai-voice-connect" id="speech-account-controls"><label for="speech-profile">Tài khoản giọng nói</label><button type="button" class="stage-btn" id="speech-key-add" aria-expanded="false" aria-controls="speech-key-form">+ Thêm khóa</button></div>
-                  <form id="speech-key-form" class="ai-voice-form" autocomplete="off" aria-label="Thêm tài khoản giọng nói" hidden>
-                    <label for="speech-key-provider">Nhà cung cấp giọng nói<select id="speech-key-provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI chính thức</option><option value="mistral">Mistral</option></select></label>
-                    <div class="ai-profile-fields"><label for="speech-key-name">Tên gọi tài khoản<input id="speech-key-name" maxlength="80" required autocomplete="off" placeholder="Tài khoản giọng nói của em"></label><label for="speech-key-storage">Nơi lưu<select id="speech-key-storage" aria-describedby="speech-key-privacy"><option value="local">Chỉ trên thiết bị này</option><option value="server" id="speech-key-server" disabled>Tài khoản của em trên máy chủ</option></select></label></div>
-                    <div class="ai-field"><label for="speech-key">Khóa API giọng nói</label><div class="auth-password-wrap"><input id="speech-key" type="password" required minlength="8" maxlength="512" autocomplete="off" spellcheck="false" aria-describedby="speech-key-privacy speech-key-status"><button type="button" id="speech-key-toggle" aria-pressed="false" aria-label="Hiện khóa API giọng nói">Hiện</button></div></div>
-                    <p id="speech-key-privacy" class="ai-field-hint">Thiết bị: mã hóa trong trình duyệt này, không đồng bộ. Máy chủ: mã hóa theo tài khoản VJBot của em. Máy chủ nhận khóa khi gửi yêu cầu giọng nói.</p>
-                    <div class="ai-actions"><button type="submit" class="public-cta" id="speech-key-save">Lưu tài khoản giọng nói</button><button type="button" class="stage-btn" id="speech-key-cancel">Hủy</button></div>
-                    <p id="speech-key-status" class="ai-field-hint" role="status" aria-live="polite"></p>
-                  </form>
-                  <select id="speech-profile" aria-describedby="ai-oauth-voice-hint speech-model-status"><option value="">Chọn tài khoản giọng nói đã lưu</option></select>
-                  <div class="ai-voice-listen"><button type="button" class="public-cta" id="speech-test" aria-describedby="speech-test-hint" disabled>Nghe thử</button><p id="speech-test-hint" class="ai-field-hint">Một yêu cầu âm thanh. Tốn hạn mức, có thể tính phí.</p></div>
-                  <p id="speech-model-status" class="ai-field-hint" role="status"></p>
-                  <details class="ai-voice-help" id="speech-personal-setup"><summary>Model giọng nói và cài đặt</summary><div class="ai-voice-options">
+                  <div class="sound-fields">
+                  <div class="sound-stack speech-account-field">
+                    <div id="speech-account-controls"><label for="speech-profile">Tài khoản giọng nói</label></div>
+                    <select id="speech-profile" aria-describedby="ai-oauth-voice-hint speech-model-status"><option value="">Chọn tài khoản giọng nói đã lưu</option></select>
+                    <button type="button" class="settings-link" id="speech-key-add" aria-haspopup="dialog" aria-expanded="false" aria-controls="speech-key-dialog">+ Thêm khóa</button>
+                  </div>
+                  <div class="sound-stack" id="speech-personal-setup">
                     <label for="speech-model"><span id="speech-model-label">Model giọng nói</span><select id="speech-model" aria-describedby="speech-model-status" disabled><option value="">Chọn tài khoản giọng nói</option></select></label>
-                    <div class="ai-actions"><button type="button" class="stage-btn" id="speech-model-refresh" disabled>Tải lại model</button><a class="stage-btn" href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">Lấy khóa Gemini ↗</a><a class="stage-btn" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">Lấy khóa OpenAI ↗</a><a class="stage-btn" href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener noreferrer">Lấy khóa Mistral ↗</a></div>
-                    <p class="ai-field-hint" id="ai-oauth-voice-hint">Giọng nói dùng tài khoản đã lưu riêng, độc lập với chat.</p>
-                    <p class="ai-field-hint">Quyền truy cập được kiểm tra khi em nghe. Đăng nhập Antigravity dành cho chat, không dùng cho API giọng đọc này. <a href="https://ai.google.dev/gemini-api/docs/pricing" target="_blank" rel="noopener noreferrer">Bảng giá Gemini ↗</a> · <a href="https://openai.com/api/pricing/" target="_blank" rel="noopener noreferrer">Bảng giá OpenAI ↗</a></p>
-                  </div></details>
+                    <button type="button" class="settings-link" id="speech-model-refresh" disabled>Tải lại model</button>
+                  </div>
+                  </div>
+                  <p class="ai-field-hint" id="ai-oauth-voice-hint">Giọng nói dùng tài khoản đã lưu riêng, độc lập với chat.</p>
+                  <div class="settings-inline-actions speech-key-links"><span>Lấy khóa:</span><a class="settings-link" href="https://aistudio.google.com/api-keys" target="_blank" rel="noopener noreferrer">Gemini ↗</a><a class="settings-link" href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer">OpenAI ↗</a><a class="settings-link" href="https://console.mistral.ai/api-keys" target="_blank" rel="noopener noreferrer">Mistral ↗</a></div>
+                  <p id="speech-model-status" class="ai-field-hint" role="status"></p>
+                  <div class="ai-voice-listen"><button type="button" class="stage-btn" id="speech-test" aria-describedby="speech-test-hint" disabled>Nghe thử</button><p id="speech-test-hint" class="ai-field-hint">Một yêu cầu âm thanh. Tốn hạn mức, có thể tính phí.</p></div>
                   </div>
                 </details>
+                <dialog id="speech-key-dialog" class="ai-add-dialog settings-dialog" aria-labelledby="speech-key-title" aria-describedby="speech-key-privacy">
+                  <div class="ai-add-heading"><h2 id="speech-key-title">Thêm khóa giọng mặc định</h2></div>
+                  <form id="speech-key-form" class="sound-stack" autocomplete="off" hidden>
+                    <div class="sound-fields">
+                      <label for="speech-key-provider">Nhà cung cấp<select id="speech-key-provider"><option value="gemini">Google Gemini</option><option value="openai">OpenAI chính thức</option><option value="mistral">Mistral</option></select></label>
+                      <label for="speech-key-name">Tên gọi tài khoản<input id="speech-key-name" maxlength="80" required autocomplete="off"></label>
+                      <div class="ai-field"><label for="speech-key">Khóa API</label><div class="auth-password-wrap"><input id="speech-key" type="password" required minlength="8" maxlength="512" autocomplete="off" spellcheck="false" aria-describedby="speech-key-privacy speech-key-status"><button type="button" id="speech-key-toggle" aria-pressed="false" aria-label="Hiện khóa API giọng nói">Hiện</button></div></div>
+                      <label for="speech-key-storage">Nơi lưu<select id="speech-key-storage" aria-describedby="speech-key-privacy"><option value="local">Thiết bị này</option><option value="server" id="speech-key-server" disabled>Máy chủ</option></select></label>
+                    </div>
+                    <p id="speech-key-privacy" class="ai-field-hint">Thiết bị: mã hóa trong trình duyệt này, không đồng bộ. Máy chủ: mã hóa theo tài khoản VJBot của em. Máy chủ nhận khóa khi gửi yêu cầu giọng nói.</p>
+                    <div class="settings-inline-actions"><button type="submit" class="public-cta" id="speech-key-save">Lưu kết nối</button><button type="button" class="stage-btn" id="speech-key-cancel">Hủy</button></div>
+                    <p id="speech-key-status" class="ai-field-hint" role="status"></p>
+                  </form>
+                </dialog>
                 <details class="ai-disclosure" id="voice-v2-settings" name="sound-voice-settings">
                   <summary><span class="sound-heading">Giọng song ngữ Nhật–Việt<small>Giọng cho từng ngôn ngữ và hội thoại trực tiếp</small></span></summary>
                   <div class="sound-stack">
@@ -966,7 +987,6 @@
                     <footer><button type="submit" class="stage-btn" value="cancel" autofocus>Hủy</button><button type="submit" class="public-cta" id="voice-v2-confirm-delete" value="delete">Xóa kết nối</button></footer>
                   </form>
                 </dialog>
-                <div class="setting-toggle-row"><strong>Âm báo khi học</strong><button type="button" class="sketch-action-chip" id="btn-toggle-sound-setting" aria-label="Âm báo khi học" aria-pressed="true">Bật âm thanh</button></div>
               </section>
               <section class="settings-card danger-card" id="settings-danger-card">
                 <header class="card-head"><h2 class="card-title">Xóa dữ liệu</h2></header>

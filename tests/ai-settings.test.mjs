@@ -19,7 +19,7 @@ function settings({consent = true, models = ['paid', 'denied', 'working'], saved
       addEventListener(name, handler) { this.events[name] = handler; },
       showModal() {
         this.open = true;
-        if (consent !== null) queueMicrotask(() => this.close(consent ? 'start' : 'cancel'));
+        if (id === 'ai-confirm-dialog' && consent !== null) queueMicrotask(() => this.close(consent ? 'start' : 'cancel'));
       },
       close(value = '') { this.open = false; this.returnValue = value; this.events.close?.(); },
       click() { return this.events.click?.(); },
@@ -601,11 +601,46 @@ test('adding an API draft preserves the selected saved connection and unsaved fi
   assert.equal(ui.element('ai-key').value, 'unsaved-secret');
   assert.equal(JSON.stringify([...ui.storage]).includes('unsaved-secret'), false);
   await ui.element('ai-api-back').click();
+  assert.equal(ui.element('ai-edit-dialog').open, false);
   assert.equal(ui.element('ai-profile-list').value, 'server:saved-profile');
   assert.equal(ui.element('ai-profile-name').value, 'Saved provider');
   assert.equal(ui.element('ai-key').value, '');
   assert.equal(ui.element('ai-current-model').textContent, 'paid');
   assert.equal(ui.requests.some(request => request.path.includes('/models')), false);
+});
+
+test('API editor dismissal and account changes scrub keys without scanning or changing the active connection', async () => {
+  const ui = settings();
+  await ui.context.renderAiPanels('settings');
+  ui.element('ai-edit-connection').click();
+  assert.equal(ui.element('ai-edit-dialog').open, true);
+  ui.element('ai-key').value = 'synthetic-unsaved-key';
+  ui.element('ai-key').type = 'text';
+  ui.context.dispatchEvent(new Event('hashchange'));
+  assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.element('ai-key').value, '');
+  assert.equal(ui.element('ai-key').type, 'password');
+  assert.deepEqual(JSON.parse(JSON.stringify(ui.activeChoice.value)), {scope:'server', id:'saved-profile'});
+  await ui.context.renderAiPanels('settings');
+  ui.element('ai-edit-connection').click();
+  ui.element('ai-key').value = 'second-synthetic-key';
+  ui.context.signedInUser = {user_id:'other:owner'};
+  ui.context.dispatchEvent(new Event('vjbot-voice-changed'));
+  assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.element('ai-key').value, '');
+  assert.equal(ui.requests.some(r => r.path.includes('/models') || r.body.api_key), false);
+});
+
+test('history navigation closes a pending scan cost prompt without probing', async () => {
+  const ui = settings({models:['working'], consent:null});
+  await ui.context.renderAiPanels('settings');
+  const scan = ui.element('ai-fetch-models').click();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(ui.element('ai-confirm-dialog').open, true);
+  ui.context.dispatchEvent(new Event('hashchange'));
+  await scan;
+  assert.equal(ui.element('ai-confirm-dialog').open, false);
+  assert.equal(ui.requests.some(request => request.path === '/api/ai/models/test'), false);
 });
 
 test('selecting OAuth delegates explicit activation and leaves the API voice profile unchanged', async () => {
