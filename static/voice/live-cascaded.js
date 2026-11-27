@@ -485,10 +485,13 @@
         // validated and appended every record.
         appendChain=(async()=>{
           if (!current()) return;
-          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
-            mode:'bilingual',stream:true,routing},signal,{voiceRouting:true});
           const base=(routing.mode==='single' ? routing.primary.speed : routing.ja?.speed ?? routing.primary.speed) ?? 1;
           const jaScale=Math.min(base,Math.max(0.75,base-0.12*steps))/base;
+          // Separate language clips only when Japanese needs a different pace, using the same voice and connection.
+          const synthesisRouting=mistralSingle && jaScale<1
+            ? {...routing,mode:'dual_same_api',ja:{profile:null},vi:{profile:null}} : routing;
+          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
+            mode:'bilingual',stream:true,routing:synthesisRouting},signal,{voiceRouting:true});
           await window.VJVoice.consume(response,async part=>{
             await before;
             if (!current()) return;
@@ -509,10 +512,12 @@
         const parts=segments.slice(0,batched);
         if (cut) {
           const last=parts.at(-1);
-          const rest=last.text.slice(cut).trimStart();
+          const rest=last.text.slice(cut).trim();
           if (rest) {
             parts[parts.length-1]={...last,text:last.text.slice(0,cut)};
-            tail={...last,text:rest,boundary:'sentence'};
+            // Mirror the TTS check for spoken text and explicitly labelled numbers.
+            if (/[\p{L}]/u.test(rest) || /^[\d０-９][\d０-９.,，、\s]*[。！？!?]?$/u.test(rest))
+              tail={...last,text:rest,boundary:'sentence'};
           }
         }
         batch(parts);

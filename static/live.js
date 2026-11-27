@@ -10,7 +10,7 @@
   const cascadedCommands=new Set(['hint','repeat','slower','situation','check','explain','summary']);
   const sttNames={openai:'OpenAI',mistral:'Mistral',elevenlabs:'ElevenLabs',browser:'trình duyệt'};
   const ttsNames={...sttNames,gemini:'Gemini',openai_compatible:'máy chủ tùy chỉnh'};
-  const nativeMode='Kết nối trực tiếp gốc (Native)';
+  const nativeMode='Kết nối trực tiếp gốc';
   const nativeUnavailable='Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.';
   const liveError=message=>Object.assign(new Error(message),{userFacing:true});
   let cascaded=null,cascadedSession=null,cascadedState=null,teacherSink=null,wakeRequest=0;

@@ -154,6 +154,24 @@ test('single Mistral waits for the first sentence and splits the TTS payload wit
   assert.equal(f.errors.length,0);f.engine.stop();
 });
 
+test('single Mistral skips a nonspoken tail without losing captions or replay',async()=>{
+  const parts=[{lang:'ja',boundary:'start',text:'こんにちは！😊'}];
+  const f=fixture({route:async()=>({...routeSingle,primary:{provider:'mistral',speed:1}}),fetch(call){
+    if(call.path==='/api/live/turn')return turnResponse(segment(0,parts[0])+done(parts));
+    if(!/\p{L}/u.test(call.body.text.replace(/<\/?ja>/g,'')))return Response.json({detail:'Không có chữ để đọc.'},{status:400});
+  }});
+  await f.engine.start();
+  const spoken=f.calls.filter(call=>call.path==='/api/tts');
+  assert.deepEqual(spoken.map(call=>call.body.text),['<ja>こんにちは！</ja>']);
+  assert.equal(f.captions.at(-1).text,parts[0].text);
+  assert.equal(f.clips.length,1);
+  await f.engine.sendCommand('repeat');
+  assert.equal(f.calls.filter(call=>call.path==='/api/tts').length,1);
+  assert.equal(f.clips.length,2);
+  assert.deepEqual(f.errors,[]);
+  f.engine.stop();
+});
+
 test('single Mistral flushes an unterminated first sentence on done, and nothing on cancellation',async()=>{
   const parts=[{lang:'vi',boundary:'start',text:'Bài này là'}, {lang:'ja',boundary:'inline',text:'猫'}];
   for(const cancel of [false,true]){
@@ -248,6 +266,26 @@ test('commands carry canonical context; repeat is RAM only; slower changes Japan
   assert.deepEqual(f.clips.slice(-6).map(({lang,speed})=>[lang,speed]),[['ja',0.88],['vi',1],['ja',0.88],['ja',0.88],['vi',1],['ja',0.88]]);
   assert(f.calls.filter(call=>call.path==='/api/tts').every(call=>call.body.routing.primary.speed===1));
   f.engine.stop();await f.engine.sendCommand('repeat');assert.equal(f.errors.length,0);
+});
+
+test('Mistral single voice uses separated audio only when slowing Japanese',async()=>{
+  const parts=[{lang:'ja',boundary:'start',text:'「猫」'},{lang:'vi',boundary:'inline',text:'nghĩa là con mèo.'}];
+  const primary={provider:'mistral',profile:{scope:'server',id:'voice-test'},voice_id:'voice_clone',speed:1};
+  const f=fixture({route:async()=>({...routeSingle,primary}),fetch(call){
+    if(call.path==='/api/live/turn')return turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts));
+    if(call.body.routing.mode==='single')return audioResponse('ja');
+    return audioResponse('ja','vi');
+  }});
+  await f.engine.start();
+  await f.engine.sendCommand('slower');
+  const requests=f.calls.filter(call=>call.path==='/api/tts');
+  assert.deepEqual(requests.map(call=>call.body.routing),[
+    {version:2,mode:'single',primary},
+    {version:2,mode:'dual_same_api',primary,ja:{profile:null},vi:{profile:null}}
+  ]);
+  assert.deepEqual(f.clips.map(({lang,speed})=>[lang,speed]),[['ja',1],['ja',0.88],['vi',1]]);
+  assert.deepEqual(f.errors,[]);
+  f.engine.stop();
 });
 
 test('chat and explicit voice STT route and transcribe strictly through their own paths',async()=>{

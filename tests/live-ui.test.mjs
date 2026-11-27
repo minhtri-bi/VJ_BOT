@@ -188,7 +188,7 @@ test('native Mistral creates and deletes with the same explicit server selection
   ui.context.VJProfiles={active:()=>selection};
   try{
     ui.context.openLiveConversation();
-    assert.match(ui.element('live-status').textContent,/Kết nối trực tiếp gốc \(Native\)/);
+    assert.match(ui.element('live-status').textContent,/^Kết nối trực tiếp gốc\./);
     assert.equal(ui.permissions(),0);
     await ui.element('live-start').events.click();
     assert.equal(ui.room().published,true);
@@ -334,7 +334,7 @@ test('idle Live distinguishes bilingual Mistral from native and points missing C
     assert.equal(ui.permissions(),0);assert.equal(ui.requests.length,0);
     assert.equal(ui.element('live-start').disabled,false);
     config.live.engine='native';ui.windowEvents['vjbot-voice-changed']();
-    assert.match(ui.element('live-status').textContent,/Kết nối trực tiếp gốc \(Native\)/);
+    assert.match(ui.element('live-status').textContent,/^Kết nối trực tiếp gốc\./);
   }finally{ui.windowEvents.pagehide();}
 });
 
@@ -467,7 +467,7 @@ test('opening live shows the panel without requesting a microphone until explici
     const endedStatus=ui.element('live-status').textContent;
     await ui.context.openLiveConversation();
     assert.match(endedStatus,/kết thúc/);
-    assert.match(ui.element('live-status').textContent,/Kết nối trực tiếp gốc \(Native\)/);
+    assert.match(ui.element('live-status').textContent,/^Kết nối trực tiếp gốc\./);
     assert.equal(ui.permissions(),1);assert.equal(ui.requests.length,1);
   }finally{ui.windowEvents.pagehide();}
 });
