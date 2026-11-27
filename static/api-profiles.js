@@ -8,11 +8,11 @@
   const SUFFIX = {openai: /\/chat\/completions$/, anthropic: /\/v1\/messages$/, gemini: /\/v1(beta)?$/,
     mistral:/\/audio\/speech$/,openai_compatible:/\/audio\/speech$/};
   const BLOCKED = /(^|\.)(localhost|local|internal|localdomain|home|lan|workers\.dev|dangphuc\.me)$/i;
-  const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/ai/test'];
+  const PATHS = ['/api/chat', '/api/kaiwa/evaluate', '/api/practice/coach', '/api/tts', '/api/stt', '/api/live/turn', '/api/ai/test'];
   const encoder = new TextEncoder(), decoder = new TextDecoder('utf-8', {fatal: true});
   const unavailable = () => problem('Kết nối API trên thiết bị không dùng được. Mở cài đặt API để lưu lại hoặc chọn kết nối khác.', 'unavailable');
   const storageError = () => problem('Trình duyệt chưa lưu được kết nối. Em cho phép trang lưu dữ liệu rồi thử lại nhé. Chi tiết lưu trữ: cần IndexedDB và Web Crypto.', 'storage');
-  let opening = null, voiceVersion = 0;
+  let opening = null, voiceVersion = 0, chatVersion = 0;
 
   function problem(message, code = 'invalid') { return Object.assign(new Error(message), {code}); }
   const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -213,6 +213,11 @@
     let selectedVoice;
     try { selectedVoice = voice(owner); } catch { /* Saving credentials does not repair a corrupt voice reference. */ }
     if (!sameConnection && selectedVoice?.scope === 'local' && selectedVoice.id === id) voiceChanged(owner);
+    if (!sameConnection || previous.model !== row.model) {
+      let selectedChat;
+      try { selectedChat = active(owner); } catch { /* Saving credentials does not repair a corrupt Chat reference. */ }
+      if (selectedChat?.scope === 'local' && selectedChat.id === id) chatChanged(owner);
+    }
     return publicProfile(row);
   }
   const validSelection = (choice, prefix) => object(choice) && (choice.scope === 'none' ? choice.id === ''
@@ -236,6 +241,11 @@
     voiceVersion++;
     globalThis.dispatchEvent?.(new Event('vjbot-voice-changed'));
   }
+  function chatChanged(owner) {
+    if (typeof signedInUser !== 'undefined' && signedInUser?.user_id !== owner) return;
+    chatVersion++;
+    globalThis.dispatchEvent?.(new Event('vjbot-chat-connection-changed'));
+  }
   function setSelection(owner, choice, prefix) {
     account(owner);
     if (choice !== null && !validSelection(choice, prefix)) throw problem('Lựa chọn kết nối đang dùng không hợp lệ.');
@@ -250,7 +260,12 @@
       }
     } catch { throw storageError(); }
   }
-  const setActive = (owner, choice) => setSelection(owner, choice, ACTIVE);
+  function setActive(owner, choice) {
+    let previous;
+    try { previous = active(owner); } catch { previous = undefined; }
+    setSelection(owner, choice, ACTIVE);
+    if (JSON.stringify(previous) !== JSON.stringify(active(owner))) chatChanged(owner);
+  }
   function setVoice(owner, choice) {
     let previous;
     try { previous = voice(owner); } catch { previous = undefined; }
@@ -282,7 +297,7 @@
     });
     if (selectionError) throw selectionError;
   }
-  async function prepareRequest(path, options = {}, owner) {
+  async function prepareRequest(path, options = {}, owner, binding) {
     const result = {...options};
     // Compare exact strings rather than normalized URLs: queries, aliases, dot segments,
     // encoded paths and external URLs must never acquire a device credential.
@@ -290,20 +305,30 @@
     if (typeof path !== 'string' || !PATHS.some(allowed => path === allowed || (origin && path === origin + allowed))
       || typeof options.method !== 'string' || options.method.toUpperCase() !== 'POST') return result;
     const speech = path === '/api/tts' || path === origin + '/api/tts';
-    const revision = voiceVersion;
+    const liveTurn = path === '/api/live/turn' || path === origin + '/api/live/turn';
+    const revision = speech ? voiceVersion : chatVersion;
     const selected = speech ? voice(owner) : active(owner);
+    let pinnedRevision;
+    if (binding != null) {
+      const stt = path === '/api/stt' || path === origin + '/api/stt';
+      if ((!liveTurn && !stt) || binding.scope !== 'local' || selected?.scope !== 'local' ||
+        binding.id !== selected.id || typeof binding.revision !== 'string' || !binding.revision) throw unavailable();
+      pinnedRevision = binding.revision;
+    }
     if (speech && (!selected || selected.scope === 'none')) throw problem('Chưa chọn kết nối đọc thành tiếng. Hãy chọn tài khoản trong phần Âm thanh của Cài đặt.');
     if (selected?.scope === 'none') throw problem('Chưa chọn kết nối API. Hãy chọn kết nối trong cài đặt API trước khi tiếp tục.');
     if (speech && selected?.scope === 'platform' && selected.id === 'openai') {
       const headers = new Headers(options.headers);
       headers.set('X-VJBot-Profile', 'platform_openai');
       result.headers = Object.fromEntries(headers);
+      result.redirect = 'error';
       return result;
     }
     if (selected?.scope === 'server') {
       const headers = new Headers(options.headers);
       headers.set('X-VJBot-Profile', selected.id);
       result.headers = Object.fromEntries(headers);
+      result.redirect = 'error';
       return result;
     }
     if (selected?.scope !== 'local') return result;
@@ -316,7 +341,8 @@
     let profile;
     try { profile = await load(owner, selected.id); } catch { throw unavailable(); }
     const current = speech ? voice(owner) : active(owner);
-    if (speech && revision !== voiceVersion) throw unavailable();
+    if ((speech && revision !== voiceVersion) || ((liveTurn || pinnedRevision) && revision !== chatVersion) ||
+      (pinnedRevision && profile.revision !== pinnedRevision)) throw unavailable();
     if (current?.scope !== 'local' || current.id !== selected.id) throw unavailable();
     if (speech && !((profile.protocol === 'gemini' && profile.base_url === BASES.gemini)
       || (profile.protocol === 'openai' && [BASES.openai, 'https://api.mistral.ai/v1'].includes(profile.base_url)))) throw problem('Giọng nói cần Gemini gốc, OpenAI chính thức hoặc Mistral chính thức.');
@@ -326,11 +352,13 @@
     headers.delete('X-VJBot-Profile');
     result.headers = Object.fromEntries(headers);
     result.body = JSON.stringify({...body, api_connection: {protocol: profile.protocol, base_url: profile.base_url, model: profile.model, api_key: profile.api_key}});
+    result.redirect = 'error';
     return result;
   }
   globalThis.addEventListener?.('storage', event => {
     const owner = typeof signedInUser === 'undefined' ? null : signedInUser?.user_id;
     if (event.key === null || (owner && event.key === VOICE + owner)) voiceChanged(owner);
+    if (owner && (event.key === null || event.key === ACTIVE + owner)) chatChanged(owner);
   });
   globalThis.VJProfiles = Object.freeze({list, metadata, load, save, remove, clear, active, setActive, voice, setVoice, prepareRequest});
 })();

@@ -329,7 +329,10 @@
                 <p class="ai-field-hint" id="live-privacy">Giọng thầy là giọng AI. Khi em bắt đầu, micro gửi âm thanh đến nhà cung cấp của kết nối trò chuyện đã chọn. Mỗi cuộc trò chuyện tối đa 10 phút.</p>
                 <details class="lesson-disclosure"><summary>Về bản chép lời</summary><p>Bản chép lời chỉ ở trang này, không lưu vào lịch sử hay tiến độ.</p></details>
                 <p id="live-status" role="status">Micro chỉ bật khi em bấm Bắt đầu nói.</p>
-                <div class="live-controls"><button type="button" class="public-cta" id="live-start" aria-describedby="live-privacy">Bắt đầu nói</button><button type="button" class="stage-btn" id="live-play-audio" hidden>Bật âm thanh</button><button type="button" class="stage-btn" id="live-mute" aria-pressed="false" hidden disabled>Tắt micro</button><button type="button" class="stage-btn" id="live-end" hidden disabled>Kết thúc</button></div>
+                <div class="live-controls"><button type="button" class="public-cta" id="live-start" aria-describedby="live-privacy">Bắt đầu nói</button><button type="button" class="stage-btn" id="live-play-audio" hidden>Bật âm thanh</button><button type="button" class="stage-btn" id="live-mute" aria-pressed="false" hidden disabled>Tắt micro</button><button type="button" class="stage-btn" id="live-end" hidden disabled>Kết thúc</button>
+                  <select id="live-turn-mode" aria-label="Cách thu micro trong phiên" hidden><option value="vad">Tự động nghe</option><option value="ptt">Bấm để nói</option></select>
+                  <button type="button" class="stage-btn" id="live-talk" aria-pressed="false" hidden>Bấm để nói</button>
+                </div>
               </section>
               <div id="classroom-text" class="classroom-text">
               <!-- Messages Scroll Stage -->
@@ -919,6 +922,16 @@
                       <form id="voice-v2-routing">
                         <label for="voice-v2-mode">Cách chia giọng<select id="voice-v2-mode"><option value="single">Một giọng cho hai ngôn ngữ</option><option value="dual_same_api">Hai giọng · một kết nối</option><option value="dual_split_api">Hai giọng · hai kết nối</option></select></label>
                         <div id="voice-v2-slots"></div>
+                        <fieldset>
+                          <legend>Hội thoại trực tiếp</legend>
+                          <label for="voice-v2-live-engine">Kiểu hội thoại<select id="voice-v2-live-engine"><option value="cascaded">Giọng song ngữ</option><option value="native">Kết nối trực tiếp gốc</option></select></label>
+                          <div id="voice-v2-live-options">
+                          <label for="voice-v2-live-turn">Cách thu micro<select id="voice-v2-live-turn"><option value="vad">Tự động nghe</option><option value="ptt">Bấm để nói</option></select></label>
+                          <label for="voice-v2-live-barge"><input id="voice-v2-live-barge" type="checkbox" checked> Cho phép ngắt lời thầy</label>
+                          <label for="voice-v2-live-stt">Nguồn chép lời<select id="voice-v2-live-stt"><option value="chat">Theo kết nối trò chuyện</option><option value="voice">Dùng kết nối giọng nói</option><option value="browser">Nhận diện trên trình duyệt</option></select></label>
+                          <label for="voice-v2-live-stt-slot" id="voice-v2-live-stt-slot-field" hidden>Kết nối chép lời<select id="voice-v2-live-stt-slot"><option value="primary">Kết nối chính</option><option value="ja">Tiếng Nhật</option><option value="vi">Tiếng Việt</option></select></label>
+                          </div>
+                        </fieldset>
                         <div class="ai-actions"><button type="submit" class="public-cta">Lưu cấu hình song ngữ</button><button type="button" class="stage-btn" id="voice-v2-preview">Nghe thử song ngữ</button><button type="button" class="stage-btn" id="voice-v2-remove">Xóa kết nối chính</button></div>
                         <p class="ai-field-hint">Nghe thử tạo âm thanh và có thể tính phí theo nhà cung cấp.</p>
                       </form>
@@ -1122,6 +1135,7 @@
   <script src="chat-history.js"></script>
   <script src="account-menu.js"></script>
   <script src="live-transcript.js"></script>
+  <script src="voice/live-cascaded.js"></script>
   <script src="live.js"></script>
   <script src="classroom-vfx.js"></script>
   <script src="study-vfx.js"></script>

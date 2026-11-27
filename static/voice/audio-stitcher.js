@@ -12,11 +12,13 @@
       promise.then(value=>finish(resolve,value),error=>finish(reject,error));
     });
   }
-  function create() {
+  function create({audioContext,sink}={}) {
     const Context=window.AudioContext || window.webkitAudioContext;
-    if (!Context) throw new Error('Trình duyệt không hỗ trợ ghép âm thanh.');
-    const abort=new AbortController(), context=new Context({sampleRate:24000});
-    const ready=bounded(context.resume(),abort.signal,5000,'Trình duyệt chưa cho phát âm thanh. Bấm Nghe lại.');
+    if (!audioContext && !Context) throw new Error('Trình duyệt không hỗ trợ ghép âm thanh.');
+    const abort=new AbortController(), context=audioContext || new Context({sampleRate:24000});
+    const destination=sink || context.destination;
+    const ready=context.state==='running' ? Promise.resolve()
+      : bounded(context.resume(),abort.signal,5000,'Trình duyệt chưa cho phát âm thanh. Bấm Nghe lại.');
     ready.catch(()=>{});
     let next=0, closed=false;
     const active=new Set();
@@ -50,7 +52,7 @@
       first-=lead;last+=trail;
       const source=context.createBufferSource(), volume=context.createGain();
       source.buffer=buffer;source.playbackRate.value=segment.speed;
-      source.connect(volume).connect(context.destination);
+      source.connect(volume).connect(destination);
       const start=Math.max(context.currentTime+0.015,next+(pause[segment.boundary] || 0));
       const seconds=(last-first+1)/buffer.sampleRate, duration=seconds/segment.speed;
       const sampleTime=1/(buffer.sampleRate*segment.speed);
@@ -74,7 +76,7 @@
         try {entry.source.stop();} catch { /* Already ended. */ }
         entry.finish();
       }
-      context.close().catch(()=>{});
+      if (!audioContext) context.close().catch(()=>{});
     }
     return {append,finish:()=>tail,stop};
   }

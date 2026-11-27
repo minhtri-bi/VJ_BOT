@@ -81,7 +81,7 @@ test('a long stream replays all parts only after a fresh profile check',async()=
   assert.match(history.at(-1)[1],/đã bị xóa/);
 });
 
-function settingsFixture(apiFetch,profileReads=[],storage=new Map()) {
+function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=false) {
   const nodes = new Map();
   function node(tag) {
     return {tag, value:'', children:[], events:{},
@@ -93,6 +93,12 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map()) {
   const el=id=>nodes.get('voice-v2-'+id);
   for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','remove','routing','preview','settings','key','confirm-title','confirm-description'])
     node('fixture').id='voice-v2-'+id;
+  if (withLive) {
+    for (const id of ['engine','turn','stt','stt-slot']) node('select').id='voice-v2-live-'+id;
+    node('input').id='voice-v2-live-barge';
+    node('label').id='voice-v2-live-stt-slot-field';
+    node('div').id='voice-v2-live-options';
+  }
   const dialog=Object.assign(node('dialog'),{open:false,returnValue:'',
     showModal(){this.open=true;},
     close(value=''){this.open=false;this.returnValue=value;const handler=this.events.close;delete this.events.close;handler?.();}});
@@ -112,7 +118,7 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map()) {
     document:{getElementById:id=>nodes.get(id), createElement:node},
     localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key)}});
   vm.runInContext(readFileSync('static/voice/voice-settings.js','utf8'),context);
-  const refresh=()=>window.renderVoiceProfiles(owner,profiles,false);
+  const refresh=()=>window.renderVoiceProfiles(owner,profiles,false,undefined,true);
   refresh();
   function change(id,value) {el(id).value=value;el(id).events.change();}
   return {el,dialog,context,window,profiles,removed,refresh,change,
@@ -224,6 +230,154 @@ test('prepared replay reads local metadata but not the key, and rejects a rotate
   profiles[1]={...profiles[1],revision:'2'};
   await assert.rejects(prepare({replay:true}),/đã đổi/);
   assert.deepEqual(reads,['metadata','key','metadata']);
+});
+
+test('legacy live defaults are immutable; settings change live identity but preserve audio identity',()=>{
+  const storage=new Map();
+  const key='vjbot_voice_routing_v2:learner';
+  storage.set(key,JSON.stringify({version:2,mode:'single',admin_override:false,
+    primary:{provider:'gemini',profile:{scope:'local',id:'b'},kanji_mode:'kanji_native'}}));
+  const {window,el,change,save,saved}=settingsFixture(undefined,[],storage,true);
+  const routing=window.VJVoiceRouting, before=routing.identity(saved()), events=[];
+  const liveBefore=routing.liveIdentity(saved());
+  const defaults={engine:'cascaded',turn_mode:'vad',barge_in:true,stt_source:'chat',stt_slot:'primary'};
+  assert.ok(Object.isFrozen(routing));
+  assert.ok(Object.isFrozen(routing.liveConfig(saved())));
+  assert.deepEqual({...routing.liveConfig(saved())},defaults);
+  assert.deepEqual({...routing.liveConfig({live:{engine:'unknown',turn_mode:1,barge_in:'false',stt_source:'unknown',stt_slot:'xx'}})},defaults);
+  assert.equal(el('live-stt-slot-field').hidden,true);
+  assert.equal(el('live-stt-slot').disabled,true);
+  window.addEventListener('vjbot-voice-changed',event=>events.push(event.detail));
+  change('live-stt','voice');
+  assert.equal(el('live-stt-slot-field').hidden,false);
+  assert.equal(el('live-stt-slot').disabled,false);
+  assert.equal(el('live-options').hidden,false);
+  el('live-turn').value='ptt';
+  el('live-barge').checked=false;
+  el('live-stt-slot').value='ja';
+  change('live-engine','native');
+  assert.equal(el('live-options').hidden,true);
+  assert.ok(['turn','barge','stt','stt-slot'].every(name=>el('live-'+name).disabled));
+  save();
+  const edited={engine:'native',turn_mode:'ptt',barge_in:false,stt_source:'voice',stt_slot:'ja'};
+  assert.deepEqual(saved().live,edited);
+  assert.equal(routing.identity(saved()),before);
+  assert.notEqual(routing.liveIdentity(saved()),liveBefore);
+  assert.deepEqual({...events[0].live},edited);
+  const again=settingsFixture(undefined,[],storage,true);
+  assert.equal(again.el('live-engine').value,'native');
+  assert.equal(again.el('live-turn').value,'ptt');
+  assert.equal(again.el('live-barge').checked,false);
+  assert.equal(again.el('live-stt-slot').value,'ja');
+  again.change('live-engine','cascaded');
+  assert.equal(again.el('live-options').hidden,false);
+  assert.ok(['turn','barge','stt','stt-slot'].every(name=>!again.el('live-'+name).disabled));
+  assert.equal(again.el('live-stt-slot').value,'ja');
+});
+
+test('saving cascaded voice STT rejects an unsupported split slot without replacing the saved route',()=>{
+  const {el,window,profiles,refresh,change,save,saved}=settingsFixture(undefined,[],new Map(),true);
+  profiles.push({id:'o',scope:'local',name:'OpenAI',protocol:'openai',base_url:'https://api.openai.com/v1',revision:'1'});
+  refresh();
+  change('mode','dual_split_api');
+  change('primary-profile','local:o');
+  change('ja-profile','local:b');
+  save();
+  const prior=saved();
+  let changes=0;
+  window.addEventListener('vjbot-voice-changed',()=>{changes++;});
+  change('live-stt','voice');
+  el('live-stt-slot').value='ja';
+  save();
+  assert.deepEqual(saved(),prior);
+  assert.equal(changes,0);
+  assert.match(el('status').textContent,/OpenAI.*Mistral.*ElevenLabs/);
+  change('ja-profile','');
+  save();
+  assert.equal(saved().live.stt_source,'voice');
+  assert.equal(saved().live.stt_slot,'ja');
+  assert.equal(changes,1);
+});
+
+test('explicit STT prepares only the selected effective slot, uses the v2 wire schema and never substitutes an unsupported slot',async()=>{
+  const reads=[], requests=[];
+  const {window,profiles,refresh}=settingsFixture(async(path,options)=>{
+    requests.push({path,options});
+    return Response.json({profiles:profiles.filter(row=>row.scope==='server')});
+  },reads);
+  profiles.push({id:'m',scope:'server',name:'Mistral',protocol:'openai',
+    base_url:'https://api.mistral.ai/v1',connection_id:'mistral-confirmed'});
+  refresh();
+  const routing=window.VJVoiceRouting, primary={provider:'elevenlabs',profile:{scope:'local',id:'a'},voice_id:'reader'};
+  const draft={version:2,mode:'dual_split_api',admin_override:false,primary,
+    ja:{provider:'mistral',profile:{scope:'server',id:'m'}},vi:{provider:'gemini',profile:{scope:'local',id:'b'}},
+    live:{stt_source:'voice',stt_slot:'ja'}};
+  const plain=value=>JSON.parse(JSON.stringify(value));
+  assert.deepEqual(plain(await routing.preparedStt(draft)),{version:2,admin_override:false,provider:'mistral',profile:{scope:'server',id:'m'}});
+  assert.deepEqual(reads,[]);
+  assert.deepEqual(requests.map(({path})=>path),['/api/ai/profiles']);
+  assert.deepEqual(plain(await routing.preparedStt({...draft,ja:{profile:null}})),{
+    version:2,admin_override:false,provider:'elevenlabs',profile:{scope:'local',connection:{
+      base_url:'https://api.elevenlabs.io',api_key:'synthetic-fixture-key'}}});
+  assert.deepEqual(reads,['key','metadata']);
+  await assert.rejects(routing.preparedStt({...draft,live:{stt_source:'voice',stt_slot:'vi'}}),/OpenAI.*Mistral.*ElevenLabs/);
+  assert.equal(await routing.preparedStt({...draft,live:{stt_source:'browser'}}),null);
+  assert.equal(await routing.preparedStt({...draft,live:undefined}),null);
+  assert.deepEqual(reads,['key','metadata']);
+  assert.equal(requests.length,1);
+  await assert.rejects(routing.preparedStt({...draft,ja:{provider:'mistral',profile:{scope:'server',id:'removed'}}}),/đã đổi/);
+  assert.equal(requests.length,1);
+  const identity=routing.identity({...draft,primary:{...primary,profile:{...primary.profile,connection:{api_key:'synthetic-private'}}}});
+  assert.doesNotMatch(identity,/synthetic-private/);
+  profiles[0].key_last4='private-tail';
+  assert.doesNotMatch(routing.identity(draft),/private-tail/);
+});
+
+test('explicit STT rejects in-flight profile, configuration, role and abort revocation',async()=>{
+  for(const revoke of ['profile','metadata','config','role','abort']){
+    const {el,window,context,profiles,refresh,change,save,saved}=settingsFixture(undefined,[],new Map(),true);
+    change('primary-profile','local:a');
+    el('primary-voice').value='reader';
+    change('live-stt','voice');
+    save();
+    const controller=new AbortController(), load=context.VJProfiles.load;
+    let release;
+    context.VJProfiles.load=async(...args)=>{
+      const prior=load(...args);
+      return new Promise(resolve=>{release=()=>resolve(prior);});
+    };
+    const pending=window.VJVoiceRouting.preparedStt(saved(),controller.signal);
+    if(revoke==='profile') {
+      profiles[0]={...profiles[0],revision:'rotated'};
+      refresh();
+    } else if(revoke==='metadata') {
+      profiles[0]={...profiles[0],revision:'rotated-without-refresh'};
+    } else if(revoke==='config') {
+      el('live-turn').value='ptt';
+      save();
+    } else if(revoke==='role') {
+      context.signedInUser.is_admin=true;
+    } else controller.abort();
+    release();
+    await assert.rejects(pending,/đã đổi|abort/i);
+  }
+});
+
+test('administrator STT requires an explicit personal override and the current server fingerprint',async()=>{
+  let currentId='initial-connection';
+  const {context,window,profiles,refresh}=settingsFixture(async()=>Response.json({profiles:[
+    {id:'s',protocol:'openai',base_url:'https://api.openai.com/v1',connection_id:currentId}
+  ]}));
+  context.signedInUser.is_admin=true;
+  profiles.push({id:'s',scope:'server',name:'OpenAI',protocol:'openai',
+    base_url:'https://api.openai.com/v1',connection_id:currentId});
+  refresh();
+  const config={version:2,mode:'single',admin_override:true,live:{stt_source:'voice'},
+    primary:{provider:'openai',profile:{scope:'server',id:'s'}}};
+  assert.equal((await window.VJVoiceRouting.preparedStt(config)).admin_override,true);
+  await assert.rejects(window.VJVoiceRouting.preparedStt({...config,admin_override:false}),/Quyền tài khoản/);
+  currentId='rotated-connection';
+  await assert.rejects(window.VJVoiceRouting.preparedStt(config),/đã đổi/);
 });
 
 test('removing a voice profile uses the native dialog and cancels on dismiss or account switch',async()=>{

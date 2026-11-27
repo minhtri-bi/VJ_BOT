@@ -3,7 +3,7 @@ name: CI
 on:
   push:
   pull_request:
-    branches: [main]
+    branches: [main, feat/voice-v2-phase2-backend]
   workflow_dispatch:
 
 concurrency:
@@ -35,7 +35,7 @@ jobs:
         run: npm run teacher:catalog
       - name: Test
         run: npm test
-      - name: Voice v2 browser playback
+      - name: Voice playback and Cascaded Live in Chromium
         timeout-minutes: 1
         run: BROWSER="$(command -v google-chrome)" node tests/voice-v2-browser.mjs
       - name: Validate Worker build

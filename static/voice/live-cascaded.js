@@ -1,0 +1,505 @@
+(function () {
+  const maxAudio=2*1024*1024, maxText=4000, maxSegments=8;
+  const minSpeech=350, maxRecording=30000, hangover=750;
+  // The Worker limits the request to 20 KiB; reserve room for a device connection and its JSON escaping.
+  const maxTurnBytes=18*1024;
+  const textEncoder=new TextEncoder();
+  const commands=['start','hint','explain','situation','check','slower','summary'];
+  const invalidReply='Phản hồi hội thoại không hợp lệ.';
+  const noSpeech='Chưa nghe rõ lời nói. Em thử nói lại nhé.';
+  const captureError='Không ghi được âm thanh. Em kiểm tra micro rồi thử lại nhé.';
+  const explicitUnavailable='Kết nối chép lời giọng nói đã chọn không dùng được. Hệ thống không dùng nguồn khác.';
+  const message=(error,fallback)=>error instanceof SyntaxError ? invalidReply : error?.message || fallback;
+  const detail=(body,fallback)=>typeof body?.detail==='string' && body.detail.trim() ? body.detail.slice(0,600) : fallback;
+  const cancelBody=response=>{void response.body?.cancel().catch(()=>{});};
+  function post(path,body,signal,options) {
+    return apiFetch(path,{method:'POST',signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body),...options});
+  }
+  async function readStream(response,signal,current,maxBytes,readText) {
+    if (!response.body || !current()) {cancelBody(response);return false;}
+    const reader=response.body.getReader(), decoder=new TextDecoder('utf-8',{fatal:true});
+    const cancel=()=>{void reader.cancel().catch(()=>{});};
+    signal.addEventListener('abort',cancel,{once:true});
+    let bytes=0, complete=false;
+    try {
+      for (;;) {
+        const {done,value}=await reader.read();
+        if (!current()) return false;
+        bytes+=value?.byteLength || 0;
+        if (bytes>maxBytes) throw new Error('Phản hồi hội thoại quá lớn.');
+        readText(done ? decoder.decode() : decoder.decode(value,{stream:true}));
+        if (done) {complete=true;return true;}
+      }
+    } finally {
+      signal.removeEventListener('abort',cancel);
+      if (!complete) cancel();
+      reader.releaseLock();
+    }
+  }
+  async function jsonResponse(response,signal,current,fallback) {
+    let text='';
+    if (!await readStream(response,signal,current,32*1024,chunk=>{text+=chunk;})) {
+      if (!current()) return null;
+      throw new Error(fallback);
+    }
+    let result;
+    try {result=JSON.parse(text);} catch {throw new Error(fallback);}
+    if (!response.ok) throw new Error(detail(result,fallback));
+    return result;
+  }
+  async function liveEvents(response,signal,current,onSegment) {
+    if (!current()) {cancelBody(response);return null;}
+    if (!response.ok) return jsonResponse(response,signal,current,invalidReply);
+    if (!response.headers.get('Content-Type')?.startsWith('text/event-stream') || !response.body) {
+      cancelBody(response);throw new Error(invalidReply);
+    }
+    let pending='', event='', data='', reply=null, length=0;
+    const segments=[];
+    const complete=await readStream(response,signal,current,256*1024,chunk=>{
+      pending+=chunk;
+      let newline;
+      while ((newline=pending.indexOf('\n'))!==-1) {
+        const line=pending.slice(0,newline).replace(/\r$/,'');pending=pending.slice(newline+1);
+        if (line.startsWith(':')) continue;
+        if (line && reply) throw new Error(invalidReply);
+        if (line.startsWith('event:') && !event) {event=line.slice(6).trim();continue;}
+        if (line.startsWith('data:')) {data+=(data?'\n':'')+line.slice(5).trimStart();continue;}
+        if (line) throw new Error(invalidReply);
+        if (!event && !data) continue;
+        const row=JSON.parse(data);data='';
+        if (event==='error') throw new Error(detail(row,invalidReply));
+        if (event==='done' && segments.length && row?.count===segments.length && typeof row.full_text==='string'
+          && row.full_text===segments.map(part=>part.text).join(' ') && typeof row.japanese_only==='boolean') {
+          reply=row;
+        } else if (event==='segment' && row?.index===segments.length && row.index<maxSegments
+          && ['ja','vi'].includes(row.lang) && (row.index ? ['inline','sentence'].includes(row.boundary) : row.boundary==='start')
+          && typeof row.text==='string' && row.text.trim() && !/<\/?(?:ja|vi)>/i.test(row.text)) {
+          length+=row.text.length+9+Number(row.index>0);
+          if (length>maxText) throw new Error('Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.');
+          segments.push(row);
+          onSegment(row);
+          if (!current()) return;
+        } else throw new Error(invalidReply);
+        event='';
+      }
+    });
+    if (!complete || !current()) return null;
+    if (pending || event || data || !reply) throw new Error('Lượt trả lời chưa hoàn tất. Em thử lại nhé.');
+    return {segments,reply};
+  }
+
+  function create({audioContext,microphone,sink,live,route,stt,context,current,chatBinding,onState,onCaption,onError}) {
+    const session=new AbortController(), epoch=performance.now();
+    const explicit=live.stt_source==='voice';
+    const chatOptions=chatBinding ? {chatBinding} : {};
+    const sttOptions=explicit ? {voiceRouting:true} : {...chatOptions,cascadedStt:true};
+    const Recognition=window.SpeechRecognition || window.webkitSpeechRecognition;
+    let mode=live.turn_mode, muted=false, phase='connecting', sttProvider=null;
+    let started=false, ready=false, sequence=0, active=null, capture=null, setupTimer;
+    let source=null, detector=null, pollTimer, vadMute=null;
+    let history=[], lastAudio=null, slowerSteps=0;
+    let japaneseOnly=live.japanese_only===true;
+    let speakerEndedAt=-Infinity, waitForQuiet=false;
+    const time=()=>Math.round(performance.now()-epoch);
+    function ownsSession() {
+      if (session.signal.aborted) return false;
+      if (current()) return true;
+      stop();return false;
+    }
+    const owns=turn=>active===turn && !turn.controller.signal.aborted && ownsSession();
+    function state(next=phase) {
+      if (phase==='speaking' && next!=='speaking') speakerEndedAt=time();
+      phase=next;
+      if (ownsSession()) onState({phase,mode,muted,sttProvider});
+    }
+    function caption(turn,role,text,start_ms,end_ms) {
+      if (owns(turn)) onCaption({role,key:'cascaded-'+turn.id+'-'+role,text,start_ms,end_ms});
+    }
+    function releaseTurn() {
+      const turn=active;active=null;
+      if (!turn) return;
+      clearTimeout(turn.timer);
+      turn.audio?.stop();
+      turn.controller.abort();
+    }
+    function beginTurn() {
+      releaseTurn();
+      return active={id:++sequence,controller:new AbortController(),audio:null,timer:null};
+    }
+    function turnError(turn,error) {
+      if (!owns(turn)) return;
+      releaseTurn();state('listening');
+      if (ownsSession()) onError(message(error,'Chưa xử lý được lượt nói. Em thử lại nhé.'));
+    }
+    function deadline(turn,ms,detail) {
+      clearTimeout(turn.timer);
+      turn.timer=setTimeout(()=>turnError(turn,new Error(detail)),ms);
+    }
+    function completeTurn(turn) {
+      if (!owns(turn)) return;
+      releaseTurn();state('listening');
+    }
+    function fatal(error) {
+      if (!ownsSession()) return;
+      stop();onError(message(error,'Chưa mở được hội thoại.'),true);
+    }
+    function stop() {
+      if (session.signal.aborted) return;
+      session.abort();ready=false;
+      clearTimeout(setupTimer);clearInterval(pollTimer);
+      releaseCapture(capture);releaseTurn();
+      if (detector?.port) detector.port.onmessage=null;
+      source?.disconnect();detector?.disconnect();vadMute?.disconnect();
+      source=detector=vadMute=null;
+      history=[];lastAudio=null;
+    }
+    async function routingForStt(signal) {
+      if (!explicit) return {};
+      const routing=await stt(signal);
+      if (!routing) throw new Error(explicitUnavailable);
+      return {stt_routing:routing};
+    }
+    async function selectStt(signal) {
+      if (live.stt_source!=='browser') {
+        const routing=await routingForStt(signal);
+        if (!ownsSession()) return null;
+        const response=await post('/api/stt',{action:'capabilities',...routing},signal,sttOptions);
+        const result=await jsonResponse(response,signal,ownsSession,'Không kiểm tra được kết nối chép lời.');
+        if (!ownsSession()) return null;
+        if (result?.supported===true && ['openai','mistral','elevenlabs'].includes(result.provider)) {
+          if (!window.MediaRecorder) throw new Error('Trình duyệt không hỗ trợ ghi âm cho kết nối chép lời đã chọn.');
+          return result.provider;
+        }
+        if (explicit) throw new Error(explicitUnavailable);
+        throw new Error('Kết nối Chat đã chọn không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
+      }
+      if (!Recognition) throw new Error('Trình duyệt không hỗ trợ chép lời. Em chọn nguồn chép lời khác trong Cài đặt.');
+      return 'browser';
+    }
+    async function initVad() {
+      // Use a silent output connection so the graph keeps processing without monitoring the microphone.
+      if (audioContext.audioWorklet && window.AudioWorkletNode) {
+        let timer;
+        const signal=session.signal;
+        let cancel;
+        try {
+          await Promise.race([audioContext.audioWorklet.addModule('voice/vad-worklet.js'),
+            new Promise((_,reject)=>{
+              cancel=()=>reject(signal.reason);
+              signal.addEventListener('abort',cancel,{once:true});
+              timer=setTimeout(()=>reject(new Error('AudioWorklet timeout')),2000);
+            })]);
+          if (!ownsSession()) return;
+          detector=new window.AudioWorkletNode(audioContext,'vjbot-vad-processor');
+          vadMute=audioContext.createGain();vadMute.gain.value=0;
+          detector.connect(vadMute).connect(audioContext.destination);
+          source=audioContext.createMediaStreamSource(microphone);source.connect(detector);
+          detector.port.onmessage=event=>observe(event.data?.rms);
+          return;
+        } catch {
+          source?.disconnect();detector?.disconnect();vadMute?.disconnect();
+          source=detector=vadMute=null;
+        } finally {
+          clearTimeout(timer);signal.removeEventListener('abort',cancel);
+        }
+      }
+      if (!ownsSession()) return;
+      try {
+        detector=audioContext.createAnalyser();detector.fftSize=1024;
+        const samples=new Float32Array(detector.fftSize);
+        source=audioContext.createMediaStreamSource(microphone);source.connect(detector);
+        pollTimer=setInterval(()=>{
+          if (!ownsSession() || !ready || muted || mode!=='vad') return;
+          detector.getFloatTimeDomainData(samples);
+          let squares=0;
+          for (const sample of samples) squares+=sample*sample;
+          observe(Math.sqrt(squares/samples.length));
+        },30);
+      } catch {
+        source?.disconnect();detector?.disconnect();source=detector=null;
+      }
+    }
+    async function start() {
+      if (started || !ownsSession()) return;
+      started=true;state();
+      setupTimer=setTimeout(()=>fatal(new Error('Mở hội thoại quá lâu. Em kiểm tra kết nối rồi thử lại nhé.')),15000);
+      try {
+        const provider=await selectStt(session.signal);
+        if (!ownsSession()) return;
+        sttProvider=provider;
+        await initVad();
+        if (!ownsSession()) return;
+        clearTimeout(setupTimer);ready=true;
+        if (mode==='vad' && !detector) {
+          mode='ptt';state('listening');
+          if (ownsSession()) onError('Trình duyệt không hỗ trợ phát hiện tiếng nói. Em dùng Bấm để nói nhé.');
+        }
+        return sendCommand('start');
+      } catch (error) {fatal(error);}
+    }
+
+    function releaseCapture(record) {
+      if (!record || capture!==record) return;
+      capture=null;clearTimeout(record.timer);
+      const {device}=record;
+      if (!device) return;
+      try {
+        if (record.browser) {
+          device.onresult=device.onerror=device.onend=null;device.abort();
+        } else {
+          device.ondataavailable=device.onerror=device.onstop=null;
+          if (device.state!=='inactive') device.stop();
+        }
+      } catch { /* The device may have ended on its own. */ }
+    }
+    function captureErrorFor(record,text) {
+      if (capture!==record || !ownsSession()) return;
+      releaseCapture(record);
+      if (record.auto) waitForQuiet=true;
+      if (record.turn) turnError(record.turn,new Error(text));
+      else if (text!==noSpeech || !record.auto) onError(text);
+    }
+    function commitCapture(record) {
+      if (!ownsSession() || capture!==record) return;
+      record.turn=beginTurn();state('recording');
+    }
+    function recordEnded(record) {
+      if (capture!==record || !ownsSession()) return;
+      const {turn,browser,start,lastLoud}=record, end=record.end ?? time();
+      releaseCapture(record);
+      if (!turn || !owns(turn)) return;
+      if ((record.auto ? lastLoud : end)-start<minSpeech) {
+        completeTurn(turn);
+        if (!record.auto && ownsSession()) onError(noSpeech);
+        return;
+      }
+      const input=browser ? null : new Blob(record.chunks,{type:record.device.mimeType || record.chunks[0]?.type || record.mime});
+      if (!browser && (input.size<512 || input.size>maxAudio)) {turnError(turn,new Error(noSpeech));return;}
+      void learnerTurn(turn,record.text,input,start,end);
+    }
+    function endCapture(record) {
+      if (capture!==record || record.end!==undefined || !ownsSession()) return;
+      if (!record.turn) {releaseCapture(record);return;}
+      record.end=time();clearTimeout(record.timer);
+      record.timer=setTimeout(()=>captureErrorFor(record,captureError),4000);
+      try {record.device.stop();} catch {captureErrorFor(record,captureError);}
+    }
+    function beginCapture(auto,now) {
+      if (!ownsSession() || muted) return;
+      const browser=sttProvider==='browser', record=capture={auto,browser,start:now,lastLoud:now,text:'',chunks:[],size:0};
+      try {
+        if (browser) {
+          const recognizer=record.device=new Recognition();
+          recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
+          recognizer.onresult=event=>{
+            if (capture!==record || !ownsSession()) return;
+            let text='';
+            for (let i=0;i<event.results.length;i++) {
+              if (!event.results[i].isFinal) continue;
+              text+=(text?' ':'')+event.results[i][0].transcript.trim();
+              if (text.length>1500) {captureErrorFor(record,'Câu nói quá dài. Em thử nói ngắn hơn nhé.');return;}
+            }
+            record.text=text;
+          };
+          recognizer.onerror=event=>captureErrorFor(record,event.error==='no-speech' ? noSpeech : 'Trình duyệt chưa chép được lời. Em kiểm tra micro và nguồn chép lời nhé.');
+          recognizer.onend=()=>recordEnded(record);
+          recognizer.start();
+        } else {
+          const Recorder=window.MediaRecorder;
+          const mime=record.mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type=>Recorder.isTypeSupported?.(type));
+          const recorder=record.device=new Recorder(microphone,mime?{mimeType:mime}:{});
+          recorder.ondataavailable=({data})=>{
+            if (capture!==record || !ownsSession() || !data?.size) return;
+            record.size+=data.size;
+            if (record.size>maxAudio) {captureErrorFor(record,'Bản ghi quá lớn. Em thử nói ngắn hơn nhé.');return;}
+            record.chunks.push(data);
+          };
+          recorder.onerror=()=>captureErrorFor(record,captureError);
+          recorder.onstop=()=>recordEnded(record);
+          recorder.start(250);
+        }
+        if (capture!==record || !ownsSession()) return;
+        record.timer=setTimeout(()=>{
+          if (record.auto) waitForQuiet=true;
+          endCapture(record);
+        },maxRecording);
+        if (!auto) commitCapture(record);
+      } catch {captureErrorFor(record,captureError);}
+    }
+    function observe(rms) {
+      if (!ownsSession() || !ready || muted || mode!=='vad' || !Number.isFinite(rms)) return;
+      if (waitForQuiet) {
+        if (rms<0.012) waitForQuiet=false;
+        return;
+      }
+      const now=time(), record=capture;
+      const nearSpeaker=phase==='speaking' || now-speakerEndedAt<250;
+      const threshold=nearSpeaker ? 0.035 : 0.022;
+      if (!record) {
+        // Start capturing on the first loud window; confirm before interrupting the teacher.
+        if (rms>=threshold && (phase==='listening' && !nearSpeaker || live.barge_in && ['listening','thinking','speaking'].includes(phase)))
+          beginCapture(true,now);
+        return;
+      }
+      if (record.end!==undefined) return;
+      if (!record.turn) {
+        if (rms>=threshold) {
+          if (now-record.lastLoud>=60) record.start=now;
+          record.lastLoud=now;
+          if (now-record.start>=(nearSpeaker ? 180 : 120)) commitCapture(record);
+        } else if (now-record.lastLoud>=60 || nearSpeaker && !live.barge_in) releaseCapture(record);
+      } else {
+        if (rms>=0.012) record.lastLoud=now;
+        else if (now-record.lastLoud>=hangover) endCapture(record);
+      }
+    }
+    function toggleTalk() {
+      if (!ownsSession() || !ready || muted || mode!=='ptt') return;
+      if (capture) endCapture(capture);
+      else if (phase==='listening' || live.barge_in && ['thinking','speaking'].includes(phase)) beginCapture(false,time());
+    }
+    function discardCapture() {
+      const turn=capture?.turn;
+      releaseCapture(capture);
+      if (turn && active===turn) {releaseTurn();phase='listening';}
+    }
+    function setMode(value) {
+      if (!ownsSession() || !['ptt','vad'].includes(value) || mode===value) return;
+      if (ready && value==='vad' && !detector) {
+        state();
+        if (ownsSession()) onError('Trình duyệt không hỗ trợ chế độ tự động.');
+        return;
+      }
+      discardCapture();mode=value;state();
+    }
+    function setMuted(value) {
+      if (!ownsSession() || muted===Boolean(value)) return;
+      muted=Boolean(value);
+      if (muted) discardCapture();
+      state();
+    }
+
+    async function learnerTurn(turn,transcript,blob,start,end) {
+      const signal=turn.controller.signal, current=()=>owns(turn);
+      try {
+        deadline(turn,30000,'Chép lời quá lâu. Em thử lại nhé.');state('thinking');
+        const reference=await context();
+        if (!current()) return;
+        if (blob) {
+          const bytes=new Uint8Array(await blob.arrayBuffer());
+          if (!current()) return;
+          let binary='';
+          for (let i=0;i<bytes.length;i+=32768) binary+=String.fromCharCode(...bytes.subarray(i,i+32768));
+          const routing=await routingForStt(signal);
+          if (!current()) return;
+          const {level,lesson}=reference;
+          const response=await post('/api/stt',{audio:btoa(binary),mime_type:blob.type,level,lesson,...routing},signal,sttOptions);
+          const result=await jsonResponse(response,signal,current,'Chưa chép được bản ghi. Em thử lại nhé.');
+          if (!current()) return;
+          transcript=result?.text;
+        }
+        transcript=typeof transcript==='string' ? transcript.trim() : '';
+        if (!transcript) throw new Error(noSpeech);
+        if (transcript.length>1500) throw new Error('Câu nói quá dài. Em thử nói ngắn hơn nhé.');
+        caption(turn,'user',transcript,start,end);
+        if (current()) await generate(turn,reference,null,transcript);
+      } catch (error) {turnError(turn,error);}
+    }
+    async function generate(turn,reference,command,transcript='') {
+      const signal=turn.controller.signal, current=()=>owns(turn);
+      deadline(turn,35000,'Thầy phản hồi quá lâu. Em thử lại nhé.');
+      let prepared, appendChain=Promise.resolve(), text='', firstAt;
+      const audioSegments=[];
+      const steps=slowerSteps;
+      function batch(parts) {
+        const before=appendChain;
+        prepared??=route(signal);
+        // Start both HTTP requests independently. Limit the second reader to one pending
+        // record until every record from batch zero has been appended and validated.
+        appendChain=(async()=>{
+          const routing=await prepared;
+          if (!current()) return;
+          const response=await post('/api/tts',{...reference,text:parts.map(({lang,text})=>`<${lang}>${text}</${lang}>`).join(' '),
+            mode:'bilingual',stream:true,routing},signal,{voiceRouting:true});
+          const base=(routing.mode==='single' ? routing.primary.speed : routing.ja?.speed ?? routing.primary.speed) ?? 1;
+          const jaScale=Math.min(base,Math.max(0.75,base-0.12*steps))/base;
+          await window.VJVoice.consume(response,async part=>{
+            await before;
+            if (!current()) return;
+            const clip={...part,boundary:part.index===0 ? parts[0].boundary : part.boundary,
+              speed:part.lang==='ja' ? part.speed*jaScale : part.speed};
+            turn.audio??=window.VJVoiceStitcher.create({audioContext,sink});
+            await turn.audio.append(clip);
+            if (!current()) return;
+            audioSegments.push(clip);
+            if (phase!=='speaking') state('speaking');
+          },current,signal);
+        })();
+        void appendChain.catch(error=>turnError(turn,error));
+      }
+      const payload={...reference,command,transcript,history:[],japanese_only:japaneseOnly};
+      const room=maxTurnBytes-textEncoder.encode(JSON.stringify(payload)).length;
+      let first=history.length, bytes=0;
+      while(first){
+        bytes+=1+textEncoder.encode(JSON.stringify(history[first-1])).length;
+        if(bytes>room)break;
+        first--;
+      }
+      if(first)history=history.slice(first);
+      payload.history=history;
+      const response=await post('/api/live/turn',payload,signal,chatOptions);
+      const result=await liveEvents(response,signal,current,part=>{
+        const now=time();firstAt??=now;
+        text+=(text?' ':'')+part.text;
+        caption(turn,'assistant',text,firstAt,now);
+        if (part.index===0 && current()) batch([part]);
+      });
+      if (!result || !current()) return;
+      deadline(turn,90000,'Âm thanh tải hoặc phát quá lâu. Em thử lại nhé.');
+      if (result.segments.length>1) batch(result.segments.slice(1));
+      await appendChain;
+      if (!current()) return;
+      await turn.audio.finish();
+      if (!current()) return;
+      // Stage speculative captions/audio for latency, but commit only a fully played turn.
+      if (transcript) history.push({role:'user',text:trimHistory(transcript)});
+      history.push({role:'assistant',text:trimHistory(result.reply.full_text)});
+      history=history.slice(-12);
+      lastAudio=audioSegments;
+      japaneseOnly=result.reply.japanese_only;
+      completeTurn(turn);
+    }
+    function trimHistory(text) {
+      const short=text.slice(0,600);
+      return /[\uD800-\uDBFF]$/.test(short) ? short.slice(0,-1) : short;
+    }
+    async function sendCommand(command) {
+      if (!ownsSession() || !ready || command!=='repeat' && !commands.includes(command)) return;
+      if (command==='repeat' && !lastAudio) {
+        onError('Chưa có lời đáp hoàn chỉnh để nghe lại.');return;
+      }
+      discardCapture();
+      const turn=beginTurn();
+      try {
+        if (command==='repeat') {
+          deadline(turn,90000,'Âm thanh phát quá lâu. Em thử lại nhé.');
+          turn.audio=window.VJVoiceStitcher.create({audioContext,sink});
+          for (const part of lastAudio) {
+            if (!owns(turn)) return;
+            await turn.audio.append(part);
+            if (!owns(turn)) return;
+            if (phase!=='speaking') state('speaking');
+          }
+          await turn.audio.finish();
+          completeTurn(turn);return;
+        }
+        if (command==='slower') slowerSteps=Math.min(slowerSteps+1,11);
+        deadline(turn,35000,'Thầy phản hồi quá lâu. Em thử lại nhé.');state('thinking');
+        const reference=await context();
+        if (owns(turn)) await generate(turn,reference,command);
+      } catch (error) {turnError(turn,error);}
+    }
+    return {start,stop,toggleTalk,setMode,setMuted,sendCommand};
+  }
+  window.VJLiveCascaded=Object.freeze({create});
+})();
