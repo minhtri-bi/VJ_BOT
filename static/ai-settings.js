@@ -107,14 +107,16 @@
   async function saveProfile(useModel) {
     const owner = signedInUser?.user_id, scope = el('ai-profile-storage').value;
     if (!owner || managed()) throw new Error('API cá nhân chỉ dành cho tài khoản học viên.');
-    const model = el('ai-models').hidden ? '' : el('ai-model-list').value;
+    // The connection editor saves metadata, not a new chat model for unchanged credentials.
+    const metadataOnly = !useModel && editState && !editState.credentialsDirty && editState.profile === selectedProfile;
+    const model = metadataOnly ? selectedProfile.model : el('ai-models').hidden ? '' : el('ai-model-list').value;
     if (useModel && !model) throw new Error('Hãy kiểm tra model và chọn một kết quả phản hồi được trước.');
     const snapshot = modelSnapshot;
     const draft = {name: el('ai-profile-name').value.trim(), protocol: el('ai-protocol').value,
       base_url: el('ai-base').value, model, api_key: draftKey(),
-      models: [...el('ai-model-list').options].map(option => option.value),
-      checked_at: snapshot?.checkedAt || selectedProfile?.checked_at || null,
-      connection_id: snapshot?.identity || selectedProfile?.connection_id || null};
+      models: metadataOnly ? selectedProfile.models : [...el('ai-model-list').options].map(option => option.value),
+      checked_at: (metadataOnly ? selectedProfile.checked_at : snapshot?.checkedAt || selectedProfile?.checked_at) ?? null,
+      connection_id: (metadataOnly ? selectedProfile.connection_id : snapshot?.identity || selectedProfile?.connection_id) ?? null};
     if (!draft.name) throw new Error('Nhập tên kết nối.');
     const id = selectedProfile?.scope === scope ? selectedProfile.id : null;
     let profile;
@@ -889,10 +891,7 @@
     });
     refreshSavedConnections();
   });
-  el('ai-profile-save').addEventListener('click', () => {
-    if (activeScan && !testing && !managed()) publishModels();
-    return profileAction(() => saveProfile(false));
-  });
+  el('ai-profile-save').addEventListener('click', () => profileAction(() => saveProfile(false)));
   el('ai-edit-dialog').addEventListener('keydown', event => {
     if (event.key !== 'Enter' || event.isComposing || event.target.tagName !== 'INPUT' || !['text', 'url', 'password'].includes(event.target.type)) return;
     event.preventDefault();
