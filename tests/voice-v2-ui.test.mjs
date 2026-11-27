@@ -85,20 +85,25 @@ test('a long stream replays all parts only after a fresh profile check',async()=
 function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=false) {
   const nodes = new Map();
   function node(tag) {
-    return {tag, value:'', children:[], events:{},
-      set id(id) {nodes.set(id,id.startsWith('voice-v2-') ? this : undefined);},
+    return {tag, value:'', children:[], events:{}, attributes:{}, dataset:{},
+      get id(){return this.nodeId;},
+      set id(id) {this.nodeId=id;nodes.set(id,this);},
       append(...children) {for (const child of children) child.parentElement=this; this.children.push(...children);},
       replaceChildren(...children) {this.children=[];this.append(...children);},
-      setAttribute(){}, addEventListener(event,handler){this.events[event]=handler;}};
+      prepend(child) {child.parentElement=this;this.children.unshift(child);},
+      setAttribute(name,value){this.attributes[name]=value;},
+      focus(){this.focused=true;}, addEventListener(event,handler){this.events[event]=handler;}};
   }
   const el=id=>nodes.get('voice-v2-'+id);
-  for (const id of ['source','mode','slots','status','kind','url','storage','personal','account','account-status','remove','routing','preview','settings','key','confirm-title','confirm-description'])
+  for (const id of ['mode','slots','status','kind','url','url-field','storage','account','account-status','account-cancel',
+    'add','remove','routing','preview','settings','key','key-toggle','confirm-title','confirm-description','name','active',
+    'bilingual-tab','default-tab','reading-tab','reading-settings','live-tab','live-settings','use-default','default-note','default-status'])
     node('fixture').id='voice-v2-'+id;
+  node('fixture').id='speech-legacy-settings';
   if (withLive) {
     for (const id of ['engine','turn','stt','stt-slot']) node('select').id='voice-v2-live-'+id;
     node('input').id='voice-v2-live-barge';
-    node('details').id='voice-v2-live-settings';
-    el('live-stt').focus=()=>{el('live-stt').focused=true;};
+    el('live-settings').hidden=true;
     node('label').id='voice-v2-live-stt-slot-field';
     node('div').id='voice-v2-live-options';
   }
@@ -106,6 +111,9 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
     showModal(){this.open=true;},
     close(value=''){this.open=false;this.returnValue=value;const handler=this.events.close;delete this.events.close;handler?.();}});
   dialog.id='voice-v2-confirm-dialog';
+  const accountDialog=Object.assign(node('dialog'),{open:false,showModal(){this.open=true;},close(){this.open=false;}});
+  accountDialog.id='voice-v2-account-dialog';
+  el('account').reset=()=>{for(const id of ['key','name','url'])el(id).value='';el('kind').value='elevenlabs';};
   el('storage').options=[{},{}];
   const owner='learner', removed=[];
   const window = new EventTarget();
@@ -128,7 +136,7 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
     saved:()=>JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),
     prepare:options=>window.VJVoiceRouting.prepared(JSON.parse(storage.get('vjbot_voice_routing_v2:'+owner)),undefined,options),
     save:()=>el('routing').events.submit({preventDefault(){}}),
-    catalog:()=>el('slots').children[0].children.find(child=>child.tag==='button').events.click()};
+    catalog:()=>el('primary-catalog').events.click()};
 }
 
 // Keep IndexedDB records across page contexts; load the real routing, cache and player in each.
@@ -256,6 +264,51 @@ test('hiding split settings in single-voice mode preserves the draft for both la
   assert.deepEqual([saved().ja.voice_id,saved().vi.voice_id],['ja_clone','vi_clone']);
 });
 
+test('shared and split modes preserve each configured voice draft without applying IDs to another provider',()=>{
+  const {el,change,save,saved}=settingsFixture();
+  change('primary-profile','local:b');
+  change('mode','dual_same_api');
+  el('ja-voice').value='shared_ja';
+  change('mode','dual_split_api');
+  change('ja-profile','local:a');
+  el('ja-voice').value='split_ja';
+  change('mode','dual_same_api'); save();
+  assert.equal(saved().ja.voice_id,'shared_ja');
+  change('primary-profile','local:c');
+  el('primary-voice').value='custom_fallback';
+  el('primary-model').value='custom_model';
+  change('mode','dual_split_api'); save();
+  assert.equal(saved().ja.voice_id,'split_ja');
+  assert.equal(saved().ja.profile.id,'a');
+});
+
+test('voice account modal shows only custom URLs and clears revealed secrets on navigation or owner change',()=>{
+  const {el,change,context,window}=settingsFixture();
+  for(const event of ['hashchange','vjbot-voice-changed','vjbot-account-ready']){
+    context.signedInUser={user_id:'learner'};
+    el('add').events.click();
+    change('kind','openai_compatible');
+    assert.equal(el('url-field').hidden,false);
+    assert.equal(el('url').required,true);
+    el('url').value='https://placeholder.example/v1';
+    change('kind','mistral');
+    assert.equal(el('url-field').hidden,true);
+    assert.equal(el('url').disabled,true);
+    assert.equal(el('url').value,'');
+    el('key').value='synthetic-draft';
+    el('key').type='password';
+    el('key-toggle').events.click();
+    assert.equal(el('key').type,'text');
+    assert.equal(el('account-dialog').open,true);
+    if(event==='vjbot-voice-changed')context.signedInUser=null;
+    if(event==='vjbot-account-ready')context.signedInUser={user_id:'new-owner'};
+    window.dispatchEvent(new Event(event));
+    assert.equal(el('account-dialog').open,false);
+    assert.equal(el('key').type,'password');
+    assert.equal(el('key').value,'');
+  }
+});
+
 test('catalog keeps paging after model selection but starts fresh after a profile switch',async()=>{
   const cursors=[];
   const {el,change,catalog}=settingsFixture(async (_path,request)=>{
@@ -282,6 +335,7 @@ test('custom speed is opt-in and cannot follow a selected endpoint change',()=>{
   assert.equal(saved().primary.speed,undefined);
   el('primary-speed').value='0.8';
   el('primary-native-speed').checked=true;
+  assert.equal(el('primary-native-speed').parentElement.children[0],el('primary-native-speed'));
   save();
   assert.equal(saved().primary.native_speed,true);
   assert.equal(saved().primary.speed,0.8);
@@ -396,7 +450,8 @@ test('saving cascaded voice STT rejects an unsupported split slot without replac
   assert.deepEqual(saved(),prior);
   assert.equal(changes,0);
   assert.match(el('status').textContent,/OpenAI.*Mistral.*ElevenLabs/);
-  assert.equal(el('live-settings').open,true);
+  assert.equal(el('live-settings').hidden,false);
+  assert.equal(el('live-tab').attributes['aria-selected'],'true');
   assert.equal(el('live-stt').focused,true);
   change('ja-profile','');
   save();

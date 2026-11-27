@@ -255,7 +255,7 @@ async function runLiveBrowser(debuggerUrl,origin){
   };
   const visible=selector=>observe(s=>document.querySelector(s)?.checkVisibility(),selector);
   const press=async (key,{shift=false}={})=>{
-    const keys={Tab:9,Enter:13,Escape:27,Home:36,ArrowUp:38,ArrowDown:40,' ':32};
+    const keys={Tab:9,Enter:13,Escape:27,Home:36,ArrowLeft:37,ArrowUp:38,ArrowRight:39,ArrowDown:40,' ':32};
     const text=key==='Enter'?'\r':key===' '?' ':undefined;
     const params={key,code:key===' '?'Space':key,windowsVirtualKeyCode:keys[key],modifiers:shift?8:0};
     await send('Input.dispatchKeyEvent',{...params,type:text?'keyDown':'rawKeyDown',text});
@@ -325,21 +325,36 @@ async function runLiveBrowser(debuggerUrl,origin){
       .filter(link=>new URL(link.href).origin===location.origin && !link.sheet).map(link=>link.href)),[],
       'A local stylesheet from the original app shell did not load');
     await observe(observeLiveMedia);
-    await click('#speech-legacy-settings > summary');
+    await click('#voice-v2-default-tab');
     assert.ok(await visible('#speech-test'));
-    await click('#voice-v2-settings > summary');
-    assert.ok(!await visible('#speech-test'),'Opening bilingual settings must fold the default voice panel');
-    await choose('#voice-v2-source','personal');
+    await press('ArrowLeft');
+    assert.ok(!await visible('#speech-test'),'Selecting the bilingual view must hide the default voice panel');
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-bilingual-tab');
+    await click('#voice-v2-add');
+    assert.ok(await visible('#voice-v2-key'));
+    assert.ok(!await visible('#voice-v2-url'),'Official providers do not expose a URL field');
+    await choose('#voice-v2-kind','openai_compatible');
+    assert.ok(await visible('#voice-v2-url') && await observe(()=>document.querySelector('#voice-v2-url').required));
+    await press('Escape');
+    assert.ok(!await visible('#voice-v2-key'));
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-add');
     await until('loopback voice profile metadata',()=>observe(()=>Boolean(document.querySelector('#voice-v2-primary-profile option[value="server:fixture"]'))));
     await choose('#voice-v2-primary-profile','server:fixture');
     assert.ok(!await visible('#voice-v2-key') && !await visible('#voice-v2-live-turn'),
       'Choosing a saved account must not open connection setup or Live options');
     await choose('#voice-v2-mode','dual_same_api');
+    assert.ok(!await visible('#voice-v2-primary-model') && !await visible('#voice-v2-ja-speed'),'Advanced and fallback fields are hidden by default');
+    assert.ok(!await visible('#voice-v2-ja-catalog') && await visible('#voice-v2-primary-catalog'),'The shared connection has one catalog action');
+    await click('#voice-v2-primary-fallback');
+    assert.ok(await visible('#voice-v2-primary-model'));
+    await click('#voice-v2-primary-fallback');
+    assert.ok(!await visible('#voice-v2-primary-model'));
     const slotPositions=()=>observe(()=>{
       const rect=id=>document.getElementById(`voice-v2-${id}-voice`).getBoundingClientRect();
       const ja=rect('ja'),vi=rect('vi');
+      const card=document.getElementById('settings-sound-card').getBoundingClientRect();
       return {sameRow:Math.abs(ja.top-vi.top)<1,sameColumn:Math.abs(ja.left-vi.left)<1,
-        fits:Math.max(ja.right,vi.right)<=innerWidth};
+        fits:Math.min(ja.left,vi.left)>=card.left && Math.max(ja.right,vi.right)<=card.right};
     });
     const splitProfilesVisible=()=>observe(()=>['ja','vi'].map(lang=>{
       const profile=document.querySelector(`#voice-v2-${lang}-profile`);
@@ -351,17 +366,45 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.deepEqual(await slotPositions(),{sameRow:false,sameColumn:true,fits:true});
     await choose('#voice-v2-mode','dual_split_api');
     assert.deepEqual(await splitProfilesVisible(),[true,true],'Split mode must expose both language connections');
+    const clippedControls=selector=>observe(s=>{
+      const container=document.querySelector(s), bounds=container.getBoundingClientRect();
+      return [...container.querySelectorAll('input,select,button,summary')].filter(control=>{
+        if (!control.checkVisibility()) return false;
+        const rect=control.getBoundingClientRect();
+        return rect.left<bounds.left || rect.right>bounds.right;
+      }).map(control=>control.id || control.textContent.trim());
+    },selector);
+    assert.deepEqual(await clippedControls('#voice-v2-reading-settings'),[]);
+    await click('#voice-v2-live-tab');
+    await choose('#voice-v2-live-stt','voice');
+    assert.ok(await visible('#voice-v2-live-stt-slot'));
+    assert.deepEqual(await clippedControls('#voice-v2-live-settings'),[]);
+    await choose('#voice-v2-live-stt','chat');
+    await click('#voice-v2-reading-tab');
+    await click('#voice-v2-add');
+    await choose('#voice-v2-kind','openai_compatible');
+    assert.ok(await visible('#voice-v2-url'));
+    assert.deepEqual(await clippedControls('#voice-v2-account-dialog'),[]);
+    await press('Escape');
     await width(1440);
     await choose('#voice-v2-mode','single');
     assert.ok(!await visible('#voice-v2-ja-voice') && !await visible('#voice-v2-vi-voice'));
     await tabTo('#voice-v2-primary-voice');
     await send('Input.insertText',{text:'fixture-voice'});
-    await tabTo('#voice-v2-live-settings > summary');
-    await press('Enter');
+    await tabTo('#voice-v2-reading-tab',{shift:true});
+    await press('ArrowRight');
+    assert.equal(await observe(()=>document.activeElement.id),'voice-v2-live-tab');
     await choose('#voice-v2-live-turn','ptt');
     await choose('#voice-v2-live-stt','voice');
     await click('#voice-v2-routing button[type="submit"]');
     await until('saved routing through Sound settings',()=>observe(()=>document.querySelector('#voice-v2-status').textContent.includes('Đã lưu')));
+    const activeVoice=()=>observe(()=>document.querySelector('#voice-v2-active').textContent);
+    assert.match(await activeVoice(),/Đang dùng: Giọng song ngữ/);
+    await click('#voice-v2-default-tab');
+    assert.ok(await visible('#voice-v2-use-default'));
+    assert.match(await activeVoice(),/Đang dùng: Giọng song ngữ/,'Viewing default voice must not alter the saved route');
+    await click('#voice-v2-bilingual-tab');
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-live-turn').value),'ptt');
     await click('#tab-btn-classroom');
     await until('Classroom chat ready',()=>observe(()=>document.querySelector('.classroom-chat-window').dataset.ai==='ready'));
     await width(390);
