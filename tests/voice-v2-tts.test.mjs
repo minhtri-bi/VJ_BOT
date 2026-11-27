@@ -71,15 +71,15 @@ test('Mistral mixed clauses keep tagged numeric text and skip unmarked non-speec
   const inputs = [];
   intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
   const routing = {version:2,mode:'single',primary:slot('mistral','custom_voice')};
-  const records = await lines(await tts({text:'→ … → <ja>３。→ ４?</ja> → <vi>3.5 → 3:15 → 100%</vi> → 29 →',stream:true,routing}));
-  assert.deepEqual(inputs,['３。','４?','3.5','3:15','100%']);
+  const records = await lines(await tts({text:'→ … → <ja>３。→ ４? → 10〜20%</ja> → <vi>3.5 → 3:15 → １００％ ～ １２０％</vi> → 29 →',stream:true,routing}));
+  assert.deepEqual(inputs,['３。','４?','10〜20%','3.5','3:15','１００％ ～ １２０％']);
   assert.deepEqual(records.map(({type,lang,boundary})=>[type,lang,boundary]),[
-    ['segment','ja','start'],['segment','ja','arrow'],['segment','vi','arrow'],
+    ['segment','ja','start'],['segment','ja','arrow'],['segment','ja','arrow'],['segment','vi','arrow'],
     ['segment','vi','arrow'],['segment','vi','arrow'],['done',undefined,undefined]]);
   const empty = await tts({text:'→ ! → 404',stream:true,routing});
   assert.equal(empty.status,400);
   assert.equal((await empty.json()).code,'tts_no_text');
-  assert.equal(inputs.length,5);
+  assert.equal(inputs.length,6);
 });
 
 test('Japanese-only and dual same-account Mistral keep script routing and preset or explicit voice precedence', async t => {

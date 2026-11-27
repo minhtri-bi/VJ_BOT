@@ -516,7 +516,7 @@
           if (rest) {
             parts[parts.length-1]={...last,text:last.text.slice(0,cut)};
             // Mirror the TTS check for spoken text and explicitly labelled numbers.
-            if (/\p{L}/u.test(rest) || /^[\d０-９][\d０-９.,，、:：%％\s]*[。！？!?]?$/u.test(rest))
+            if (/\p{L}/u.test(rest) || /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u.test(rest))
               tail={...last,text:rest,boundary:'sentence'};
           }
         }
