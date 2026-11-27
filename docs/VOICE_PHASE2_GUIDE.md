@@ -128,6 +128,7 @@ sequenceDiagram
   - Bắt buộc có `transcript` (1–1500 ký tự) **hoặc** `command` ∈ `['start','hint','explain','situation','check','slower','summary']` (`repeat` xử lý ở client từ cache, không cần gọi server).
   - Nếu có `lesson` / `focus` / `task`: dùng đúng `validLessonReference`, `validFocusReference`, `catalogLesson`, `processingAllowed`, `resolveTaskReference`, `groundLesson` từ [`src/tutor-context.js`](../src/tutor-context.js) (tuyệt đối không để lộ đáp án bài tập chưa làm!).
   - `history`: tối đa **12 lượt**, chỉ chấp nhận `role ∈ ['user','assistant']`, `text` string `<= 600` ký tự; strip thẻ `<ja>`/`<vi>` khỏi history nếu có.
+  - While a canonical multiple-choice task is focused, the Worker gives answer-safe strategy guidance, or a closing reminder for `summary`, without calling a Chat provider. Live does not verify a choice submission. Model-based conversation resumes after leaving the choice.
   - Phân giải Chat provider bằng [`resolveProvider(env, userId, body.api_connection, profileId)`](../src/providers.js#L34-L41) → tự động hoạt động cho Admin (server OpenAI), Learner (API key local/server hoặc Antigravity OAuth!).
 - **Incremental Tag & Sentence Chunker (trong `src/voice/live-turn.js`):**
   - Đọc từng delta từ `streamLLM()` vào buffer:

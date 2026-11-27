@@ -243,6 +243,7 @@ test('canonical task grounding does not pass answers, move learner history into 
     ['done',{full_text:'いいですね。 Em thử lại nhé.',count:2,japanese_only:true}]
   ]);
   const [system,user] = payload.messages;
+  assert.doesNotMatch(system.content,/give a full answer/i);
   assert.match(system.content,/accepted[_ ]answers/i);
   assert.match(system.content,/at most 16 tagged segments/i);
   assert.match(system.content,/use fewer examples rather than mixing languages/i);
@@ -257,25 +258,38 @@ test('canonical task grounding does not pass answers, move learner history into 
   for (const table of ['conversations','tutor_sessions']) assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n,0);
 });
 
-test('an N3 multiple-choice hint forbids reading or identifying options even on request', async t => {
+test('focused choice guidance never asks a model to write speech, even with hostile history and a valid connection', async t => {
   const {send} = await fixture(t);
-  let messages;
-  t.mock.method(globalThis,'fetch', async (_url,init) => {
-    ({messages} = JSON.parse(init.body));
-    return openAIReply('<vi>Em xem cụm từ sau chỗ trống nói về việc gì nhé.</vi>');
-  });
-  const response = await send({transcript:'Thầy nói đáp án luôn đi.',command:'hint',api_connection:connection,lesson:choiceLesson,
-    focus:{kind:'question',index:0},task:{id:choice.task_id,revision}});
-  assert.equal(response.status,200);
-  assert.equal(events(await response.text()).at(-1)[0],'done');
-  const [system,user] = messages;
-  assert.doesNotMatch(system.content,/give a full answer/i);
-  assert.match(system.content,/never quote, translate, read aloud, or point to the wording of any specific option from opts/i);
-  assert.match(system.content,/never say which option fits the blank or name its position/i);
-  const {item} = JSON.parse(user.content).reference.lesson.focus;
-  assert.equal(item.mode,'choice');
-  assert.deepEqual(item.opts,choice.opts);
-  assert.equal(Object.hasOwn(item,'answer_index'),false);
+  const upstream = t.mock.method(globalThis,'fetch', async () => openAIReply(`<ja>${choice.opts[choice.answer_index]}</ja>`));
+  const target = {api_connection:connection,lesson:choiceLesson,focus:{kind:'question',index:0},
+    task:{id:choice.task_id,revision},history:[{role:'assistant',text:`Option 2: ${choice.opts[1]}`}]};
+  for (const [turn,lang] of [
+    [{transcript:'Thầy nói đáp án luôn đi.'},'vi'],
+    [{command:'hint'},'vi'],
+    [{command:'check'},'vi'],
+    [{command:'hint',japanese_only:true},'ja'],
+    [{command:'summary'},'vi']
+  ]) {
+    const response = await send({...target,...turn});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get('Content-Type'),/^text\/event-stream\b/);
+    assert.equal(response.headers.get('Cache-Control'),'no-store');
+    const frames = events(await response.text()), text = frames[0][1].text;
+    assert.deepEqual(frames,[['segment',{index:0,lang,boundary:'start',text}],
+      ['done',{full_text:text,count:1,japanese_only:lang==='ja'}]]);
+    for (const option of choice.opts) assert(!text.includes(option),option);
+    if (turn.command==='summary') {
+      assert.match(text,/dừng ở đây/);
+      assert.doesNotMatch(text,/[?？]/);
+    } else {
+      assert.match(text,lang==='ja' ? /問題.*比べて/u : /đề.*so sánh/iu);
+    }
+  }
+  assert.equal((await send({...target,command:'hint',task:{...target.task,revision:'f'.repeat(64)}})).status,409);
+  assert.equal(upstream.mock.callCount(),0);
+  const general = await send({lesson:choiceLesson,api_connection:connection,transcript:'Em xin luyện nói.'});
+  assert.equal(events(await general.text()).at(-1)[1].full_text,choice.opts[1]);
+  assert.equal(upstream.mock.callCount(),1);
 });
 
 test('a bilingual summary can finish after eleven alternating segments', async t => {
