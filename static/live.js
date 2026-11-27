@@ -7,13 +7,27 @@
   let audioContext=null,analyser=null,waveFrame=null,callOwner=null,statsTimer=null,remoteLevel=0;
   let liveSocket=null,captureNode=null,captureSource=null,nextPlayTime=0;
   let mistralRoom=null,mistralClose=null,mistralSegments={};
+  const cascadedCommands=new Set(['hint','repeat','slower','situation','check','explain','summary']);
+  const sttNames={openai:'OpenAI',mistral:'Mistral',elevenlabs:'ElevenLabs',browser:'trình duyệt'};
+  const ttsNames={...sttNames,gemini:'Gemini',openai_compatible:'máy chủ tùy chỉnh'};
+  let cascaded=null,cascadedSession=null,cascadedState=null,teacherSink=null,wakeRequest=0;
   const audioSources=[];
   let wakeLock=null,commands={},teacherAnalyser=null,teacherHeardAt=0,teacherExpectedUntil=0,teacherSpeaking=false,userMuted=false;
   // Keep the screen on during a call: iPhone locking the screen drops the microphone.
-  const keepAwake=async()=>{try{wakeLock?.release?.();wakeLock=await navigator.wakeLock?.request('screen');}catch{wakeLock=null;}};
-  const letSleep=()=>{wakeLock?.release?.().catch(()=>{});wakeLock=null;};
+  const keepAwake=async()=>{
+    const request=++wakeRequest,run=version;
+    try{
+      const lock=await navigator.wakeLock?.request('screen');
+      if(request!==wakeRequest || run!==version || closing || !ready){if(lock!==wakeLock)await lock?.release();return;}
+      if(wakeLock!==lock)wakeLock?.release().catch(()=>{});
+      wakeLock=lock;
+    }catch{ /* Wake Lock is optional. */ }
+  };
+  const letSleep=()=>{++wakeRequest;wakeLock?.release?.().catch(()=>{});wakeLock=null;};
   const timeline = createLiveTranscript(el('live-transcript'));
   const status = text => { el('live-status').textContent=text; };
+  const nativePrivacy=el('live-privacy')?.textContent;
+  const liveTalk=el('live-talk'),liveTurnMode=el('live-turn-mode');
   function controls(active) {
     el('live-start').disabled=active;
     el('live-end').disabled=!active;
@@ -22,8 +36,27 @@
     el('live-stage').dataset.active=String(ready && !closing);
     turn();
   }
+  function drawCascaded() {
+    if(!liveTalk || !liveTurnMode)return;
+    const state=ready && cascadedState;
+    liveTurnMode.hidden=!state;
+    liveTalk.hidden=!state || state.mode!=='ptt';
+    if(!state)return;
+    liveTurnMode.value=state.mode;
+    liveTalk.disabled=state.muted || (!cascadedSession.live.barge_in && !['listening','recording'].includes(state.phase));
+    liveTalk.textContent=state.phase==='recording'?'Dừng và gửi':'Bấm để nói';
+    liveTalk.setAttribute('aria-pressed',String(state.phase==='recording'));
+    el('live-stage').dataset.turn=state.muted?'muted':state.phase==='speaking'?'teacher':'you';
+    el('live-commands').hidden=false;
+    for(const button of el('live-commands').querySelectorAll('button'))button.disabled=false;
+    status(state.muted?'Micro đang tắt':{
+      listening:state.mode==='ptt'?'Bấm để nói khi sẵn sàng nhé.':'Đến lượt em nói nhé.',
+      recording:'Đang thu lời em…',thinking:'Thầy đang chuẩn bị trả lời…',speaking:'Thầy đang nói…'
+    }[state.phase] || 'Đang kết nối…');
+  }
   // One speaker at a time: the microphone stays closed while the teacher talks and opens when the teacher stops.
   function turn() {
+    if(cascadedSession){drawCascaded();return;}
     const live=ready && !closing, mine=live && !teacherSpeaking;
     stream?.getAudioTracks().forEach(track=>{track.enabled=mine && !userMuted;});
     el('live-stage').dataset.turn=live?(teacherSpeaking?'teacher':userMuted?'muted':'you'):'';
@@ -52,6 +85,10 @@
   }
   function cleanup(message) {
     ++version; ready=false; closing=false;
+    const oldCascaded=cascaded,wasCascaded=Boolean(cascadedSession);cascaded=null;cascadedSession=null;cascadedState=null;
+    oldCascaded?.stop();
+    teacherSink?.disconnect();teacherSink=null;
+    drawCascaded();
     clearInterval(timer); clearTimeout(closeTimer); clearTimeout(connectTimer); clearTimeout(disconnectedTimer);
     abort?.abort(); abort=null;
     stream?.getTracks().forEach(track=>track.stop()); stream=null;
@@ -70,6 +107,7 @@
     el('live-play-audio').hidden=true;
     el('live-mute').setAttribute('aria-pressed','false');el('live-mute').textContent='Tắt micro';
     controls(false); if (message) status(message);
+    if(wasCascaded)describeNextCall();
     timeline.finish();
   }
   function connectWave(media,teacher=false) {
@@ -77,18 +115,19 @@
     const source=audioContext.createMediaStreamSource(media);source.connect(analyser);audioSources.push(source);
     if(teacher && teacherAnalyser)source.connect(teacherAnalyser);
   }
-  function wave() {
+  function wave(composed=false) {
     const canvas=el('live-wave'),ctx=canvas?.getContext?.('2d');
     const AudioContext=window.AudioContext || window.webkitAudioContext;
-    if(!ctx || !AudioContext)return;
-    audioContext=new AudioContext();audioContext.resume().catch(()=>{});
+    if(!AudioContext || (!ctx && !composed))return;
+    audioContext=new AudioContext();
+    const resumed=audioContext.resume();resumed.catch(()=>{});
     analyser=audioContext.createAnalyser();analyser.fftSize=256;analyser.smoothingTimeConstant=.65;
     teacherAnalyser=audioContext.createAnalyser();teacherAnalyser.fftSize=512;
     const samples=new Uint8Array(analyser.fftSize),levels=new Float32Array(BARS);
-    statsTimer=setInterval(pollRemoteLevel,150);
+    if(!composed)statsTimer=setInterval(pollRemoteLevel,150);
     const draw=()=>{
       if(!analyser)return;
-      teacherPulse();
+      if(!composed)teacherPulse();
       analyser.getByteTimeDomainData(samples);
       const span=Math.floor(samples.length/BARS);let sum=0;
       for(let i=0;i<BARS;i++){
@@ -99,7 +138,8 @@
         levels[i]+=(Math.max(own,remote)-levels[i])*.35;sum+=levels[i];
       }
       paint(levels,sum/BARS);waveFrame=requestAnimationFrame(draw);
-    };draw();
+    };if(ctx)draw();
+    return resumed;
   }
   // Mirrored capsule bars (Siri / Voice Memos style) drawn with one stroked path.
   function paint(levels,level) {
@@ -126,28 +166,145 @@
     }
     cleanup('Đã kết thúc cuộc trò chuyện.');
   }
+  function cascadedReference() {
+    const context=globalThis.teacherContext?.(),lesson=(typeof chatLessonContext==='undefined'?null:chatLessonContext) || context?.lesson;
+    const same=lesson && context?.lesson?.id===lesson.id && context.lesson.level===lesson.level;
+    const focus=same?context.focus:null,task=focus?.kind==='question'?context.task:null;
+    if(focus?.kind==='question' && !task)throw Object.assign(new Error('Bài tập đã đổi. Em mở lại câu này trước khi tiếp tục nhé.'),{userFacing:true});
+    return {
+      body:{level:lesson?.level || (typeof activeCurriculumLevel==='undefined'?'N5':activeCurriculumLevel) || 'N5',
+        ...(lesson?{lesson:{id:lesson.id,level:lesson.level}}:{}),...(focus?{focus}:{}),
+        ...(task?{view:context.view || 'checks'}:{})},
+      task
+    };
+  }
+  function chatIdentity(owner,admin) {
+    return admin?'platform_openai':usesAntigravityOAuth(owner)
+      ? JSON.stringify(['antigravity',antigravityConnectionId(owner)])
+      : JSON.stringify(window.VJProfiles?.active(owner) || null);
+  }
+  function cascadedIdentity(owner,admin,routing) {
+    if(owner!==signedInUser?.user_id || admin!==(signedInUser?.is_admin===true))return null;
+    const saved=routing.stored();
+    if(!saved)return null;
+    const {body,task}=cascadedReference();
+    return JSON.stringify([routing.liveIdentity(saved),chatIdentity(owner,admin),body,task?taskRevisionSource(task):null]);
+  }
+  function describeCascaded(config,live,owner,admin,provider) {
+    const chat=admin?'OpenAI máy chủ':usesAntigravityOAuth(owner)?'Antigravity':'kết nối AI đã chọn';
+    const slots=config.mode==='single'?[config.primary]:[config.ja,config.vi];
+    const teachers=[...new Set(slots.map(slot=>ttsNames[slot?.provider || config.primary?.provider]).filter(Boolean))].join(' / ');
+    const transcription=provider==='browser' || live.stt_source==='browser'?'dịch vụ nhận diện của trình duyệt (có thể xử lý từ xa)'
+      : sttNames[provider] || (live.stt_source==='chat'?'kết nối trò chuyện':'kết nối giọng nói đã chọn');
+    el('live-model-name').textContent=teachers?`Giọng song ngữ · ${teachers}`:'Giọng song ngữ';
+    el('live-privacy').textContent=`Giọng thầy là giọng AI. Micro được chép lời qua ${transcription}. Gửi bản chép lời đến ${chat}; gửi câu trả lời đến ${teachers || 'kết nối giọng đọc đã chọn'}. Tối đa 10 phút.`;
+  }
+  function describeNextCall() {
+    try{
+      const config=window.VJVoiceRouting?.stored(),live=config && window.VJVoiceRouting.liveConfig(config);
+      if(live?.engine==='cascaded'){
+        describeCascaded(config,live,signedInUser?.user_id,signedInUser?.is_admin===true);return;
+      }
+    }catch{ /* Start reports invalid saved routing without using a fallback. */ }
+    if(nativePrivacy)el('live-privacy').textContent=nativePrivacy;
+    el('live-model-name').textContent='Tiếng Nhật';
+  }
+  async function openCascaded(run,owner,microphone,resumed) {
+    const {config,live,routing,current,admin,chatBinding}=cascadedSession;
+    if(!audioContext || !resumed)throw Object.assign(new Error('Trình duyệt không hỗ trợ âm thanh hội thoại.'),{userFacing:true});
+    let resumeTimer;
+    try{await Promise.race([resumed,new Promise((_,reject)=>{resumeTimer=setTimeout(()=>reject(Object.assign(new Error('Trình duyệt chưa cho phát âm thanh. Bấm Bắt đầu nói lại.'),{userFacing:true})),5000);})]);}
+    finally{clearTimeout(resumeTimer);}
+    if(!current()){if(run===version)cleanup('Kết nối hội thoại đã thay đổi.');return;}
+    connectWave(microphone);
+    teacherSink=audioContext.createGain();
+    teacherSink.connect(audioContext.destination);teacherSink.connect(analyser);
+    let shownProvider=null;
+    describeCascaded(config,live,owner,admin,shownProvider);
+    cascaded=window.VJLiveCascaded.create({audioContext,microphone,sink:teacherSink,live,chatBinding,
+      route:signal=>routing.prepared(config,signal),stt:signal=>routing.preparedStt(config,signal),
+      current(){
+        if(current())return true;
+        if(run===version)cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');
+        return false;
+      },
+      async context(){
+        const {body,task}=cascadedReference();
+        if(task)body.task=await taskReference(task);
+        return body;
+      },
+      onState(state){
+        if(!current())return;
+        cascadedState=state;
+        if(state.sttProvider && state.sttProvider!==shownProvider){
+          shownProvider=state.sttProvider;describeCascaded(config,live,owner,admin,shownProvider);
+        }
+        if(!ready && state.phase!=='connecting'){
+          ready=true;startedAt=Date.now();controls(true);void keepAwake();
+        }
+        drawCascaded();
+      },
+      onCaption(data){if(current())timeline.upsert(data);},
+      onError(message,fatal){if(!current())return;if(fatal)cleanup(message);else status(message);}
+    });
+    await cascaded.start();
+  }
   async function start() {
-    if (peer || liveSocket || mistralRoom || el('live-start').disabled) return;
-    if (!navigator.mediaDevices?.getUserMedia || typeof RTCPeerConnection==='undefined') {status('Trình duyệt cần hỗ trợ WebRTC và micro qua HTTPS hoặc localhost.');return;}
-    // iOS only lets an element play later if it was started inside this tap: unlock it with a silent clip.
-    const speaker=el('live-audio');
-    if(!speaker.srcObject){speaker.src=SILENCE;speaker.play?.()?.catch?.(()=>{});}
-    const run=++version, owner=signedInUser?.user_id;
+    if(peer || liveSocket || mistralRoom || el('live-start').disabled)return;
+    if(!signedInUser || !navigator.mediaDevices?.getUserMedia){status('Đăng nhập và dùng trình duyệt hỗ trợ micro qua HTTPS hoặc localhost.');return;}
+    const owner=signedInUser.user_id,admin=signedInUser.is_admin===true,routing=window.VJVoiceRouting;
+    let config,live,key;
+    try{
+      config=routing?.stored();
+      live=config?routing.liveConfig(config):null;
+      if(live?.engine==='cascaded'){
+        if(!window.VJLiveCascaded)throw new Error('Chưa tải được hội thoại song ngữ. Hãy tải lại trang.');
+        key=cascadedIdentity(owner,admin,routing);
+      }
+    }catch(error){status(error.message);return;}
+    // Unlock audio inside this click, before microphone or network awaits.
+    if(!key){
+      const speaker=el('live-audio');
+      if(!speaker.srcObject){speaker.src=SILENCE;speaker.play?.()?.catch?.(()=>{});}
+    }
+    const run=++version;
+    if(key)cascadedSession={config,live,routing,admin,current(){
+      try{return run===version && location.hash.startsWith('#classroom') && cascadedIdentity(owner,admin,routing)===key;}
+      catch{return false;}
+    }};
     callOwner=owner;
     timeline.reset();
     el('live-duration').textContent='00:00';controls(true);status('Cho phép micro để bắt đầu…');
+    if(cascadedSession)timer=setInterval(()=>{
+      if(!cascadedSession.current()){cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');return;}
+      if(!ready)return;
+      const seconds=Math.floor((Date.now()-startedAt)/1000);
+      if(seconds>=600){end(true);return;}
+      el('live-duration').textContent=String(Math.floor(seconds/60)).padStart(2,'0')+':'+String(seconds%60).padStart(2,'0');
+    },1000);
     try {
       globalThis.stopSpeech?.();globalThis.stopJapaneseInputs?.();
-      wave();
-      const microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true},video:false});
+      const resumed=wave(Boolean(key));
+      if(key && !admin && !usesAntigravityOAuth(owner)){
+        const choice=window.VJProfiles?.active(owner);
+        if(choice?.scope==='local'){
+          const {revision}=await window.VJProfiles.metadata(owner,choice.id);
+          if(run!==version)return;
+          if(!cascadedSession.current()){cleanup('Kết nối hội thoại đã thay đổi.');return;}
+          cascadedSession.chatBinding={...choice,revision};
+        }
+      }
+      const microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,...(key?{autoGainControl:true}:{})},video:false});
       if(run!==version || owner!==signedInUser?.user_id){microphone.getTracks().forEach(track=>track.stop());if(run===version)cleanup('Tài khoản đã thay đổi.');return;}
       stream=microphone;
+      if(key){await openCascaded(run,owner,microphone,resumed);return;}
       const engine=await liveEngine(owner);
       if(run!==version)return;
       if(owner!==signedInUser?.user_id){cleanup('Tài khoản đã thay đổi.');return;}
       if(engine?.name==='gemini'){await startGemini(run,microphone);return;}
       if(engine?.name==='mistral'){await startMistral(run,microphone,owner,engine.localId);return;}
       if(engine?.name!=='openai'){cleanup('Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.');return;}
+      if(typeof RTCPeerConnection==='undefined'){cleanup('Trình duyệt cần hỗ trợ WebRTC để kết nối OpenAI trực tiếp.');return;}
       const connection=peer=new RTCPeerConnection();
       connectWave(stream);
       stream.getTracks().forEach(track=>connection.addTrack(track,stream));
@@ -373,6 +530,7 @@
   }
   function mode(live) {
     if(!live && (peer || el('live-start').disabled))end();
+    if(live && !el('live-start').disabled)describeNextCall();
     if(!live)timeline.stop();
     if(live && !callOwner && !peer && !closing && !el('live-start').disabled)status('Em bấm Bắt đầu nói khi sẵn sàng nhé.');
     el('classroom-voice').hidden=!live;
@@ -387,7 +545,11 @@
     try{await el('live-audio').play();if(run===version){el('live-play-audio').hidden=true;status('Đã bật âm thanh.');turn();}}
     catch{if(run===version)status('Chưa phát được âm thanh. Kiểm tra thiết bị rồi thử lại.');}
   });
+  liveTurnMode?.addEventListener('change',()=>cascaded?.setMode(liveTurnMode.value));
+  liveTalk?.addEventListener('click',()=>cascaded?.toggleTalk());
   el('live-commands').addEventListener('click',event=>{
+    const key=event.target?.dataset?.command;
+    if(cascaded){if(ready && cascadedCommands.has(key))void cascaded.sendCommand(key);return;}
     const text=commands[event.target?.dataset?.command];
     if(!text || !ready || closing || teacherSpeaking)return;
     teacherExpectedUntil=Date.now()+4000;turn();
@@ -396,19 +558,40 @@
   });
   el('live-mute').addEventListener('click',()=>{
     const mute=el('live-mute').getAttribute('aria-pressed')!=='true';
-    userMuted=mute;turn();
+    userMuted=mute;
+    if(cascaded){
+      stream?.getAudioTracks().forEach(track=>{track.enabled=!mute;});
+      cascaded.setMuted(mute);
+    }else turn();
     el('live-mute').setAttribute('aria-pressed',String(mute));el('live-mute').textContent=mute?'Bật micro':'Tắt micro';
   });
   for(const button of document.querySelectorAll('[data-chat-mode]'))button.addEventListener('click',()=>mode(button.dataset.chatMode==='live'));
   // The browser drops the wake lock when the tab is hidden; take it again on return.
   window.addEventListener('focus',()=>{if(ready&&!closing)keepAwake();});
   window.addEventListener('pagehide',()=>{end(true);timeline.stop();});
-  window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#classroom')){end();timeline.stop();}});
+  window.addEventListener('hashchange',()=>{
+    if(!location.hash.startsWith('#classroom')){end();timeline.stop();}
+    else checkCascaded();
+  });
   window.checkLiveAccount=()=>{
     timeline.accountChanged();
     if(!signedInUser || callOwner && callOwner!==signedInUser?.user_id)mode(false);
+    else checkCascaded();
   };
   window.addEventListener('vjbot-account-ready',window.checkLiveAccount);
+  function checkCascaded() {
+    if(cascadedSession && !cascadedSession.current())
+      cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');
+    if(!el('classroom-voice').hidden && !el('live-start').disabled)describeNextCall();
+  }
+  window.addEventListener('vjbot-voice-changed',checkCascaded);
+  window.addEventListener('storage',checkCascaded);
+  const chatChanged=()=>{
+    if(cascadedSession)cleanup('Kết nối trò chuyện đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');
+  };
+  window.addEventListener('vjbot-chat-connection-changed',chatChanged);
+  const oldAiConnectionChanged=window.aiConnectionChanged;
+  window.aiConnectionChanged=()=>{chatChanged();oldAiConnectionChanged?.();};
   window.stopLiveConversation=()=>{end();timeline.stop();timeline.accountChanged();};
   window.openLiveConversation=()=>{if(!signedInUser)return;mode(true);};
   paint(new Float32Array(BARS),0);

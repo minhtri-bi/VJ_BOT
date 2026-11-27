@@ -188,6 +188,7 @@
 #panel-classroom .live-id p{color:var(--pencil);font-weight:700}
 #panel-classroom #live-wave{color:var(--accent)}
 #panel-classroom .live-controls{display:flex;flex-wrap:wrap;justify-content:center;gap:10px}
+#panel-classroom #live-turn-mode,#panel-classroom #live-talk{min-height:44px}
 #panel-classroom .live-commands{display:flex;flex-wrap:wrap;justify-content:center;gap:8px}
 #panel-classroom .live-commands button{border:2px solid var(--border-dark);border-radius:999px;background:var(--sheet);box-shadow:2px 2px 0 var(--sk-soft);font-weight:800}
 #live-status{color:var(--pencil);font-weight:700}

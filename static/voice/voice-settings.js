@@ -4,17 +4,40 @@
   const bases={elevenlabs:'https://api.elevenlabs.io',mistral:'https://api.mistral.ai/v1',openai:'https://api.openai.com/v1',gemini:'https://generativelanguage.googleapis.com',openai_compatible:''};
   const titles={primary:'Kết nối chính',ja:'Tiếng Nhật',vi:'Tiếng Việt'};
   const source=el('source'), mode=el('mode'), slots=el('slots'), status=el('status'), kind=el('kind'), url=el('url');
+  const liveEngine=el('live-engine'), liveTurn=el('live-turn'), liveBarge=el('live-barge'),
+    liveStt=el('live-stt'), liveSlot=el('live-stt-slot'), liveSlotField=el('live-stt-slot-field'), liveOptions=el('live-options');
   const controls=new Map(), catalogs=new Map(), selectedAccounts=new Map();
-  let rows=[], metadataOwner, drawnIdentity, busy=false, pendingRemoval=null;
+  let rows=[], metadataRole, drawnIdentity, busy=false, pendingRemoval=null, routingRevision=0, restoredLive;
   const owner=()=>signedInUser?.user_id;
   const admin=()=>signedInUser?.is_admin===true;
   const ref=row=>`${row.scope}:${row.id}`;
   const provider=row=>row.protocol==='openai' && row.base_url===bases.mistral ? 'mistral' : row.protocol;
   const roleKey=()=>JSON.stringify([owner(),admin()]);
   const modes=['single','dual_same_api','dual_split_api'];
-  const voiceChanged=()=>window.dispatchEvent(new CustomEvent('vjbot-voice-changed',{detail:{source:'routing-v2'}}));
-  const fingerprint=row=>[row.base_url,row.connection_id,row.key_last4,row.revision];
+  const names=Object.keys(titles);
+  const sttProviders=['openai','mistral','elevenlabs'];
+  const voiceChanged=config=>window.dispatchEvent(new CustomEvent('vjbot-voice-changed',{detail:{source:'routing-v2',live:liveConfig(config)}}));
+  const fingerprint=row=>[row.base_url,row.connection_id,row.revision];
   const reloadProfiles=()=>window.loadVoiceProfiles?.({personalVoice:true});
+  function liveConfig(config) {
+    const live=config?.live;
+    return Object.freeze({
+      // Phase 1 routing predates Live settings and must stay on the native path.
+      engine:live?.engine==='native' || config!=null && live===undefined ? 'native' : 'cascaded',
+      turn_mode:live?.turn_mode==='ptt'?'ptt':'vad',
+      barge_in:live?.barge_in!==false,
+      stt_source:['voice','browser'].includes(live?.stt_source)?live.stt_source:'chat',
+      stt_slot:names.includes(live?.stt_slot)?live.stt_slot:'primary'
+    });
+  }
+  function layoutLive() {
+    const native=liveEngine?.value==='native';
+    if (liveOptions) liveOptions.hidden=native;
+    for (const control of [liveTurn,liveBarge,liveStt]) if (control) control.disabled=native;
+    const hide=native || liveStt?.value!=='voice';
+    if (liveSlotField) liveSlotField.hidden=hide;
+    if (liveSlot) liveSlot.disabled=hide;
+  }
   function stored() {
     if (!owner()) return null;
     const raw=localStorage.getItem(prefix+owner());
@@ -30,7 +53,7 @@
     if (!owner()) throw new Error('Đăng nhập để chọn giọng đọc.');
     if (value) localStorage.setItem(prefix+owner(),JSON.stringify(value));
     else localStorage.removeItem(prefix+owner());
-    voiceChanged();
+    voiceChanged(value);
   }
   function input(parent,label,id,type='text') {
     const wrapper=document.createElement('label'), control=document.createElement(type==='select'?'select':'input');
@@ -109,6 +132,13 @@
   }
   function capture() {
     const config={version:2,mode:mode.value,admin_override:admin()};
+    config.live=liveConfig({live:{
+      engine:liveEngine?.value ?? restoredLive.engine,
+      turn_mode:liveTurn?.value ?? restoredLive.turn_mode,
+      barge_in:liveBarge ? liveBarge.checked : restoredLive.barge_in,
+      stt_source:liveStt?.value ?? restoredLive.stt_source,
+      stt_slot:liveSlot?.value ?? restoredLive.stt_slot
+    }});
     for (const [slot,control] of controls) {
       if (slot!=='primary' && config.mode==='single') continue;
       const reference=control.profile.disabled ? '' : control.profile.value;
@@ -130,6 +160,8 @@
       if (control.reading) settings.kanji_mode=control.reading.value;
       config[slot]=settings;
     }
+    const live=config.live;
+    if (live.engine==='cascaded' && live.stt_source==='voice') sttProfileName(config,live.stt_slot);
     for (const [lang,slot] of Object.entries(config.mode==='single' ? {ja:config.primary,vi:config.primary} : {ja:config.ja,vi:config.vi})) {
       const effective=slot.profile ? slot : {...config.primary,...slot,provider:config.primary.provider};
       if (['elevenlabs','openai_compatible'].includes(effective.provider) || effective.provider==='mistral' && config.mode==='single') {
@@ -148,6 +180,13 @@
     catch (error) {status.textContent=error.message;}
     source.value=config?'personal':'legacy';el('personal').hidden=!config;
     mode.value=config?.mode || 'single';
+    restoredLive=liveConfig(config);
+    if (liveEngine) liveEngine.value=restoredLive.engine;
+    if (liveTurn) liveTurn.value=restoredLive.turn_mode;
+    if (liveBarge) liveBarge.checked=restoredLive.barge_in;
+    if (liveStt) liveStt.value=restoredLive.stt_source;
+    if (liveSlot) liveSlot.value=restoredLive.stt_slot;
+    layoutLive();
     for (const [slot,control] of controls) {
       const value=config?.[slot] || {};
       if (value.profile) {
@@ -163,49 +202,118 @@
     layout();
     catalogs.clear();updateAccounts(true);
   }
-  const rowFor=slot=>rows.find(row=>ref(row)===ref(slot.profile) && provider(row)===slot.provider);
-  async function prepared(config,signal,{replay=false}={}) {
-    const identity=roleKey(), user=owner(), result={...config}, loaded=new Map();
-    if (metadataOwner!==user) throw new Error('Chưa tải được danh sách kết nối giọng nói.');
+  const rowFor=(profile,kind)=>rows.find(row=>ref(row)===ref(profile) && provider(row)===kind);
+  const changed=()=>new Error('Kết nối giọng nói đã đổi hoặc đã bị xóa.');
+  function assertRole(config) {
+    if (!owner() || config?.admin_override!==admin()) throw new Error('Quyền tài khoản đã đổi. Chọn lại nguồn giọng đọc.');
+  }
+  function profileRows(config,slots) {
+    if (metadataRole!==roleKey()) throw new Error('Chưa tải được danh sách kết nối giọng nói.');
+    return slots.flatMap(name=>{
+      const slot=config[name];
+      if (!slot?.profile) return [];
+      const {scope,id}=slot.profile, kind=slot.provider, profile={scope,id};
+      const row=rowFor(profile,kind);
+      if (!row) throw changed();
+      return [{name,profile,kind,row,fingerprint:JSON.stringify(fingerprint(row))}];
+    });
+  }
+  async function confirmProfiles(config,slots,signal,{replay=false,verifyLocal=false}={}) {
+    assertRole(config);
+    const role=roleKey(), user=owner(), revision=routingRevision;
+    signal?.throwIfAborted();
+    const targets=profileRows(config,slots), loaded=new Map(), profiles=new Map();
+    const check=()=>{
+      signal?.throwIfAborted();
+      if (roleKey()!==role || revision!==routingRevision || metadataRole!==role) throw changed();
+      for (const target of targets) {
+        const row=rowFor(target.profile,target.kind);
+        if (!row || JSON.stringify(fingerprint(row))!==target.fingerprint) throw changed();
+      }
+    };
+    function unavailable() {
+      void reloadProfiles()?.catch(()=>{});
+      throw changed();
+    }
     let server;
-    if (['primary','ja','vi'].some(name=>config[name]?.profile?.scope==='server')) {
+    if (targets.some(({profile})=>profile.scope==='server')) {
       const response=await apiFetch('/api/ai/profiles',{signal});
+      check();
       if (!response.ok) throw new Error('Chưa kiểm tra được kết nối giọng nói trên máy chủ.');
       const data=await response.json();
-      if (roleKey()!==identity || signal?.aborted || !Array.isArray(data.profiles)) throw new Error('Kết nối giọng nói đã đổi.');
+      check();
+      if (!Array.isArray(data.profiles)) throw changed();
       server=new Map(data.profiles.map(row=>[row.id,row]));
     }
-    for (const name of ['primary','ja','vi']) {
-      const slot=config[name];
-      if (!slot?.profile) continue;
-      const row=rowFor(slot);
-      if (!row) throw new Error('Kết nối giọng nói đã đổi hoặc đã bị xóa.');
-      if (row.scope==='server') {
-        const latest=server.get(row.id);
-        if (latest && latest.connection_id && latest.connection_id===row.connection_id && latest.base_url===row.base_url && provider(latest)===slot.provider) continue;
-        void reloadProfiles()?.catch(()=>{});
-        throw new Error('Kết nối giọng nói đã đổi hoặc đã bị xóa.');
-      }
-      const profile=loaded.get(row.id) || await (replay ? VJProfiles.metadata(user,row.id) : VJProfiles.load(user,row.id));
-      loaded.set(row.id,profile);
-      if (roleKey()!==identity || signal?.aborted || provider(profile)!==slot.provider || profile.base_url!==row.base_url
-        || profile.revision!==row.revision || !rowFor(slot)) {
-        void reloadProfiles()?.catch(()=>{});
-        throw new Error('Kết nối giọng nói đã đổi.');
-      }
-      if (replay) continue;
-      result[name]={...slot,profile:{scope:'local',connection:{base_url:profile.base_url,api_key:profile.api_key}}};
+    for (const {name,profile,kind,row} of targets) {
+      if (profile.scope==='server') {
+        const latest=server.get(profile.id);
+        if (!latest?.connection_id || latest.connection_id!==row.connection_id || latest.base_url!==row.base_url || provider(latest)!==kind) unavailable();
+        profiles.set(name,profile);
+      } else if (profile.scope==='local') {
+        const matches=value=>value && provider(value)===kind && value.base_url===row.base_url && value.revision===row.revision;
+        let value=loaded.get(profile.id);
+        if (!value) {
+          value=await (replay ? VJProfiles.metadata(user,profile.id) : VJProfiles.load(user,profile.id));
+          check();
+          if (!matches(value)) unavailable();
+          if (verifyLocal) {
+            const latest=await VJProfiles.metadata(user,profile.id);
+            check();
+            if (!matches(latest)) unavailable();
+          }
+          loaded.set(profile.id,value);
+        }
+        if (!replay) profiles.set(name,{scope:'local',connection:{base_url:value.base_url,api_key:value.api_key}});
+      } else throw changed();
     }
+    return {profiles,check};
+  }
+  async function prepared(config,signal,{replay=false}={}) {
+    const result={...config}, {profiles,check}=await confirmProfiles(config,names,signal,{replay});
+    check();
+    for (const [name,profile] of profiles) if (profile.scope==='local') result[name]={...result[name],profile};
     return result;
   }
-  function identity(config) {
-    return JSON.stringify([roleKey(),config,...['primary','ja','vi'].flatMap(name=>{
-      const slot=config[name];if (!slot?.profile) return [];
-      const row=rowFor(slot);
-      if (!row || metadataOwner!==owner()) throw new Error('Kết nối giọng nói đã đổi hoặc chưa tải.');
-      return [fingerprint(row)];
-    })]);
+  function sttProfileName(config,slot) {
+    // An unset split slot shares the configured primary account, just like read-aloud.
+    const name=config.mode==='dual_split_api' && config[slot]?.profile!=null ? slot : 'primary';
+    const selected=config[name];
+    if (!selected?.profile || !sttProviders.includes(selected.provider)) throw new Error('Chọn kết nối OpenAI, Mistral hoặc ElevenLabs để chép lời.');
+    return name;
   }
+  async function preparedStt(config,signal) {
+    const live=liveConfig(config);
+    if (live.stt_source!=='voice') return null;
+    assertRole(config);
+    if (config.version!==2 || !modes.includes(config.mode)) throw changed();
+    const name=sttProfileName(config,live.stt_slot);
+    const kind=config[name].provider, override=config.admin_override, user=owner();
+    const saved=localStorage.getItem(prefix+user);
+    const {profiles,check}=await confirmProfiles(config,[name],signal,{verifyLocal:true});
+    check();
+    if (saved!==localStorage.getItem(prefix+user)) throw changed();
+    return {version:2,admin_override:override,provider:kind,profile:profiles.get(name)};
+  }
+  function audioIdentity(config,legacy=false) {
+    assertRole(config);
+    const profiles=profileRows(config,names);
+    const audio={version:config.version,mode:config.mode,admin_override:config.admin_override};
+    for (const name of names) {
+      const slot=config[name];
+      if (!slot) continue;
+      const {provider,model,voice_id,native_speed,speed,kanji_mode}=slot;
+      const profile=profiles.find(item=>item.name===name)?.profile ?? slot.profile;
+      audio[name]={profile,provider,model,voice_id,native_speed,speed,kanji_mode};
+    }
+    return JSON.stringify([roleKey(),audio,...profiles.map(({row})=>[row.base_url,row.connection_id,legacy?row.key_last4:null,row.revision])]);
+  }
+  const identity=config=>audioIdentity(config);
+  async function legacyCacheKey(config,text,reference) {
+    // Only the digest leaves this compatibility lookup; the suffix is not part of the current identity.
+    return window.VJVoiceCache.key(audioIdentity(config,true),text,reference);
+  }
+  const liveIdentity=config=>JSON.stringify([identity(config),liveConfig(config)]);
   async function loadCatalog(slot) {
     if (busy) return;
     const control=controls.get(slot), role=roleKey();
@@ -248,10 +356,14 @@
     old?.(user,data,canStore,platform);
     if (user!==owner() || admin() && !profilesLoaded) return;
     const previous=activeIdentity();
-    metadataOwner=user;rows=data.filter(row=>Object.hasOwn(bases,provider(row)) && (row.protocol!=='openai' || [bases.openai,bases.mistral].includes(row.base_url)) && (row.protocol!=='gemini' || row.base_url===bases.gemini));
+    metadataRole=roleKey();rows=data.filter(row=>Object.hasOwn(bases,provider(row)) && (row.protocol!=='openai' || [bases.openai,bases.mistral].includes(row.base_url)) && (row.protocol!=='gemini' || row.base_url===bases.gemini));
     el('storage').options[1].disabled=!canStore;
     if (drawnIdentity!==roleKey()) {drawnIdentity=roleKey();restore();} else {redrawAccounts();updateAccounts();}
-    if (previous!==activeIdentity()) voiceChanged();
+    if (previous!==activeIdentity()) {
+      let current;
+      try {current=stored();} catch { /* An invalid configuration was already revoked. */ }
+      voiceChanged(current);
+    }
   };
   function cancelRemoval() {pendingRemoval?.abort();pendingRemoval=null;}
   function confirmRemoval(row, signal) {
@@ -278,6 +390,8 @@
     } catch (error) {status.textContent=error.message;}
   });
   mode.addEventListener('change',()=>{layout();updateAccounts();});
+  liveEngine?.addEventListener('change',layoutLive);
+  liveStt?.addEventListener('change',layoutLive);
   kind.addEventListener('change',()=>{url.placeholder=bases[kind.value] || 'https://tts.example.com/v1';url.required=kind.value==='openai_compatible';url.value='';});
   el('account').addEventListener('submit',async event=>{
     event.preventDefault();if (busy) return;
@@ -315,7 +429,7 @@
   el('preview').addEventListener('click',()=>{
     try {
       const config=stored();
-      if (!config || JSON.stringify(capture())!==JSON.stringify(config)) throw new Error('Lưu cấu hình trước khi nghe thử.');
+      if (!config || identity(capture())!==identity(config)) throw new Error('Lưu cấu hình trước khi nghe thử.');
       window.VJVoice.speak('Xin chào! こんにちは、いっしょに練習しましょう。',{preview:true});
     } catch (error) {status.textContent=error.message;}
   });
@@ -325,17 +439,18 @@
   window.addEventListener('pagehide',cancelRemoval);
   window.addEventListener('hashchange',cancelRemoval);
   window.addEventListener('popstate',cancelRemoval);
+  window.addEventListener('vjbot-voice-changed',()=>{routingRevision++;});
   window.addEventListener('vjbot-account-ready',()=>{
     if (drawnIdentity===roleKey()) return;
     cancelRemoval();
-    metadataOwner=null;rows=[];catalogs.clear();el('key').value='';drawnIdentity=roleKey();restore();
+    routingRevision++;metadataRole=null;rows=[];catalogs.clear();el('key').value='';drawnIdentity=roleKey();restore();
     if (owner() && source.value==='personal') reloadProfiles();
   });
   window.addEventListener('storage',event=>{
     if (owner() && (event.key===prefix+owner() || event.key===null)) {
-      restore();voiceChanged();
+      restore();voiceChanged({live:restoredLive});
     }
   });
-  window.VJVoiceRouting=Object.freeze({stored,prepared,identity});
+  window.VJVoiceRouting=Object.freeze({stored,prepared,identity,legacyCacheKey,liveIdentity,liveConfig,preparedStt});
   restore();
 })();

@@ -1,22 +1,37 @@
 (function () {
   const maxLine=7 * 1024 * 1024;
+  const maxStream=Math.ceil(5 * 1024 * 1024 / 3) * 4 + 65536;
   // Matches the Worker synthesis budget in src/voice/segmenter.js.
   const maxSegments=16;
-  async function consume(response, append, current) {
-    if (!response.ok) {
-      const problem=await response.json();
-      throw new Error(problem.detail || 'Không đọc được đoạn này.');
+  async function consume(response, append, current, signal) {
+    if (!current()) {
+      void response.body?.cancel().catch(()=>{});
+      return null;
     }
-    if (!response.headers.get('Content-Type')?.startsWith('application/x-ndjson') || !response.body)
-      throw new Error('Phản hồi âm thanh không hợp lệ.');
+    const failed=!response.ok, missing='Không đọc được đoạn này.';
+    if (!response.body || !failed && !response.headers.get('Content-Type')?.startsWith('application/x-ndjson')) {
+      void response.body?.cancel().catch(()=>{});
+      throw new Error(failed ? missing : 'Phản hồi âm thanh không hợp lệ.');
+    }
     const reader=response.body.getReader(), decoder=new TextDecoder('utf-8',{fatal:true});
     const segments=[];
-    let pending='', ended=false, complete=false;
+    let pending='', ended=false, complete=false, bytes=0;
+    const cancel=()=>{void reader.cancel().catch(()=>{});};
+    signal?.addEventListener('abort',cancel,{once:true});
     try {
       for (;;) {
         const {done,value}=await reader.read();
         if (!current()) return null;
+        bytes+=value?.byteLength || 0;
+        if (failed && bytes>32*1024) throw new Error(missing);
+        if (bytes>maxStream) throw new Error('Phản hồi âm thanh quá lớn.');
         pending+=done ? decoder.decode() : decoder.decode(value,{stream:true});
+        if (failed) {
+          if (!done) continue;
+          let problem;
+          try {problem=JSON.parse(pending);} catch {throw new Error(missing);}
+          throw new Error(typeof problem?.detail==='string' && problem.detail.trim() ? problem.detail.slice(0,600) : missing);
+        }
         let position;
         while ((position=pending.indexOf('\n'))!==-1) {
           if (position>maxLine || ended) throw new Error('Phản hồi âm thanh không hợp lệ.');
@@ -38,7 +53,8 @@
       complete=true;
       return segments;
     } finally {
-      if (!complete) await reader.cancel().catch(()=>{});
+      signal?.removeEventListener('abort',cancel);
+      if (!complete) cancel();
       reader.releaseLock();
     }
   }
@@ -79,8 +95,17 @@
       if (!current()) return;
       const cache=window.VJVoiceCache, persist=options.cacheAudio===true && !options.privateAudio && !options.preview && !config.admin_override;
       const cacheKey=await cache.key(identity,text,reference).catch(()=>null);
-      const hit=cacheKey ? await cache.get(cacheKey,persist) : null;
+      let hit=cacheKey ? await cache.get(cacheKey,persist) : null, fromLegacy=false;
       if (!current()) return;
+      if (!hit && cacheKey && persist) {
+        const legacyKey=await window.VJVoiceRouting.legacyCacheKey?.(config,text,reference).catch(()=>null);
+        if (!current()) return;
+        if (legacyKey && legacyKey!==cacheKey) {
+          hit=await cache.get(legacyKey,true);
+          fromLegacy=Boolean(hit);
+        }
+        if (!current()) return;
+      }
       // Keep profile revocation checks on replay; only a cache miss needs local key decryption.
       const routing=await window.VJVoiceRouting.prepared(config,controller.signal,{replay:Boolean(hit)});
       if (!current()) return;
@@ -89,11 +114,12 @@
         if (current()) {mascotMgr.setState('speaking');speechStatus('Đang đọc · '+(segment.lang==='ja'?'Tiếng Nhật':'Tiếng Việt'),true);}
       }
       if (hit) {
+        if (fromLegacy) void cache.put(cacheKey,hit,persist);
         for (const segment of hit) {if (!current()) return;await append(segment);}
       } else {
         const response=await apiFetch('/api/tts',{voiceRouting:true,method:'POST',signal:controller.signal,headers:{'Content-Type':'application/json'},
           body:JSON.stringify({...reference,text,stream:true,routing})});
-        const segments=await consume(response,append,current);
+        const segments=await consume(response,append,current,controller.signal);
         if (segments && current() && cacheKey) void cache.put(cacheKey,segments,persist);
       }
       if (!current()) return;
@@ -106,5 +132,5 @@
     }
   }
   window.addEventListener('vjbot-account-ready',()=>window.VJVoiceCache.clearMemory());
-  window.VJVoice=Object.freeze({speak,stop});
+  window.VJVoice=Object.freeze({speak,stop,consume});
 })();
