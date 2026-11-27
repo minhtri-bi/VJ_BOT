@@ -17,6 +17,7 @@ const assetTypes = {css:'text/css',js:'application/javascript',json:'application
 const voiceProfile = {id:'fixture',name:'Mistral kiểm thử',protocol:'openai',
   base_url:'https://api.mistral.ai/v1',connection_id:'fixture-voice',purpose:'speech'};
 const html = `<!doctype html><meta charset="utf-8"><div id="speech-notice" hidden><span id="speech-status"></span><button id="speech-stop"></button></div>
+<button type="button" id="playback-check">Start playback check</button>
 ${assets.map(path => `<script src="${path}"></script>`).join('')}
 <script>
 const config = {admin_override:false};
@@ -54,7 +55,8 @@ AudioContext.prototype.createBufferSource = function () {
   },{once:true});
   return source;
 };
-(async()=>{
+document.getElementById('playback-check').addEventListener('click',async event=>{
+  if(!event.isTrusted)return;
   let error = '';
   try {
     const replay=location.search==='?replay';
@@ -88,11 +90,16 @@ AudioContext.prototype.createBufferSource = function () {
     if (!replay) {location.search='?replay';return;}
   } catch (failure) {error=failure.message;}
   await fetch('/result',{method:'POST',body:error});
-})();
+},{once:true});
 </script>`;
 // Observe the real media objects without changing the app's account, navigation, or controls.
 function observeLiveMedia(){
-  const media=window.voiceSmoke={microphone:null,output:[],keyboardClicks:[]};
+  const media=window.voiceSmoke={microphone:null,output:[],keyboardClicks:[],resumes:[]};
+  const resume=AudioContext.prototype.resume;
+  AudioContext.prototype.resume=function(){
+    media.resumes.push({activation:navigator.userActivation.isActive,hasMicrophone:Boolean(media.microphone)});
+    return resume.call(this);
+  };
   const getUserMedia=navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
   navigator.mediaDevices.getUserMedia=async constraints=>(media.microphone=await getUserMedia(constraints));
   document.addEventListener('click',event=>{
@@ -215,10 +222,14 @@ async function runLiveBrowser(debuggerUrl,origin){
       socket.addEventListener('error',()=>reject(new Error('Could not open loopback DevTools socket')),{once:true});
     });
     const {targetInfos}=await send('Target.getTargets');
-    const target=targetInfos.find(info=>info.type==='page' && info.url===`${origin}/?replay`);
+    const target=targetInfos.find(info=>info.type==='page' && info.url===`${origin}/`);
     assert.ok(target,'Playback fixture tab was not found');
     ({sessionId}=await send('Target.attachToTarget',{targetId:target.targetId,flatten:true}));
     await send('Runtime.enable');
+    await click('#playback-check');
+    await until('read-aloud reload',()=>observe(()=>location.search==='?replay' && Boolean(document.querySelector('#playback-check'))));
+    await click('#playback-check');
+    assert.equal(await completed,'');
     await send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'no-preference'}]});
     await width(1440);
     const navigation=await send('Page.navigate',{url:`${origin}/?live#settings/sound`});
@@ -261,6 +272,8 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.deepEqual(await motion(),[true,'none','none'],'Reduced motion did not stop the Voice orb animation and transition');
     await tabTo('#live-start');
     await press('Enter');
+    assert.deepEqual(await observe(()=>window.voiceSmoke.resumes[0]),{activation:true,hasMicrophone:false},
+      'Start must resume the actual AudioContext during a trusted gesture, before obtaining the microphone');
     await until('opening playback',async()=>await playing()===3 && await turn()==='you');
     assert.deepEqual(await observe(()=>{
       const {output}=window.voiceSmoke,[a,b,c]=output;
@@ -494,7 +507,7 @@ server.listen(0,'127.0.0.1');
 await once(server,'listening');
 const origin=`http://127.0.0.1:${server.address().port}`;
 // Keep Chromium's decoder and playback clock, without depending on a physical audio device.
-const browser = spawn(executable,['--headless','--disable-gpu','--disable-audio-output','--no-first-run','--no-default-browser-check','--autoplay-policy=no-user-gesture-required',
+const browser = spawn(executable,['--headless','--disable-gpu','--disable-audio-output','--no-first-run','--no-default-browser-check','--autoplay-policy=document-user-activation-required',
   '--use-fake-device-for-media-stream','--use-fake-ui-for-media-stream','--window-size=560,860',
   '--remote-debugging-port=0','--remote-debugging-address=127.0.0.1',
   '--disable-background-networking','--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1',
@@ -523,10 +536,7 @@ async function closeChromium() {
 let timer;
 let failure;
 try {
-  await Promise.race([(async()=>{
-    assert.equal(await completed,'');
-    await runLiveBrowser(await debuggerReady,origin);
-  })(),
+  await Promise.race([debuggerReady.then(url=>runLiveBrowser(url,origin)),
     exit.then(([code])=>{throw new Error(`Browser exited early (${code}): ${diagnostics}`);}),
     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Browser smoke timed out (pages ${pages}; synthesis ${requests}; live ${liveRequests}): ${diagnostics}`)),25000);})]);
   assert.deepEqual(pages,['/','/?replay','/?live'],'Replay must survive navigation before the Live browser smoke');
