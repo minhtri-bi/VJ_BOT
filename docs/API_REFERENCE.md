@@ -91,6 +91,8 @@ Legacy TTS sends `text` as the verbatim transcript. Reading directions stay in `
 
 `routing` has `version:2`, a `mode` (`single`, `dual_same_api` or `dual_split_api`), and `primary:{provider,profile,model?,voice_id?,format?,speed?,kanji_mode?}`. For dual modes, `ja` and `vi` can override pronunciation settings; a `null` slot profile inherits the primary connection. Profiles are `{scope:"server",id}`, `{scope:"local",connection:{base_url?,api_key}}` or `{scope:"platform",id:"openai"}`. The managed profile requires current admin rights. To use a personal voice profile, admins must send `admin_override:true`; neither path falls back to the other.
 
+For Mistral `single` routing with bilingual text, language changes do not split a clip. The Worker strips language tags and sends one synthesis request per nonempty `→`-separated clause. An arrow still marks a playback pause, and a clip containing Japanese uses `lang:"ja"` for playback metadata. Japanese-only and dual-voice routing retain their existing segmentation.
+
 Both languages default to 1×; already saved speeds are preserved. Supported ElevenLabs models apply native speed within 0.7×–1.2×. OpenAI applies native speed, and a custom OpenAI-compatible profile may opt in with `native_speed:true` only if its server implements `speed`. Response `speed` is the remaining browser playback multiplier. Mistral, Gemini and non-opted-in custom endpoints apply nondefault speed in the browser, which also changes pitch. Managed platform keys retain the eight-segment limit. A valid explicit kana reading in `mode:"ja"` takes precedence over automatic pronunciation and furigana settings.
 
 Use `{action:"catalog",routing,cursor?}` to discover models and voices for the primary profile without generating audio. Follow `next_cursor` if present. Catalog entries are not proof of synthesis access. Custom OpenAI-compatible TTS and non-native ElevenLabs/Mistral origins require an exact operator-managed HTTPS origin in `VOICE_ALLOWED_ORIGINS` (comma-separated). Keep that list limited to trusted public services; URL syntax checks alone are not a public-network guarantee. Redirects are never followed. The legacy JSON read-aloud contract remains available without `routing`.
@@ -100,6 +102,8 @@ In **Settings → Sound → Japanese–Vietnamese voice**, add a local or server
 Cached replay does not synthesize or decrypt a device key. It still checks device-profile revisions or revalidates server profiles online, so a deleted or rotated profile cannot replay under the old identity. A change to pronunciation or synthesis-speed semantics invalidates old audio cache keys.
 
 Common AI failures: `403 {code:"no_ai"}` for a missing selected API, `409 {code:"rekey"}` for an undecryptable key, `409 {code:"profile_changed"}` for a removed pinned profile, `403 {code:"oauth_model"}` for an unselected OAuth model, `409/503 {code:"oauth_reconnect"}` for unavailable OAuth, `429` for quota/rate limits and `503` for provider failures. Provider response bodies and secrets are not exposed.
+
+Native Mistral Live accepts `X-VJBot-Profile` on both `POST /api/live/mistral` and `DELETE /api/live/mistral`. The pin must resolve to an owned official Mistral Chat profile and cannot be combined with `api_connection`. Start and close use the same explicit profile. An unavailable pin does not fall back to another account.
 
 ### Cascaded Live Voice backend
 

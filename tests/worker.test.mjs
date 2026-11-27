@@ -1082,6 +1082,59 @@ test('Mistral Live uses the supplied official device connection for create and c
   } finally {globalThis.fetch=original;}
 });
 
+test('Mistral Live pins the owned server profile for create and delete without falling back',async()=>{
+  const {env,request}=await authenticated(),original=globalThis.fetch;
+  const base_url='https://api.mistral.ai/v1';
+  await withApi(env,request,{base_url,model:'active-mistral',api_key:'synthetic-active-key'});
+  const saved=await worker.fetch(request('/api/ai/profiles',{protocol:'openai',base_url,model:'pinned-mistral',api_key:'synthetic-pinned-key'}),env);
+  assert.equal(saved.status,201);
+  const {profile}=await saved.json();
+  await env.DB.prepare(`INSERT INTO ai_providers(user_id,id,name,protocol,base_url,model,key_enc,key_last4,updated_at)
+    SELECT 'google:other','foreign','Foreign',protocol,base_url,model,key_enc,key_last4,updated_at
+    FROM ai_providers WHERE user_id='google:qa' AND id=?`).bind(profile.id).run();
+  const send=(method,pin,body)=>{
+    const headers=request('/api/live/mistral').headers;
+    headers.set('X-VJBot-Account','google:qa');
+    headers.set('X-VJBot-Profile',pin);
+    return worker.fetch(new Request('https://vjbot.test/api/live/mistral',{method,headers,body:JSON.stringify(body)}),env);
+  };
+  const calls=[];
+  let closeStatus=204;
+  globalThis.fetch=async(url,options)=>{
+    calls.push([options.method,url,options.headers.Authorization]);
+    if(options.method==='DELETE')return new Response(null,{status:closeStatus});
+    assert.equal(JSON.parse(options.body).llm.model,'pinned-mistral');
+    return Response.json({id:'sess_pinned',participant_token:'pt-pinned',server_url:'https://lk.test'});
+  };
+  try {
+    const created=await send('POST',profile.id,{level:'N5'});
+    assert.equal(created.status,201);
+    const {id}=await created.json();
+    assert.equal(id,'sess_pinned');
+    assert.equal((await send('DELETE',profile.id,{id})).status,200);
+    closeStatus=403;
+    const unclosed=await send('DELETE',profile.id,{id});
+    assert.equal(unclosed.status,502);
+    assert.equal((await unclosed.json()).code,'live_close_failed');
+    const api_connection={protocol:'openai',base_url,model:'device-mistral',api_key:'synthetic-device-key'};
+    for(const [method,body] of [['POST',{level:'N5'}],['DELETE',{id}]]){
+      const conflict=await send(method,profile.id,{...body,api_connection});
+      assert.equal(conflict.status,400);assert.equal((await conflict.json()).code,'invalid_connection');
+      for(const pin of ['foreign','stale']){
+        const missing=await send(method,pin,body);
+        assert.equal(missing.status,409);assert.equal((await missing.json()).code,'profile_changed');
+      }
+    }
+    const oauth=await send('POST','antigravity_oauth:some-login',{level:'N5'});
+    assert.equal(oauth.status,400);assert.equal((await oauth.json()).code,'invalid_connection');
+    assert.deepEqual(calls,[
+      ['POST',`${base_url}/audio/sessions`,'Bearer synthetic-pinned-key'],
+      ['DELETE',`${base_url}/audio/sessions/sess_pinned`,'Bearer synthetic-pinned-key'],
+      ['DELETE',`${base_url}/audio/sessions/sess_pinned`,'Bearer synthetic-pinned-key']
+    ]);
+  } finally {globalThis.fetch=original;}
+});
+
 test('Mistral Live falls back to a supported agent model only when Mistral rejects the chosen one',async()=>{
   const {env,request}=await authenticated(),original=globalThis.fetch;
   const api_connection={protocol:'openai',base_url:'https://api.mistral.ai/v1',model:'magistral-small-latest',api_key:'synthetic-device-mistral-key'};

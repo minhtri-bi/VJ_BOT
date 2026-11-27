@@ -43,6 +43,100 @@ test('bilingual stream binds each segment to its selected provider and preserves
     ['api.mistral.ai','「学校に行きます」.',undefined], ['api.elevenlabs.io','Thử nói nhé.','vi']]);
 });
 
+test('one Mistral voice sends one unlabelled mixed REST input per meaningful arrow clause', async t => {
+  const calls = [];
+  intercept(t, async (url,init) => {
+    assert.equal(url,'https://api.mistral.ai/v1/audio/speech');
+    calls.push(JSON.parse(init.body));
+    return Response.json({audio_data:'SUQzBA=='});
+  });
+  const model = 'voxtral-mini-tts-3-0', voice = 'voice_custom', speed = 0.85;
+  const primary = {...slot('mistral',voice),kanji_mode:'kana_first',speed};
+  const text = '→ Trợ từ 「<ja>は</ja>」 (wa) và “へ” (e): <ja>学校(がっこう)へ行きます。</ja> (gakkō e ikimasu) Em đọc nhé! → … → <vi>Tiếng Việt (ví dụ), nhé.</vi> → 私は学生です。「はし」を読みます。(hashi) (âm) → <ja>「たべよう」(tabeyo)</ja> <vi>là cách nói rủ rê.</vi> → <vi>Hãy đọc</vi><ja>DVD</ja><vi>lần nữa.</vi> → <ja>日本語能力試験</ja> (JLPT)';
+  const expectedInputs = ['Trợ từ 「わ」 và “え”: がっこうへ行きます。 Em đọc nhé!', 'Tiếng Việt (ví dụ), nhé.', '私は学生です。「はし」を読みます。 (âm)',
+    '「たべよう」 là cách nói rủ rê.', 'Hãy đọc DVD lần nữa.', '日本語能力試験 (JLPT)'];
+  const routing = {version:2,mode:'single',primary};
+  for (const mode of [undefined,null,'bilingual']) {
+    const records = await lines(await tts({text,mode,stream:true,routing}));
+    assert.deepEqual(records,[
+      ...['ja','vi','ja','ja','vi','ja'].map((lang,index)=>({type:'segment',index,lang,boundary:index?'arrow':'start',
+        speed,voice,model,audioBase64:'SUQzBA==',mimeType:'audio/mpeg'})),
+      {type:'done',count:6}
+    ]);
+    assert.deepEqual(calls.splice(0),expectedInputs.map(input=>({model,voice_id:voice,input,response_format:'mp3'})));
+  }
+});
+
+test('Mistral mixed clauses keep tagged numeric text and skip unmarked non-speech', async t => {
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const routing = {version:2,mode:'single',primary:slot('mistral','custom_voice')};
+  const records = await lines(await tts({text:'→ … → <ja>３。→ ４?</ja> → <vi>3.5</vi> → 29 →',stream:true,routing}));
+  assert.deepEqual(inputs,['３。','４?','3.5']);
+  assert.deepEqual(records.map(({type,lang,boundary})=>[type,lang,boundary]),[
+    ['segment','ja','start'],['segment','ja','arrow'],['segment','vi','arrow'],['done',undefined,undefined]]);
+  const empty = await tts({text:'→ ! → 404',stream:true,routing});
+  assert.equal(empty.status,400);
+  assert.equal((await empty.json()).code,'tts_no_text');
+  assert.equal(inputs.length,3);
+});
+
+test('Japanese-only and dual same-account Mistral keep script routing and preset or explicit voice precedence', async t => {
+  const calls = [];
+  intercept(t, async (_url,init) => {
+    const {input,voice_id} = JSON.parse(init.body);
+    calls.push([input,voice_id]);
+    return mp3();
+  });
+  const text = '<vi>Em nghe nhé.</vi> <ja>学校(がっこう)へ行きます。</ja> (gakkō e ikimasu) → <ja>私は学生です。</ja> <vi>Đọc lại nhé.</vi>';
+  const primary = slot('mistral','custom_ja');
+  const single = {version:2,mode:'single',primary};
+  const only = await lines(await tts({text,mode:'ja',stream:true,routing:single}));
+  assert.deepEqual(only.map(({type,lang,boundary})=>[type,lang,boundary]),[
+    ['segment','ja','start'],['segment','ja','arrow'],['done',undefined,undefined]]);
+  assert.deepEqual(calls.splice(0),[['学校へ行きます。','custom_ja'],['私は学生です。','custom_ja']]);
+
+  const dual = {version:2,mode:'dual_same_api',primary:slot('mistral',''),ja:{profile:null},vi:{profile:null}};
+  const defaultVoices = await lines(await tts({text,stream:true,routing:dual}));
+  assert.deepEqual(defaultVoices.map(({type,lang,boundary})=>[type,lang,boundary]),[
+    ['segment','vi','start'],['segment','ja','sentence'],['segment','ja','arrow'],['segment','vi','sentence'],['done',undefined,undefined]]);
+  assert.deepEqual(calls.splice(0),[['Em nghe nhé.','voice_3144'],['学校へ行きます。','voice_3133'],
+    ['私は学生です。','voice_3133'],['Đọc lại nhé.','voice_3144']]);
+
+  dual.primary.voice_id='shared_clone';
+  dual.ja.voice_id='custom_ja';
+  assert.deepEqual((await lines(await tts({text,stream:true,routing:dual}))).at(-1),{type:'done',count:4});
+  assert.deepEqual(calls.map(row=>row[1]),['shared_clone','custom_ja','custom_ja','shared_clone']);
+});
+
+test('shared romaji cleanup preserves reading preference, annotations and grammatical particles', async t => {
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const routing = {version:2,mode:'single',primary:slot('openai','alloy')};
+  const text = '<ja>「は」(wa)と「へ」(e)。私は{学校|がっこう}へ行きます。</ja>\n(watashi wa gakkō e ikimasu) <ja>パーティー(paatii)と日々(hibi)。</ja> <vi>Nhắc lại (N5).</vi>';
+  for (const kanji_mode of ['kanji_native','kana_first']) {
+    routing.primary.kanji_mode=kanji_mode;
+    assert.deepEqual((await lines(await tts({text,stream:true,routing}))).at(-1),{type:'done',count:2});
+  }
+  assert.deepEqual(inputs,['「わ」と「え」。私は学校へ行きます。 パーティーと日々。','Nhắc lại (N5).',
+    '「わ」と「え」。私はがっこうへ行きます。 パーティーと日々。','Nhắc lại (N5).']);
+});
+
+test('Mistral mixed mode enforces text, segment, connection and admin limits before synthesis', async t => {
+  let calls=0;
+  intercept(t, async () => {calls++;return mp3();});
+  const routing = {version:2,mode:'single',primary:slot('mistral','custom_voice')};
+  const request = text => ({text,stream:true,routing});
+  const tooMany = await tts(request(Array(17).fill('Ví dụ 日本語。').join(' → ')));
+  assert.equal(tooMany.status,413);
+  assert.equal((await tooMany.json()).code,'tts_segment_limit');
+  assert.equal((await tts(request('あ'.repeat(4001)))).status,413);
+  assert.equal((await tts(request('日本語 và tiếng Việt.'),{admin:true})).status,403);
+  routing.primary.profile.connection.base_url='https://voice.example/v1';
+  assert.equal((await tts(request('日本語 và tiếng Việt.'))).status,403);
+  assert.equal(calls,0);
+});
+
 test('Japanese-only listening preserves acronyms in Japanese context and skips Vietnamese', async t => {
   const inputs = [];
   intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
@@ -195,17 +289,27 @@ test('same ElevenLabs account never exceeds two concurrent syntheses, even for o
   assert.equal(peak,2);
 });
 
-test('Mistral catalog returns account clones with an opaque next-page cursor', async t => {
+test('Mistral catalog identifies account clones and known presets without changing IDs or cursor', async t => {
   intercept(t,async (url,init)=>{
     const target=new URL(url);
     assert.equal(target.pathname,'/v2/audio/voices');
     assert.equal(target.searchParams.get('page_token'),'second');
     assert.equal(init.method,'GET');
-    return Response.json({data:[{id:'voice_custom',name:'Teacher clone',type:'custom'}],next_page_token:'third'});
+    return Response.json({data:[
+      {id:'voice_custom',name:'Teacher clone',type:'custom'},
+      {id:'voice_3133',name:'Provider JP',type:'preset'},
+      {id:'voice_3144',name:'Provider VI',type:'preset'},
+      {id:'voice_other',name:'Other provider voice',type:'preset'}
+    ],next_page_token:'third'});
   });
   const response=await tts({action:'catalog',cursor:'second',routing:{version:2,mode:'single',primary:slot('mistral','')}});
   assert.deepEqual(await response.json(),{models:[{id:'voxtral-mini-tts-3-0'}],
-    voices:[{id:'voice_custom',name:'Teacher clone',category:'cloned'}],verified:false,next_cursor:'third'});
+    voices:[
+      {id:'voice_custom',name:'Teacher clone',category:'cloned'},
+      {id:'voice_3133',name:'Haruto',category:'premade',lang:'ja'},
+      {id:'voice_3144',name:'Huong',category:'premade',lang:'vi'},
+      {id:'voice_other',name:'Other provider voice',category:'premade'}
+    ],verified:false,next_cursor:'third'});
 });
 
 test('custom profiles preserve client speed unless opted into native speed', async t => {
