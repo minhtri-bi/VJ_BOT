@@ -16,7 +16,7 @@ const formats = {'audio/webm':'webm','audio/mp4':'mp4','audio/ogg':'ogg','audio/
 const engines = {
   openai:{label:'OpenAI',model:'gpt-transcribe'},
   mistral:{label:'Mistral',model:'voxtral-mini-transcribe-3'},
-  elevenlabs:{label:'ElevenLabs',model:'scribe_v2'}
+  elevenlabs:{label:'ElevenLabs',model:'scribe_v3'}
 };
 const object = value => value && typeof value === 'object' && !Array.isArray(value);
 const capabilities = (kind = null) => json({supported:kind !== null,provider:kind,model:engines[kind]?.model ?? null});
@@ -24,6 +24,9 @@ const invalidRouting = (detail = 'Cấu hình chép lời không hợp lệ.') =
 const unavailable = () => json({detail:'Chưa chép được bản ghi. Thử lại hoặc nhập câu trả lời.'},503);
 const invalidTranscript = () => json({detail:'Bản chép lời không hợp lệ.'},502);
 const timeout = () => json({detail:'Kết nối chép lời hết thời gian. Thử lại hoặc nhập câu trả lời.'},504);
+const lessonLanguages = new Set(['ja','jpn','vi','vie']);
+// Reject unexpected scripts without stripping kanji, kana or Latin loanwords.
+const otherScript = /(?=\p{L})[^\p{scx=Latin}\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]/u;
 
 function audioBytes(data,mime) {
   if(typeof data!=='string' || !data.length || data.length>Math.ceil(MAX_AUDIO/3)*4 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data))return null;
@@ -59,6 +62,11 @@ async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, 
     const form = new FormData();
     form.set('file',file,filename);
     form.set(eleven ? 'model_id' : 'model',engine.model);
+    if (eleven) {
+      form.set('language_code','ja');
+      form.append('secondary_language_codes','vi');
+      form.set('tag_audio_events','false');
+    }
     for (const term of terms) form.append('context_bias',term);
     return fetch(url,{method:'POST',redirect:'manual',signal,headers,body:form});
   };
@@ -85,7 +93,14 @@ async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, 
   let result;
   try {result = JSON.parse(raw);} catch {return explicit ? invalidTranscript() : timeout();}
   if (typeof result?.text !== 'string' || result.text.length > 6000 || result.text.includes(apiKey)) return invalidTranscript();
-  return json({text:result.text.trim()});
+  const text=result.text.trim();
+  if (eleven && text) {
+    if (Array.isArray(result.words) && result.words.some(part=>part?.type==='audio_event')
+      && !result.words.some(part=>part?.type==='word')) return json({text:''});
+    if (!lessonLanguages.has(result.language_code) || otherScript.test(text))
+      return json({detail:'Chưa nhận ra tiếng Nhật hoặc tiếng Việt. Em nói lại một câu ngắn nhé.',code:'stt_language_unsupported'},422);
+  }
+  return json({text});
 }
 
 export async function transcriptionRoute(request,env) {

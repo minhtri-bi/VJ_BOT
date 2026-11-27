@@ -137,7 +137,9 @@ Native provider streams must report completion; compatible proxies may finish at
 
 For a different connection, send `stt_routing:{version:2,provider:"openai"|"mistral"|"elevenlabs",profile,admin_override?}`. The profile has the same scope and connection format as TTS. Do not send `api_connection` or `X-VJBot-Profile` with explicit routing, including for admins. An admin with a private voice profile must opt in using `admin_override:true`; invalid or unavailable selections never borrow Chat or platform keys. Explicit capabilities return `{supported,provider,model}`. Custom Mistral and ElevenLabs origins must pass the same allowlist as TTS.
 
-An optional `lesson:{id,level}` must resolve to approved-for-processing source material for any STT provider. Mistral receives up to 40 permitted canonical vocabulary hints, and retries once without those hints only if Mistral rejects the biased request with HTTP `422`. ElevenLabs uses Scribe v2; the selected Chat provider is unchanged.
+An optional `lesson:{id,level}` must resolve to approved-for-processing source material for any STT provider. Mistral receives up to 40 permitted canonical vocabulary hints, and retries once without those hints only if Mistral rejects the biased request with HTTP `422`.
+
+ElevenLabs uses [Scribe v3 batch transcription](https://elevenlabs.io/docs/eleven-api/guides/how-to/speech-to-text/batch/number-and-language-options) with `language_code=ja`, `secondary_language_codes=vi`, and `tag_audio_events=false`. Nonempty transcripts require a Japanese or Vietnamese language code and must not contain letters outside Latin, Han or kana scripts; otherwise the Worker returns `422 {code:"stt_language_unsupported"}` without the upstream text. Audio events alone count as no speech. This is a recognition hint and output check, not a guarantee of language identity or transcription accuracy. An approved proxy must support the same Scribe v3 contract. Other STT providers and the selected Chat provider are unchanged.
 
 An upstream billing failure returns HTTP `402 {code:"stt_billing"}` for both default and explicit transcription routing. It does not trigger a different provider.
 

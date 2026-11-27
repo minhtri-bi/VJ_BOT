@@ -65,14 +65,14 @@ async function reject(response, status, code) {
   if (code) assert.equal((await response.json()).code,code);
 }
 
-const success = () => Response.json({text:' こんにちは。 '});
+const success = () => Response.json({text:' こんにちは。 ',language_code:'jpn'});
 
-test('Scribe capabilities are free; ElevenLabs uses Scribe v2 and keeps approved versioned mounts',async t => {
+test('Scribe capabilities are free; ElevenLabs sends only Japanese and Vietnamese hints through approved mounts',async t => {
   const {send,env,usage} = await fixture(t);
   const calls = intercept(t,success);
   const official = local('elevenlabs','https://api.elevenlabs.io/v1/');
   const custom = local('elevenlabs','https://voice.example/gateway/v1/');
-  assert.deepEqual(await (await send({...action,stt_routing:official})).json(),{supported:true,provider:'elevenlabs',model:'scribe_v2'});
+  assert.deepEqual(await (await send({...action,stt_routing:official})).json(),{supported:true,provider:'elevenlabs',model:'scribe_v3'});
   assert.deepEqual(await (await send({...action,stt_routing:custom})).json(),{supported:false,provider:null,model:null});
   await reject(await send({...audio,stt_routing:custom}),403,'stt_profile_unavailable');
   assert.equal(usage(),0);
@@ -86,9 +86,51 @@ test('Scribe capabilities are free; ElevenLabs uses Scribe v2 and keeps approved
   assert.deepEqual(calls.map(call => call.url),['https://api.elevenlabs.io/v1/speech-to-text','https://voice.example/gateway/v1/v1/speech-to-text']);
   for (const {method,redirect,headers,body} of calls) {
     assert.deepEqual([method,redirect,headers],['POST','manual',{'xi-api-key':key}]);
-    assert.equal(body.get('model_id'),'scribe_v2');
+    assert.equal(body.get('model_id'),'scribe_v3');
+    assert.equal(body.get('language_code'),'ja');
+    assert.deepEqual(body.getAll('secondary_language_codes'),['vi']);
+    assert.equal(body.get('tag_audio_events'),'false');
     assert.equal(body.has('model'),false);
     assert.deepEqual([body.get('file').name,body.get('file').type,await body.get('file').text()],['recording.wav','audio/wav',recording]);
+  }
+});
+
+test('ElevenLabs accepts Japanese, Vietnamese and mixed speech without forwarding wrong-language guesses',async t => {
+  const {send}=await fixture(t);
+  const valid=[
+    {language_code:'jpn',text:' 今日はスーパーに行きます。 '},
+    {language_code:'vie',text:' Vào buổi sáng em đi học. '},
+    {language_code:'ja',text:' Em muốn tập nói 「学校に行きます」. '},
+    {language_code:'vi',text:' Em đọc số 20. '}
+  ];
+  const rejected=[
+    {language_code:'zho',text:'就啊。'},
+    {language_code:'hin',text:'सुनिछु हो?'},
+    {language_code:'eng',text:'Is anybody there?'},
+    {language_code:'jpn',text:'こんにちは。 सुनिछु हो?'},
+    {text:'Không có mã ngôn ngữ.'}
+  ];
+  const noise={language_code:'jpn',text:'[singing]',words:[{type:'audio_event',text:'[singing]'}]};
+  const samples=[...valid,...rejected,noise,{text:'  '}];
+  intercept(t,n=>Response.json(samples[n-1]));
+  const body={...audio,stt_routing:local('elevenlabs')};
+  for (const row of valid) {
+    const response=await send(body);
+    assert.equal(response.status,200);
+    assert.deepEqual(await response.json(),{text:row.text.trim()});
+  }
+  for (const row of rejected) {
+    const response=await send(body);
+    assert.equal(response.status,422);
+    const error=await response.json();
+    assert.equal(error.code,'stt_language_unsupported');
+    assert.equal(error.text,undefined);
+    assert.ok(!error.detail.includes(row.text));
+  }
+  for (const row of [noise,samples.at(-1)]) {
+    const response=await send(body);
+    assert.equal(response.status,200,row.text);
+    assert.deepEqual(await response.json(),{text:''});
   }
 });
 
