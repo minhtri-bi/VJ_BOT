@@ -240,10 +240,12 @@ export async function liveTurnRoute(request, env) {
   if (request.signal.aborted) return new Response(null, {status:204});
   if (await rateLimited(env, user.user_id)) return jsonError(429, 'live_rate_limited', 'Em hãy đợi một phút rồi thử lại.');
   if (request.signal.aborted) return new Response(null, {status:204});
-  if (protectedChoice) return choiceGuidance(command, japanese_only);
+  // No provider is needed for local guidance, but an explicit pin must not be ignored.
+  if (protectedChoice && profile === undefined && !Object.hasOwn(data, 'api_connection')) return choiceGuidance(command, japanese_only);
   const provider = await resolveProvider(env, user.user_id, data.api_connection, profile, {signal:request.signal});
   if (request.signal.aborted) return new Response(null, {status:204});
   const failure = providerFailure(provider);
   if (failure) return failure;
+  if (protectedChoice) return choiceGuidance(command, japanese_only);
   return liveEvents(provider, envelope, voiceStreamingInstructions(level, {japaneseOnly:japanese_only, preAnswerTask:focus?.kind === 'question'}), japanese_only, request.signal);
 }

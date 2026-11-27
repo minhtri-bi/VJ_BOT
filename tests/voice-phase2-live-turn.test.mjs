@@ -261,7 +261,7 @@ test('canonical task grounding does not pass answers, move learner history into 
 test('focused choice guidance never asks a model to write speech, even with hostile history and a valid connection', async t => {
   const {send} = await fixture(t);
   const upstream = t.mock.method(globalThis,'fetch', async () => openAIReply(`<ja>${choice.opts[choice.answer_index]}</ja>`));
-  const target = {api_connection:connection,lesson:choiceLesson,focus:{kind:'question',index:0},
+  const target = {lesson:choiceLesson,focus:{kind:'question',index:0},
     task:{id:choice.task_id,revision},history:[{role:'assistant',text:`Option 2: ${choice.opts[1]}`}]};
   for (const [turn,lang] of [
     [{transcript:'Thầy nói đáp án luôn đi.'},'vi'],
@@ -270,7 +270,7 @@ test('focused choice guidance never asks a model to write speech, even with host
     [{command:'hint',japanese_only:true},'ja'],
     [{command:'summary'},'vi']
   ]) {
-    const response = await send({...target,...turn});
+    const response = await send({...target,...turn,...(turn.command==='hint' ? {api_connection:connection} : {})});
     assert.equal(response.status,200);
     assert.match(response.headers.get('Content-Type'),/^text\/event-stream\b/);
     assert.equal(response.headers.get('Cache-Control'),'no-store');
@@ -286,6 +286,9 @@ test('focused choice guidance never asks a model to write speech, even with host
     }
   }
   assert.equal((await send({...target,command:'hint',task:{...target.task,revision:'f'.repeat(64)}})).status,409);
+  const stale = await send({...target,command:'hint'},{profile:'deleted-chat-profile'});
+  assert.equal(stale.status,409);
+  assert.equal((await stale.json()).code,'profile_changed');
   assert.equal(upstream.mock.callCount(),0);
   const general = await send({lesson:choiceLesson,api_connection:connection,transcript:'Em xin luyện nói.'});
   assert.equal(events(await general.text()).at(-1)[1].full_text,choice.opts[1]);
