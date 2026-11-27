@@ -94,6 +94,9 @@
     const chatOptions=chatBinding ? {chatBinding} : {};
     const sttOptions=explicit ? {voiceRouting:true} : {...chatOptions,cascadedStt:true};
     const Recognition=window.SpeechRecognition || window.webkitSpeechRecognition;
+    // Use the modern audio-track path only; prefixed microphone-only recognition stays PTT.
+    const recordedBrowserStt=typeof window.SpeechRecognition?.available==='function' && Boolean(window.MediaRecorder && audioContext.createMediaStreamDestination);
+    const browserPttOnly='Trình duyệt này không chép được bản ghi ở chế độ tự động. Em dùng Bấm để nói nhé.';
     let mode=live.turn_mode, muted=false, phase='connecting', sttProvider=null;
     let started=false, ready=false, sequence=0, active=null, capture=null, setupTimer;
     let source=null, detector=null, pollTimer, vadMute=null;
@@ -230,9 +233,9 @@
         await initVad();
         if (!ownsSession()) return;
         clearTimeout(setupTimer);ready=true;
-        if (mode==='vad' && !detector) {
+        if (mode==='vad' && (!detector || provider==='browser' && !recordedBrowserStt)) {
           mode='ptt';state('listening');
-          if (ownsSession()) onError('Trình duyệt không hỗ trợ phát hiện tiếng nói. Em dùng Bấm để nói nhé.');
+          if (ownsSession()) onError(provider==='browser' && !recordedBrowserStt ? browserPttOnly : 'Trình duyệt không hỗ trợ phát hiện tiếng nói. Em dùng Bấm để nói nhé.');
         }
         return sendCommand('start');
       } catch (error) {fatal(error);}
@@ -241,16 +244,21 @@
     function releaseCapture(record) {
       if (!record || capture!==record) return;
       capture=null;clearTimeout(record.timer);
-      const {device}=record;
-      if (!device) return;
-      try {
-        if (record.browser) {
-          device.onresult=device.onerror=device.onend=null;device.abort();
-        } else {
-          device.ondataavailable=device.onerror=device.onstop=null;
-          if (device.state!=='inactive') device.stop();
-        }
-      } catch { /* The device may have ended on its own. */ }
+      const {recorder,recognizer,bufferSource,track,destination}=record;
+      if (recognizer) {
+        recognizer.onresult=recognizer.onerror=recognizer.onend=recognizer.onaudiostart=null;
+        try {recognizer.abort();} catch { /* It may already have ended. */ }
+      }
+      if (recorder) {
+        recorder.ondataavailable=recorder.onerror=recorder.onstop=null;
+        try {if (recorder.state!=='inactive') recorder.stop();} catch { /* It may already have ended. */ }
+      }
+      if (bufferSource) {
+        bufferSource.onended=null;
+        try {bufferSource.stop();} catch { /* It may not have started. */ }
+        bufferSource.disconnect();
+      }
+      track?.stop();destination?.disconnect();
     }
     function captureErrorFor(record,text) {
       if (capture!==record || !ownsSession()) return;
@@ -261,35 +269,53 @@
     }
     function commitCapture(record) {
       if (!ownsSession() || capture!==record) return;
-      if (record.browser) {
+      if (record.browser && !record.auto) {
         try { startBrowserRecognition(record); }
         catch {captureErrorFor(record,captureError);return;}
         if (!ownsSession() || capture!==record) return;
       }
       record.turn=beginTurn();state('recording');
     }
-    function recordEnded(record) {
+    function finishTranscript(record) {
       if (capture!==record || !ownsSession()) return;
-      const {turn,browser,start,lastLoud}=record, end=record.end ?? time();
+      const {turn,start,text}=record, end=record.end ?? time();
       releaseCapture(record);
-      if (!turn || !owns(turn)) return;
+      if (turn && owns(turn)) void learnerTurn(turn,text,null,start,end);
+    }
+    async function recordEnded(record) {
+      if (capture!==record || !ownsSession()) return;
+      const {turn,browser,start,lastLoud,recorder}=record, end=record.end ?? time();
+      if (!turn || !owns(turn)) {releaseCapture(record);return;}
       if (record.auto && !browser && lastLoud-start<minSpeech) {
-        completeTurn(turn);
-        return;
+        releaseCapture(record);completeTurn(turn);return;
       }
-      const input=browser ? null : new Blob(record.chunks,{type:record.device.mimeType || record.chunks[0]?.type || record.mime});
-      if (!browser && (input.size<512 || input.size>maxAudio)) {turnError(turn,new Error(noSpeech));return;}
-      void learnerTurn(turn,record.text,input,start,end);
+      const input=new Blob(record.chunks,{type:recorder.mimeType || record.chunks[0]?.type || record.mime});
+      if (input.size<512 || input.size>maxAudio) {captureErrorFor(record,noSpeech);return;}
+      if (!browser) {
+        releaseCapture(record);void learnerTurn(turn,'',input,start,end);return;
+      }
+      record.end=end;record.chunks.length=0;
+      try {
+        const bytes=await input.arrayBuffer();
+        if (!owns(turn) || capture!==record) return;
+        const audio=await audioContext.decodeAudioData(bytes);
+        if (!owns(turn) || capture!==record) return;
+        clearTimeout(record.timer);
+        record.timer=setTimeout(()=>captureErrorFor(record,captureError),Math.ceil(audio.duration*1000)+8000);
+        state('thinking');
+        startBrowserRecognition(record,audio);
+      } catch {captureErrorFor(record,captureError);}
     }
     function endCapture(record) {
       if (capture!==record || record.end!==undefined || !ownsSession()) return;
-      if (!record.turn || !record.device) {releaseCapture(record);return;}
+      const device=record.recognizer || record.recorder;
+      if (!record.turn || !device) {releaseCapture(record);return;}
       record.end=time();clearTimeout(record.timer);
       record.timer=setTimeout(()=>captureErrorFor(record,captureError),4000);
-      try {record.device.stop();} catch {captureErrorFor(record,captureError);}
+      try {device.stop();} catch {captureErrorFor(record,captureError);}
     }
-    function startBrowserRecognition(record) {
-      const recognizer=record.device=new Recognition();
+    function startBrowserRecognition(record,audio) {
+      const recognizer=record.recognizer=new Recognition();
       recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
       recognizer.onresult=event=>{
         if (capture!==record || !ownsSession()) return;
@@ -302,17 +328,32 @@
         record.text=text;
       };
       recognizer.onerror=event=>captureErrorFor(record,event.error==='no-speech' ? noSpeech : 'Trình duyệt chưa chép được lời. Em kiểm tra micro và nguồn chép lời nhé.');
-      recognizer.onend=()=>recordEnded(record);
-      recognizer.start();
+      recognizer.onend=()=>finishTranscript(record);
+      if (!audio) {recognizer.start();return;}
+      // Feed the whole confirmed recording after the recognizer is ready, never the live mic.
+      const destination=record.destination=audioContext.createMediaStreamDestination();
+      const track=record.track=destination.stream.getAudioTracks()[0];
+      const bufferSource=record.bufferSource=audioContext.createBufferSource();
+      bufferSource.buffer=audio;bufferSource.connect(destination);
+      bufferSource.onended=()=>{
+        if (capture!==record || !ownsSession()) return;
+        try {recognizer.stop();} catch {captureErrorFor(record,captureError);}
+      };
+      recognizer.onaudiostart=()=>{
+        if (capture!==record || !ownsSession()) return;
+        recognizer.onaudiostart=null;
+        try {bufferSource.start();} catch {captureErrorFor(record,captureError);}
+      };
+      recognizer.start(track);
     }
     function beginCapture(auto,now) {
       if (!ownsSession() || muted) return;
       const browser=sttProvider==='browser', record=capture={auto,browser,start:now,lastLoud:now,text:'',chunks:[],size:0};
       try {
-        if (!browser) {
+        if (!browser || auto) {
           const Recorder=window.MediaRecorder;
           const mime=record.mime=['audio/webm;codecs=opus','audio/mp4','audio/ogg;codecs=opus'].find(type=>Recorder.isTypeSupported?.(type));
-          const recorder=record.device=new Recorder(microphone,mime?{mimeType:mime}:{});
+          const recorder=record.recorder=new Recorder(microphone,mime?{mimeType:mime}:{});
           recorder.ondataavailable=({data})=>{
             if (capture!==record || !ownsSession() || !data?.size) return;
             record.size+=data.size;
@@ -320,7 +361,7 @@
             record.chunks.push(data);
           };
           recorder.onerror=()=>captureErrorFor(record,captureError);
-          recorder.onstop=()=>recordEnded(record);
+          recorder.onstop=()=>{void recordEnded(record);};
           recorder.start(250);
         }
         if (capture!==record || !ownsSession()) return;
@@ -341,7 +382,7 @@
       const nearSpeaker=phase==='speaking' || now-speakerEndedAt<250;
       const threshold=nearSpeaker ? 0.035 : 0.022;
       if (!record) {
-        // Record server STT at onset. Start browser recognition only after confirmation.
+        // Capture at onset, but never invoke Browser STT until the recording is confirmed.
         if (rms>=threshold && (phase==='listening' && !nearSpeaker || live.barge_in && ['listening','thinking','speaking'].includes(phase)))
           beginCapture(true,now);
         return;
@@ -371,9 +412,9 @@
     }
     function setMode(value) {
       if (!ownsSession() || !['ptt','vad'].includes(value) || mode===value) return;
-      if (ready && value==='vad' && !detector) {
+      if (ready && value==='vad' && (!detector || sttProvider==='browser' && !recordedBrowserStt)) {
         state();
-        if (ownsSession()) onError('Trình duyệt không hỗ trợ chế độ tự động.');
+        if (ownsSession()) onError(sttProvider==='browser' && !recordedBrowserStt ? browserPttOnly : 'Trình duyệt không hỗ trợ chế độ tự động.');
         return;
       }
       discardCapture();mode=value;state();

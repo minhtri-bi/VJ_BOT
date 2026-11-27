@@ -27,9 +27,10 @@ function pushStream(type) {
   return {response,write:text=>controller.enqueue(encoder.encode(text)),close:()=>controller.close(),get cancelled(){return cancelled;}};
 }
 
-function fixture({live={},fetch,route,recognition=true,playback,worklet=false,chatBinding}={}) {
+function fixture({live={},fetch,route,recognition=true,recordedRecognition=false,playback,worklet=false,chatBinding}={}) {
   let now=0,id=0,valid=true,rms=0;
   const timers=new Map(),calls=[],states=[],captions=[],errors=[],clips=[],audio=[],recorders=[],recognizers=[],nodes=[],modules=[],sttSignals=[];
+  const decoded=[], bufferedSources=[], track={stop(){this.stopped=true;}};
   const schedule=(fn,delay,interval)=>{const key=++id;timers.set(key,{fn,at:now+delay,interval});return key;};
   const clear=key=>timers.delete(key);
   function advance(ms) {
@@ -56,13 +57,17 @@ function fixture({live={},fetch,route,recognition=true,playback,worklet=false,ch
   }
   class Recognizer {
     constructor(){recognizers.push(this);}
-    start(){this.active=true;}
+    start(track){this.active=true;this.track=track;}
     stop(){this.active=false;this.onend?.();}
     abort(){this.active=false;this.aborted=true;}
     result(transcript){this.onresult?.({results:[Object.assign([{transcript}],{isFinal:true})]});}
   }
+  if (recordedRecognition) Recognizer.available=()=>assert.fail('Capability detection must not contact the speech service');
   const audioContext={destination:{},createMediaStreamSource:node,createGain:()=>Object.assign(node(),{gain:{value:1}}),
     createAnalyser:()=>Object.assign(node(),{getFloatTimeDomainData(buffer){buffer.fill(rms);}}),
+    createMediaStreamDestination:()=>Object.assign(node(),{stream:{getAudioTracks:()=>[track]}}),
+    createBufferSource(){const result=Object.assign(node(),{start(){this.started=true;},stop(){this.stopped=true;}});bufferedSources.push(result);return result;},
+    async decodeAudioData(bytes){decoded.push(bytes.byteLength);return {duration:1};},
     ...(worklet?{audioWorklet:{async addModule(path){modules.push(path);}}}:{})};
   const window={addEventListener(){},MediaRecorder:Recorder,SpeechRecognition:recognition?Recognizer:undefined,
     AudioWorkletNode:class {constructor(){return Object.assign(node(),{port:{onmessage:null}});}},
@@ -90,7 +95,7 @@ function fixture({live={},fetch,route,recognition=true,playback,worklet=false,ch
   const engine=window.VJLiveCascaded.create({audioContext,microphone:mic,sink,live:{stt_source:'browser',turn_mode:'ptt',barge_in:true,...live},
     route:route || (async()=>routeSingle),stt:async signal=>{sttSignals.push(signal);return sttRoute;},context:async()=>reference,chatBinding,
     current:()=>valid,onState:state=>states.push(state),onCaption:caption=>captions.push(caption),onError:(message,fatal=false)=>errors.push({message,fatal})});
-  return {engine,calls,states,captions,errors,clips,audio,recorders,recognizers,nodes,modules,sttSignals,timers,advance,
+  return {engine,calls,states,captions,errors,clips,audio,recorders,recognizers,nodes,modules,sttSignals,timers,advance,decoded,bufferedSources,track,
     level:value=>{rms=value;},invalidate:()=>{valid=false;}};
 }
 
@@ -238,24 +243,41 @@ test('intentional short push-to-talk keeps はい for either STT while tiny reco
   }
 });
 
-test('automatic browser STT ignores two noise pulses and recognizes a short confirmed reply',async()=>{
-  const f=fixture({worklet:true,live:{turn_mode:'vad'}});await f.engine.start();
+test('automatic Browser STT drops noise and only sends the complete confirmed recording, including audio before confirmation',async()=>{
+  const f=fixture({worklet:true,recordedRecognition:true,live:{turn_mode:'vad'}});await f.engine.start();
   const port=f.nodes.find(node=>node.port).port;
   const emit=(rms,count)=>{for(let i=0;i<count;i++){f.advance(30);port.onmessage({data:{rms}});}};
   emit(0,10);
-  for (let i=0;i<2;i++){emit(0.06,2);emit(0,3);}
+  for (let i=0;i<2;i++){emit(0.06,2);f.recorders[i].data(1024);emit(0,3);}
   assert.equal(f.recognizers.length,0);
-  assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').length,1);
+  assert.equal(f.decoded.length,0);
+  emit(0.06,1);f.recorders[2].data(256);
   emit(0.06,4);
-  assert.equal(f.recognizers.length,0);
-  emit(0.06,1);
-  assert.equal(f.recognizers.length,1);
   assert.equal(f.states.at(-1).phase,'recording');
-  f.recognizers[0].result('はい');emit(0,25);await cycle();
+  assert.equal(f.recognizers.length,0);
+  f.recorders[2].data(768);emit(0,25);await cycle();
+  assert.deepEqual(f.decoded,[1024],'The first chunk before VAD confirmation is required');
+  const [recognizer]=f.recognizers, [buffer]=f.bufferedSources;
+  assert.equal(recognizer.track,f.track);
+  assert.equal(buffer.started,undefined);
+  recognizer.onaudiostart();assert.equal(buffer.started,true);
+  recognizer.result('はい');buffer.onended();await cycle();
   assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.transcript,'はい');
-  assert.equal(f.recognizers.length,1);
   assert(!f.calls.some(call=>call.path==='/api/stt'));
+  assert.equal(f.track.stopped,true);
   f.engine.stop();assert.equal(f.timers.size,0);
+});
+
+test('microphone-only Browser STT stays on PTT without quietly switching services',async()=>{
+  const f=fixture({worklet:true,live:{turn_mode:'vad'}});await f.engine.start();
+  assert.equal(f.states.at(-1).mode,'ptt');
+  assert.match(f.errors.at(-1).message,/Bấm để nói/);
+  f.engine.setMode('vad');assert.equal(f.states.at(-1).mode,'ptt');
+  assert.equal(f.recognizers.length,0);
+  f.engine.toggleTalk();assert.equal(f.recognizers.length,1);
+  assert.equal(f.recognizers[0].track,undefined);
+  assert(!f.calls.some(call=>call.path==='/api/stt'));
+  f.engine.stop();
 });
 
 test('AudioWorklet VAD captures at onset, blocks echo during teacher playback, and aborts after sustained louder speech',async()=>{
