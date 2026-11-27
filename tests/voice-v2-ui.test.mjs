@@ -82,6 +82,52 @@ test('a long stream replays all parts only after a fresh profile check',async()=
   assert.match(history.at(-1)[1],/đã bị xóa/);
 });
 
+test('the player keeps same-voice/model gain changes bounded unless the next peak needs less gain',async()=>{
+  const pairs=[
+    ['clone','model',0.5],
+    ['clone','model',0.025],
+    ['clone','model',0.95],
+    ['clone','other-model',0.025],
+    ['clone','other-model',0.025,1],
+    ['clone','other-model',0.025],
+    ['another-voice','other-model',0.5],
+    [undefined,undefined,0.5],
+    [undefined,undefined,0.025],
+    ['another-voice',undefined,0.5],
+    ['another-voice',undefined,0.025]
+  ];
+  const clipBuffers=pairs.map(([, , sample,peak])=>{
+    const data=new Float32Array(1024).fill(sample);
+    if (peak) data[512]=peak;
+    return {duration:data.length/24000,length:data.length,sampleRate:24000,numberOfChannels:1,getChannelData:()=>data};
+  });
+  const gains=[], starts=[];
+  const audioContext={state:'running',currentTime:0,destination:{},decodeAudioData:async()=>clipBuffers.shift(),
+    createBufferSource(){
+      return {playbackRate:{},connect:volume=>volume,disconnect(){},
+        start(...args){starts.push(args);queueMicrotask(()=>this.onended?.());}};
+    },
+    createGain(){
+      return {connect(){},disconnect(){},gain:{setValueAtTime(){},linearRampToValueAtTime(gain){if (gain) gains.push(gain);}}};
+    }};
+  const window={addEventListener(){}};
+  const context=vm.createContext({window,AbortController,TextDecoder,setTimeout,clearTimeout,atob,
+    audioDataUrl:row=>`data:${row.mimeType};base64,${row.audioBase64}`});
+  vm.runInContext(readFileSync('static/voice/audio-stitcher.js','utf8'),context);
+  vm.runInContext(script,context);
+  const audio=window.VJVoiceStitcher.create({audioContext});
+  const clips=pairs.map(([voice,model],index)=>({...vi,voice,model,index,lang:index===1?'ja':'vi',
+    boundary:index===1?'arrow':index?'inline':'start'}));
+  await window.VJVoice.consume(response(...clips,{type:'done',count:clips.length}),audio.append,()=>true);
+  await audio.finish();
+  const normal=0.25178508235883346; // -18 dB RMS target / 0.5 input RMS.
+  const expected=[normal,normal*1.35,normal*1.35*0.75,4,0.98,0.98*1.35,normal,normal,4,normal,4];
+  assert.equal(gains.length,expected.length);
+  for (const [index,gain] of gains.entries()) assert.ok(Math.abs(gain-expected[index])<1e-6,
+    `gain for clip ${index}: ${gain}, expected ${expected[index]}`);
+  assert.ok(Math.abs(starts[1][0]-starts[0][0]-starts[0][2]-0.26)<1e-8);
+});
+
 function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=false) {
   const nodes = new Map();
   function node(tag) {
@@ -158,7 +204,7 @@ function persistentCache() {
   }}};
 }
 
-test('Phase 1 disk audio replays after upgrade and reload without synthesis or key decryption',async()=>{
+test('legacy identity replay migrates current synthesis audio without reading keys and ignores prior audio versions',async()=>{
   const oldConfig={version:2,mode:'dual_split_api',admin_override:false,
     primary:{profile:{scope:'local',id:'a'},provider:'elevenlabs',model:'reader',voice_id:'voice',speed:0.9,kanji_mode:'kana_first'},
     ja:{profile:null,speed:0.8,kanji_mode:'kanji_native'},
@@ -167,7 +213,8 @@ test('Phase 1 disk audio replays after upgrade and reload without synthesis or k
   const reference={mode:'bilingual',lesson:options.lesson,focus:null,view:'checks'};
   const oldIdentity=JSON.stringify([JSON.stringify(['learner',false]),oldConfig,
     ['https://api.elevenlabs.io',null,'e123','1'],['https://generativelanguage.googleapis.com',null,'g123','1']]);
-  const oldKey=createHash('sha256').update(JSON.stringify(['synthesis-3',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
+  const oldKey=createHash('sha256').update(JSON.stringify(['synthesis-4',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
+  const staleKey=createHash('sha256').update(JSON.stringify(['synthesis-3',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
   const storage=new Map([['vjbot_voice_routing_v2:learner',JSON.stringify({...oldConfig,live:{engine:'cascaded',stt_source:'browser'}})]]);
   const {records,indexedDB}=persistentCache(), reads=[], requests=[];
   function loadPage() {
@@ -181,6 +228,7 @@ test('Phase 1 disk audio replays after upgrade and reload without synthesis or k
     return {window,context,audio,statuses};
   }
   const {window:seed}=loadPage();
+  await seed.VJVoiceCache.put(staleKey,[vi],true);
   await seed.VJVoiceCache.put(oldKey,[vi,ja],true);
   assert.equal(records.has(oldKey),true);
   const routing=seed.VJVoiceRouting, identity=routing.identity(routing.stored());
@@ -268,6 +316,55 @@ test('catalog keeps paging after model selection but starts fresh after a profil
   await catalog();
   assert.deepEqual(cursors,[undefined,'next',undefined]);
   assert.deepEqual(el('voices-primary').children.map(option=>option.value),['first']);
+});
+
+test('Mistral catalog labels clones and known presets across pages without changing option values',async()=>{
+  const cursors=[];
+  const {el,profiles,refresh,change,catalog}=settingsFixture(async (_path,request)=>{
+    const {cursor}=JSON.parse(request.body);cursors.push(cursor);
+    return Response.json({models:[{id:'voxtral-mini-tts-3-0'}],voices:cursor ? [
+      {id:'voice_3144',name:'Huong',category:'premade',lang:'vi'},
+      {id:'voice_unknown',name:'Other provider voice',category:'premade'}
+    ] : [
+      {id:'clone_id',name:'Teacher',category:'cloned'},
+      {id:'voice_3133',name:'Haruto',category:'premade',lang:'ja'}
+    ],next_cursor:cursor?null:'next'});
+  });
+  profiles.push({id:'m',scope:'local',name:'Mistral',protocol:'openai',base_url:'https://api.mistral.ai/v1',revision:'1'});
+  refresh();change('primary-profile','local:m');
+  await catalog();
+  await catalog();
+  assert.deepEqual(cursors,[undefined,'next']);
+  assert.deepEqual(el('voices-primary').children.map(option=>[option.value,option.textContent]),[
+    ['clone_id','Teacher · Giọng nhân bản'],['voice_3133','Haruto · Tiếng Nhật (nam)'],
+    ['voice_3144','Huong · Tiếng Việt (nữ)'],['voice_unknown','Other provider voice']
+  ]);
+});
+
+test('Mistral dual same-account hints describe only blank effective IDs and never save the defaults as overrides',()=>{
+  const {el,profiles,refresh,change,save,saved}=settingsFixture();
+  profiles.push({id:'m',scope:'local',name:'Mistral',protocol:'openai',base_url:'https://api.mistral.ai/v1',revision:'1'});
+  refresh();change('source','personal');change('primary-profile','local:m');
+  const jaHint=el('ja-preset-hint'), viHint=el('vi-preset-hint');
+  assert.equal(jaHint.hidden,true);assert.equal(viHint.hidden,true);
+  change('mode','dual_same_api');
+  assert.equal(jaHint.hidden,false);assert.equal(viHint.hidden,false);
+  assert.match(jaHint.textContent,/Haruto/);assert.match(viHint.textContent,/Huong/);
+  el('ja-voice').value='ja_clone';
+  el('ja-voice').events.input();
+  assert.equal(jaHint.hidden,true);assert.equal(viHint.hidden,false);
+  save();
+  assert.deepEqual([saved().primary.voice_id,saved().ja.voice_id,saved().vi.voice_id],[undefined,'ja_clone',undefined]);
+  el('primary-voice').value='shared_clone';
+  el('primary-voice').events.input();
+  assert.equal(jaHint.hidden,true);assert.equal(viHint.hidden,true);
+  save();
+  assert.deepEqual([saved().primary.voice_id,saved().ja.voice_id,saved().vi.voice_id],['shared_clone','ja_clone',undefined]);
+  el('primary-voice').value=' ';
+  el('primary-voice').events.input();
+  assert.equal(viHint.hidden,false);
+  change('mode','dual_split_api');
+  assert.equal(jaHint.hidden,true);assert.equal(viHint.hidden,true);
 });
 
 test('custom speed is opt-in and cannot follow a selected endpoint change',()=>{

@@ -8,7 +8,7 @@ const id = value => typeof value === 'string' && value.length <= 100 && alphabet
 const modelId = (kind,value) => kind === 'openai_compatible'
   ? typeof value === 'string' && value.length <= 100 && /^[\w.:/-]+$/.test(value)
   : id(value);
-const presets = {ja:'voice_3133', vi:'voice_3144'};
+const presets = {ja:{id:'voice_3133',name:'Haruto'},vi:{id:'voice_3144',name:'Huong'}};
 const openaiModel = 'gpt-4o-mini-tts';
 const elevenModel = 'eleven_flash_v2_5';
 const safeMessage = {
@@ -116,7 +116,7 @@ const elevenTextContext = /^eleven_(?:(?:flash|turbo)_v2_5|multilingual_v2)$/;
 
 export function voiceSettings(kind, slot, lang, single) {
   const model = slot.model || ({elevenlabs:elevenModel,mistral:MISTRAL_SPEECH_MODEL,openai:openaiModel,gemini:DEFAULT_SPEECH_MODEL})[kind];
-  const voice = slot.voice_id || ({mistral:single ? null : presets[lang],openai:'alloy',gemini:'Charon'})[kind];
+  const voice = slot.voice_id || ({mistral:single ? null : presets[lang]?.id,openai:'alloy',gemini:'Charon'})[kind];
   const format = slot.format ?? (kind === 'elevenlabs' ? 'mp3_44100_128' : undefined);
   if (!modelId(kind,model) || !id(voice) || (kind === 'elevenlabs' && !['mp3_44100_128','mp3_22050_32'].includes(format)) ||
       (kind === 'gemini' && (voice !== 'Charon' || !compatibleSpeechModel(model))) ||
@@ -162,7 +162,11 @@ const registry = {
       const page = await readJson(await send(connection,'/v2/audio/voices?' + query,signal));
       if (!Array.isArray(page?.data)) throw new VoiceError('tts_unavailable',502);
       return {models:[{id:MISTRAL_SPEECH_MODEL}],next_cursor:page.next_page_token,
-        voices:page.data.map(row => ({id:row?.id,name:row?.name,category:row?.type==='custom'?'cloned':'premade'}))};
+        voices:page.data.map(row => {
+          const cloned = row?.type === 'custom', id = row?.id;
+          const lang = cloned ? undefined : id === presets.ja.id ? 'ja' : id === presets.vi.id ? 'vi' : undefined;
+          return {id,name:row?.name,category:cloned ? 'cloned' : 'premade',lang};
+        })};
     }
   },
   openai_compatible: {
@@ -215,7 +219,8 @@ export async function voiceCatalog(provider, signal, cursor) {
   const safe = value => typeof value === 'string' && !value.includes(provider.apiKey);
   const models = result.models.filter(row => modelId(provider.kind,row.id) && safe(row.id)).slice(0,1000);
   const voices = result.voices.filter(row => id(row.id) && safe(row.id) && safe(row.name)).slice(0,150).map(row => ({id:row.id,
-    name:row.name.slice(0,120),...(['cloned','premade','professional','generated'].includes(row.category) ? {category:row.category} : {}),
+    name:(provider.kind === 'mistral' ? presets[row.lang]?.name : null) ?? row.name.slice(0,120),
+    ...(['cloned','premade','professional','generated'].includes(row.category) ? {category:row.category} : {}),
     ...(['ja','vi'].includes(row.lang) ? {lang:row.lang} : {})}));
   return {models,voices,verified:false,...(safe(result.next_cursor) && result.next_cursor.length <= 512 ? {next_cursor:result.next_cursor} : {}),
     ...(result.truncated ? {truncated:true} : {})};

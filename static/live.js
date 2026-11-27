@@ -10,6 +10,9 @@
   const cascadedCommands=new Set(['hint','repeat','slower','situation','check','explain','summary']);
   const sttNames={openai:'OpenAI',mistral:'Mistral',elevenlabs:'ElevenLabs',browser:'trình duyệt'};
   const ttsNames={...sttNames,gemini:'Gemini',openai_compatible:'máy chủ tùy chỉnh'};
+  const nativeMode='Kết nối trực tiếp gốc';
+  const nativeUnavailable='Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.';
+  const liveError=message=>Object.assign(new Error(message),{userFacing:true});
   let cascaded=null,cascadedSession=null,cascadedState=null,teacherSink=null,wakeRequest=0;
   const audioSources=[];
   let wakeLock=null,commands={},teacherAnalyser=null,teacherHeardAt=0,teacherExpectedUntil=0,teacherSpeaking=false,userMuted=false;
@@ -190,6 +193,40 @@
     const {body,task}=cascadedReference();
     return JSON.stringify([routing.liveIdentity(saved),chatIdentity(owner,admin),body,task?taskRevisionSource(task):null]);
   }
+  async function liveSettings(path,signal) {
+    const response=await apiFetch(path,{signal});
+    if(!response.ok)throw liveError('Chưa kiểm tra được kết nối. Kiểm tra mạng rồi thử lại.');
+    return response.json();
+  }
+  async function cascadedChatBinding(owner,admin,signal) {
+    const missing=()=>liveError('Giọng song ngữ cần kết nối trò chuyện. Vào Cài đặt → Kết nối AI, chọn kết nối và model chat.');
+    if(admin){
+      const {platform}=await liveSettings('/api/ai/settings',signal);
+      if(!platform?.configured)throw liveError('OpenAI quản trị chưa sẵn sàng. Kiểm tra khóa máy chủ trong Cài đặt quản trị.');
+      return;
+    }
+    if(usesAntigravityOAuth(owner)){
+      const id=antigravityConnectionId(owner);
+      if(!id)throw missing();
+      const {configured,connections}=await liveSettings('/api/ai/oauth/antigravity',signal);
+      if(!configured || !connections?.some(row=>row.id===id && row.state==='active' && row.model))throw missing();
+      return;
+    }
+    const profiles=window.VJProfiles,choice=profiles?.active(owner);
+    if(!profiles || choice?.scope==='none')throw missing();
+    if(choice?.scope==='local'){
+      const profile=await profiles.load(owner,choice.id).catch(()=>null);
+      if(!profile?.model)throw missing();
+      return {...choice,revision:profile.revision};
+    }
+    // Unpinned multiple-choice guidance can run locally without a Chat provider.
+    if(!choice && cascadedReference().task?.mode==='choice')return;
+    const profile=choice?.scope==='server'
+      ? (await liveSettings('/api/ai/profiles',signal)).profiles?.find(row=>row.id===choice.id)
+      : (await liveSettings('/api/ai/settings',signal)).own;
+    if(!profile?.model || profile.connection_id===null)throw missing();
+    if(!choice && profile.id) return {serverDefault:profile.id};
+  }
   function describeCascaded(config,live,owner,admin,provider) {
     const chat=admin?'OpenAI máy chủ':usesAntigravityOAuth(owner)?'Antigravity':'kết nối AI đã chọn';
     const slots=config.mode==='single'?[config.primary]:[config.ja,config.vi];
@@ -207,21 +244,21 @@
       }
     }catch{ /* Start reports invalid saved routing without using a fallback. */ }
     if(nativePrivacy)el('live-privacy').textContent=nativePrivacy;
-    el('live-model-name').textContent='Tiếng Nhật';
+    el('live-model-name').textContent=nativeMode;
   }
-  async function openCascaded(run,owner,microphone,resumed) {
-    const {config,live,routing,current,admin,chatBinding}=cascadedSession;
-    if(!audioContext || !resumed)throw Object.assign(new Error('Trình duyệt không hỗ trợ âm thanh hội thoại.'),{userFacing:true});
-    let resumeTimer;
-    try{await Promise.race([resumed,new Promise((_,reject)=>{resumeTimer=setTimeout(()=>reject(Object.assign(new Error('Trình duyệt chưa cho phát âm thanh. Bấm Bắt đầu nói lại.'),{userFacing:true})),5000);})]);}
-    finally{clearTimeout(resumeTimer);}
+  function showNextCall() {
+    describeNextCall();
+    status(`${el('live-model-name').textContent}. Em bấm Bắt đầu nói khi sẵn sàng nhé.`);
+  }
+  async function openCascaded(run,owner,microphone,sttProvider) {
+    const {config,live,routing,current,admin,chatBinding,chatProfile}=cascadedSession;
     if(!current()){if(run===version)cleanup('Kết nối hội thoại đã thay đổi.');return;}
     connectWave(microphone);
     teacherSink=audioContext.createGain();
     teacherSink.connect(audioContext.destination);teacherSink.connect(analyser);
     let shownProvider=null;
     describeCascaded(config,live,owner,admin,shownProvider);
-    cascaded=window.VJLiveCascaded.create({audioContext,microphone,sink:teacherSink,live,chatBinding,
+    cascaded=window.VJLiveCascaded.create({audioContext,microphone,sink:teacherSink,live,chatBinding,chatProfile,sttProvider,
       route:signal=>routing.prepared(config,signal),stt:signal=>routing.preparedStt(config,signal),
       current(){
         if(current())return true;
@@ -274,7 +311,7 @@
     }};
     callOwner=owner;
     timeline.reset();
-    el('live-duration').textContent='00:00';controls(true);status('Cho phép micro để bắt đầu…');
+    el('live-duration').textContent='00:00';controls(true);
     if(cascadedSession)timer=setInterval(()=>{
       if(!cascadedSession.current()){cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');return;}
       if(!ready)return;
@@ -285,26 +322,43 @@
     try {
       globalThis.stopSpeech?.();globalThis.stopJapaneseInputs?.();
       const resumed=wave(Boolean(key));
-      if(key && !admin && !usesAntigravityOAuth(owner)){
-        const choice=window.VJProfiles?.active(owner);
-        if(choice?.scope==='local'){
-          const {revision}=await window.VJProfiles.metadata(owner,choice.id);
-          if(run!==version)return;
-          if(!cascadedSession.current()){cleanup('Kết nối hội thoại đã thay đổi.');return;}
-          cascadedSession.chatBinding={...choice,revision};
+      let engine,sttProvider;
+      if(key){
+        if(!audioContext || !resumed)throw liveError('Trình duyệt không hỗ trợ âm thanh hội thoại.');
+        status('Đang kiểm tra kết nối trò chuyện và chép lời…');
+        const session=cascadedSession,controller=abort=new AbortController();
+        const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(15000)]);
+        const current=()=>!signal.aborted && session.current();
+        try{
+          const binding=await cascadedChatBinding(owner,admin,signal);
+          session.chatProfile=binding?.serverDefault;
+          session.chatBinding=session.chatProfile ? undefined : binding;
+          if(current())sttProvider=await window.VJLiveCascaded.selectStt({live,chatBinding:session.chatBinding,chatProfile:session.chatProfile,
+            stt:signal=>routing.preparedStt(config,signal),signal,current});
+          let resumeTimer;
+          try{await Promise.race([resumed,new Promise((_,reject)=>{resumeTimer=setTimeout(()=>reject(new Error('Trình duyệt chưa cho phát âm thanh. Bấm Bắt đầu nói lại.')),5000);})]);}
+          catch {throw new Error('Trình duyệt chưa cho phát âm thanh. Bấm Bắt đầu nói lại.');}
+          finally{clearTimeout(resumeTimer);}
+          signal.throwIfAborted();
+        }catch(error){
+          throw liveError(signal.aborted?'Kiểm tra kết nối quá lâu. Em kiểm tra mạng rồi thử lại nhé.':error.message);
         }
+        if(run!==version)return;
+        if(!session.current()){cleanup('Kết nối hội thoại đã thay đổi.');return;}
+      }else{
+        engine=admin?{name:'openai'}:await liveEngine(owner,(abort=new AbortController()).signal);
+        if(run!==version)return;
+        if(owner!==signedInUser?.user_id){cleanup('Tài khoản đã thay đổi.');return;}
+        if(!engine){cleanup(nativeUnavailable);return;}
+        if(engine.name==='openai' && typeof RTCPeerConnection==='undefined'){cleanup('Trình duyệt cần hỗ trợ WebRTC để kết nối OpenAI trực tiếp.');return;}
       }
+      status('Cho phép micro để bắt đầu…');
       const microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,...(key?{autoGainControl:true}:{})},video:false});
       if(run!==version || owner!==signedInUser?.user_id){microphone.getTracks().forEach(track=>track.stop());if(run===version)cleanup('Tài khoản đã thay đổi.');return;}
       stream=microphone;
-      if(key){await openCascaded(run,owner,microphone,resumed);return;}
-      const engine=await liveEngine(owner);
-      if(run!==version)return;
-      if(owner!==signedInUser?.user_id){cleanup('Tài khoản đã thay đổi.');return;}
-      if(engine?.name==='gemini'){await startGemini(run,microphone);return;}
-      if(engine?.name==='mistral'){await startMistral(run,microphone,owner,engine.localId);return;}
-      if(engine?.name!=='openai'){cleanup('Nói trực tiếp cần kết nối OpenAI chính thức, Gemini gốc hoặc Mistral gốc trong Cài đặt.');return;}
-      if(typeof RTCPeerConnection==='undefined'){cleanup('Trình duyệt cần hỗ trợ WebRTC để kết nối OpenAI trực tiếp.');return;}
+      if(key){await openCascaded(run,owner,microphone,sttProvider);return;}
+      if(engine.name==='gemini'){await startGemini(run,microphone);return;}
+      if(engine.name==='mistral'){await startMistral(run,microphone,owner,engine);return;}
       const connection=peer=new RTCPeerConnection();
       connectWave(stream);
       stream.getTracks().forEach(track=>connection.addTrack(track,stream));
@@ -371,20 +425,28 @@
   }
   // The learner's saved connection decides the engine; admin stays on the server-keyed OpenAI path.
   const isMistralProfile=profile=>profile?.protocol==='openai' && profile.base_url==='https://api.mistral.ai/v1';
-  async function liveEngine(owner) {
-    try {
-      const settings=await (await apiFetch('/api/ai/settings')).json(),own=settings?.own;
-      if(settings?.is_admin)return {name:'openai'};
-      const profiles=window.VJProfiles,selected=profiles?.active(owner);
-      if(settings?.is_admin===false && selected?.scope==='local'){
-        const profile=(await profiles.list(owner)).find(p=>p.id===selected.id);
-        if(isMistralProfile(profile))return {name:'mistral',localId:selected.id};
-      }
-      const host=protocol=>new URL((own?.base_url||'').trim()||settings?.bases?.[protocol]||'https://x').hostname;
-      if(own?.protocol==='gemini' && /(^|\.)generativelanguage\.googleapis\.com$/.test(host('gemini')))return {name:'gemini'};
-      if(isMistralProfile(own) && (!selected || selected.scope==='server'))return {name:'mistral'};
-      if(own?.protocol==='openai' && /(^|\.)openai\.com$/.test(host('openai')))return {name:'openai'};
-    } catch {}
+  async function liveEngine(owner,signal) {
+    const profiles=window.VJProfiles;
+    if(!profiles || usesAntigravityOAuth(owner))return null;
+    const binding=chatIdentity(owner,false),selected=profiles.active(owner);
+    if(selected?.scope==='none')return null;
+    if(selected?.scope==='local'){
+      const profile=(await profiles.list(owner)).find(row=>row.id===selected.id);
+      return isMistralProfile(profile) && profile.model ? {name:'mistral',localId:selected.id,binding} : null;
+    }
+    // Mistral can use an explicitly selected server profile even if it is not the account default.
+    const settings=await liveSettings('/api/ai/settings',signal),own=settings?.own;
+    if(settings?.is_admin)return {name:'openai'};
+    if(selected?.scope==='server' && selected.id!==own?.id){
+      const {profiles}=await liveSettings('/api/ai/profiles',signal);
+      const profile=profiles?.find(row=>row.id===selected.id);
+      return isMistralProfile(profile) && profile.model && profile.connection_id!==null
+        ? {name:'mistral',serverId:selected.id,binding} : null;
+    }
+    if(isMistralProfile(own))return own.model && own.connection_id!==null ? {name:'mistral',serverId:own.id,binding} : null;
+    const host=protocol=>new URL((own?.base_url||'').trim()||settings?.bases?.[protocol]||'https://x').hostname;
+    if(own?.protocol==='gemini' && /(^|\.)generativelanguage\.googleapis\.com$/.test(host('gemini')))return {name:'gemini'};
+    if(own?.protocol==='openai' && /(^|\.)openai\.com$/.test(host('openai')))return {name:'openai'};
     return null;
   }
   // Gemini Live: mic PCM 16kHz over a WebSocket, server audio 24kHz queued for playback.
@@ -462,7 +524,7 @@
     });
     return loadLiveKit.promise;
   }
-  async function startMistral(run,microphone,owner,localId) {
+  async function startMistral(run,microphone,owner,{localId,serverId,binding}) {
     status('Đang kết nối với thầy…');
     await loadLiveKit();
     if(run!==version)return;
@@ -477,15 +539,22 @@
         throw Object.assign(new Error('Kết nối Mistral không còn dùng được. Kiểm tra kết nối trong Cài đặt rồi thử lại.'),{userFacing:true});
       apiConnection={protocol:profile.protocol,base_url:profile.base_url,model:profile.model,api_key:profile.api_key};
     }
-    const request=(method,body,signal)=>apiFetch('/api/live/mistral',{method,signal,redirect:'error',headers:{'Content-Type':'application/json'},
+    if(signedInUser.is_admin || chatIdentity(owner,false)!==binding)
+      throw liveError('Kết nối Mistral không còn dùng được. Kiểm tra kết nối trong Cài đặt rồi thử lại.');
+    const headers={'Content-Type':'application/json',...(serverId?{'X-VJBot-Profile':serverId}:{})};
+    const request=(method,body,signal)=>apiFetch('/api/live/mistral',{method,signal,redirect:'error',headers,
       body:JSON.stringify(apiConnection?{...body,api_connection:apiConnection}:body)});
     const context=globalThis.teacherContext?.();
     const lesson=(typeof chatLessonContext!=='undefined'?chatLessonContext:null) || context?.lesson;
-    abort=new AbortController();
-    const response=await request('POST',{level:lesson?.level || activeCurriculumLevel || 'N5',lesson:lesson?{id:lesson.id,level:lesson.level}:null},abort.signal);
+    // Let an already dispatched create settle after local cancellation so its room can be closed.
+    const response=await request('POST',{level:lesson?.level || activeCurriculumLevel || 'N5',lesson:lesson?{id:lesson.id,level:lesson.level}:null},AbortSignal.timeout(65000));
     const result=await response.json();
     const close=()=>{
-      if(signedInUser?.user_id===owner && (!apiConnection || !signedInUser.is_admin))request('DELETE',{id:result.id}).catch(()=>{});
+      if(signedInUser?.user_id!==owner || signedInUser.is_admin)return;
+      const closingVersion=version;
+      const warn=()=>{if(closingVersion===version && !el('live-start').disabled)
+        status('Đã ngắt kết nối trên thiết bị. Mistral chưa xác nhận đóng phiên.');};
+      request('DELETE',{id:result.id},AbortSignal.timeout(15000)).then(closed=>{if(!closed.ok)warn();},warn);
     };
     if(run!==version){if(response.ok)close();return;}
     if(owner!==signedInUser?.user_id){cleanup('Tài khoản đã thay đổi.');return;}
@@ -530,9 +599,8 @@
   }
   function mode(live) {
     if(!live && (peer || el('live-start').disabled))end();
-    if(live && !el('live-start').disabled)describeNextCall();
+    if(live && !el('live-start').disabled)showNextCall();
     if(!live)timeline.stop();
-    if(live && !callOwner && !peer && !closing && !el('live-start').disabled)status('Em bấm Bắt đầu nói khi sẵn sàng nhé.');
     el('classroom-voice').hidden=!live;
     el('classroom-text').hidden=live;
     document.querySelector('.classroom-chat-window').dataset.mode=live?'live':'text';
@@ -580,14 +648,16 @@
   };
   window.addEventListener('vjbot-account-ready',window.checkLiveAccount);
   function checkCascaded() {
-    if(cascadedSession && !cascadedSession.current())
-      cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');
-    if(!el('classroom-voice').hidden && !el('live-start').disabled)describeNextCall();
+    if(cascadedSession && !cascadedSession.current()){
+      cleanup('Kết nối hội thoại đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');return;
+    }
+    if(!el('classroom-voice').hidden && !el('live-start').disabled)showNextCall();
   }
   window.addEventListener('vjbot-voice-changed',checkCascaded);
   window.addEventListener('storage',checkCascaded);
   const chatChanged=()=>{
     if(cascadedSession)cleanup('Kết nối trò chuyện đã thay đổi. Bấm Bắt đầu nói để kết nối lại.');
+    else if(!el('classroom-voice').hidden && !el('live-start').disabled)showNextCall();
   };
   window.addEventListener('vjbot-chat-connection-changed',chatChanged);
   const oldAiConnectionChanged=window.aiConnectionChanged;

@@ -21,6 +21,7 @@
       : bounded(context.resume(),abort.signal,5000,'Trình duyệt chưa cho phát âm thanh. Bấm Nghe lại.');
     ready.catch(()=>{});
     let next=0, closed=false;
+    let previousVoice, previousModel, previousGain;
     const active=new Set();
     let tail=Promise.resolve();
     async function append(segment) {
@@ -46,7 +47,13 @@
       for (const channel of channels) for(let i=first;i<=last;i++) {
         const sample=channel[i];squares+=sample*sample;peak=Math.max(peak,Math.abs(sample));
       }
-      const gain=Math.min(rmsTarget/Math.sqrt(squares/(samples*channels.length)),peakLimit/peak,4);
+      const {voice,model}=segment;
+      const labelled=typeof voice==='string' && voice.trim() && typeof model==='string' && model.trim();
+      let gain=Math.min(rmsTarget/Math.sqrt(squares/(samples*channels.length)),4);
+      if (labelled && voice===previousVoice && model===previousModel)
+        gain=Math.min(previousGain*1.35,Math.max(previousGain*0.75,gain));
+      // Never trade headroom for continuity, even when it breaks the relative gain bound.
+      gain=Math.min(gain,peakLimit/peak);
       const lead=Math.min(first,Math.round(buffer.sampleRate*0.015));
       const trail=Math.min(buffer.length-1-last,Math.round(buffer.sampleRate*0.025));
       first-=lead;last+=trail;
@@ -68,6 +75,9 @@
       }};
       active.add(entry);source.onended=entry.finish;tail=entry.done;
       source.start(start,first/buffer.sampleRate,seconds);
+      previousVoice=labelled ? voice : undefined;
+      previousModel=labelled ? model : undefined;
+      previousGain=gain;
     }
     function stop() {
       if (closed) return;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {VOICE_COMMANDS, voiceInstructions, reversedPrompt} from '../src/prompt.js';
+import {VOICE_COMMANDS, voiceInstructions, voiceStreamingInstructions, reversedPrompt} from '../src/prompt.js';
 
 // A learner greeting "こんにちは、ラム先生" was answered "こんにちは、ラム！", and "元気です" with "Em khỏe thật à?".
 test('voice and chat prompts treat the teacher name as a vocative and take answers at face value', () => {
@@ -24,4 +24,16 @@ test('voice prompt keeps the reversed-classroom turn rules, level rules and inpu
     'LEVEL N5', 'INPUT BOUNDARY', 'do not grade pronunciation']) assert.ok(prompt.includes(part), part);
   assert.match(voiceInstructions('N1'), /LEVEL N1/);
   assert.match(voiceInstructions('bad'), /Hiragana/);
+});
+
+test('teacher prompts explain the requested form without language leakage or unrelated drills', () => {
+  const protectedStream = voiceStreamingInstructions('N5', {japaneseOnly:true, preAnswerTask:true});
+  for (const prompt of [reversedPrompt('N5'), voiceInstructions('N5'), protectedStream]) {
+    assert.match(prompt, /standard Quốc ngữ.*Do not mix Chinese characters.*or add English grammar labels/);
+    assert.match(prompt, /Preserve the Japanese being studied and exact quoted material/);
+    assert.match(prompt, /食べる\(たべる\).*Do not append romaji unless the learner explicitly asks/);
+    assert.match(prompt, /one short example using that same target\. Do not add an unrelated translation exercise/);
+  }
+  assert.match(protectedStream, /Use only <ja> tags/);
+  assert.match(protectedStream, /PRE-ANSWER CANONICAL TASK:.*Never solve the task/);
 });
