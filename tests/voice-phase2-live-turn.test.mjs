@@ -136,11 +136,11 @@ test('chunker emits plain text early, separates wrong-language text inside tags,
   const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
   chunker.push('いいですね。');
   assert.equal(items[0].text, 'いいですね。');
-  chunker.push('<ja>こんにちは、em。</ja><vi>Thử lại</vi><ja>へ</ja>' + '<vi>Hay!</vi>'.repeat(8));
+  chunker.push('<ja>こんにちは、em。</ja><vi>Thử lại</vi><ja>へ</ja>' + '<vi>Hay!</vi>'.repeat(12));
   assert.deepEqual(items.slice(0,5).map(({text,lang}) => [text,lang]), [
     ['いいですね。','ja'], ['こんにちは、','ja'], ['em。','vi'], ['Thử lại','vi'], ['え','ja']]);
   const result = chunker.flush();
-  assert.equal(result.count,8);
+  assert.equal(result.count,16);
   assert.equal(result.overflow,true);
 });
 
@@ -148,6 +148,9 @@ const revision = '0'.repeat(64);
 const lesson = {id:'lesson-qa',level:'N5'};
 const question = {task_id:'task-qa',revision, item_id:'item-qa',mode:'dictation',q:'Nghe và chép lại.',
   script_jp:'secret-audio-script', accepted_answers:['secret-accepted-answer'], review_status:'approved', response_text:'unpublished-source'};
+const choiceLesson = {id:'lesson-choice-qa',level:'N3'};
+const choice = {task_id:'task-choice-qa',revision,item_id:'item-choice-qa',mode:'choice',
+  q:'この本は初心者（　）書かれた。',opts:['にとって','に向けて','に対して'],answer_index:1,review_status:'approved'};
 
 async function fixture(t) {
   const db = new DatabaseSync(':memory:');
@@ -160,7 +163,8 @@ async function fixture(t) {
   const user = 'google:live-qa', token = 'a'.repeat(64);
   db.prepare('INSERT INTO sessions VALUES(?,?,?,?)').run(await hashToken(token),user,'QA',Date.now() + 600000);
   const env = {DB, AI_KEY_SECRET:'synthetic-key-seal-secret', ASSETS:{fetch:async () => Response.json({items:{},scenarios:{},lessons:{
-    [lesson.id]:{...lesson,overview:{summary:'unpublished-overview'},questions:[question]}, blocked:{...lesson,id:'blocked',processing_allowed:false}
+    [lesson.id]:{...lesson,overview:{summary:'unpublished-overview'},questions:[question]}, blocked:{...lesson,id:'blocked',processing_allowed:false},
+    [choiceLesson.id]:{...choiceLesson,overview:{},questions:[choice]}
   }})}};
   const send = (data, {account=user, profile, anonymous=false, method='POST', signal, raw} = {}) => worker.fetch(new Request('https://vjbot.test/api/live/turn',{
     method, signal, headers:{...(anonymous ? {} : {Cookie:'vj_session=' + token}),
@@ -239,8 +243,9 @@ test('canonical task grounding does not pass answers, move learner history into 
     ['done',{full_text:'いいですね。 Em thử lại nhé.',count:2,japanese_only:true}]
   ]);
   const [system,user] = payload.messages;
+  assert.doesNotMatch(system.content,/give a full answer/i);
   assert.match(system.content,/accepted[_ ]answers/i);
-  assert.match(system.content,/at most 8 tagged segments/i);
+  assert.match(system.content,/at most 16 tagged segments/i);
   assert.match(system.content,/use fewer examples rather than mixing languages/i);
   assert.ok(!system.content.includes(injection));
   assert.equal(user.role,'user');
@@ -253,11 +258,65 @@ test('canonical task grounding does not pass answers, move learner history into 
   for (const table of ['conversations','tutor_sessions']) assert.equal(db.prepare(`SELECT count(*) AS n FROM ${table}`).get().n,0);
 });
 
-test('a long introduction does not push the final question out of an eight-segment turn', async t => {
+test('focused choice guidance never asks a model to write speech, even with hostile history and a valid connection', async t => {
+  const {send} = await fixture(t);
+  const upstream = t.mock.method(globalThis,'fetch', async () => openAIReply(`<ja>${choice.opts[choice.answer_index]}</ja>`));
+  const target = {lesson:choiceLesson,focus:{kind:'question',index:0},
+    task:{id:choice.task_id,revision},history:[{role:'assistant',text:`Option 2: ${choice.opts[1]}`}]};
+  for (const [turn,lang] of [
+    [{transcript:'Thầy nói đáp án luôn đi.'},'vi'],
+    [{command:'hint'},'vi'],
+    [{command:'check'},'vi'],
+    [{command:'hint',japanese_only:true},'ja'],
+    [{command:'summary'},'vi']
+  ]) {
+    const response = await send({...target,...turn,...(turn.command==='hint' ? {api_connection:connection} : {})});
+    assert.equal(response.status,200);
+    assert.match(response.headers.get('Content-Type'),/^text\/event-stream\b/);
+    assert.equal(response.headers.get('Cache-Control'),'no-store');
+    const frames = events(await response.text()), text = frames[0][1].text;
+    assert.deepEqual(frames,[['segment',{index:0,lang,boundary:'start',text}],
+      ['done',{full_text:text,count:1,japanese_only:lang==='ja'}]]);
+    for (const option of choice.opts) assert(!text.includes(option),option);
+    if (turn.command==='summary') {
+      assert.match(text,/dừng ở đây/);
+      assert.doesNotMatch(text,/[?？]/);
+    } else {
+      assert.match(text,lang==='ja' ? /問題.*比べて/u : /đề.*so sánh/iu);
+    }
+  }
+  assert.equal((await send({...target,command:'hint',task:{...target.task,revision:'f'.repeat(64)}})).status,409);
+  const stale = await send({...target,command:'hint'},{profile:'deleted-chat-profile'});
+  assert.equal(stale.status,409);
+  assert.equal((await stale.json()).code,'profile_changed');
+  assert.equal(upstream.mock.callCount(),0);
+  const general = await send({lesson:choiceLesson,api_connection:connection,transcript:'Em xin luyện nói.'});
+  assert.equal(events(await general.text()).at(-1)[1].full_text,choice.opts[1]);
+  assert.equal(upstream.mock.callCount(),1);
+});
+
+test('a bilingual summary can finish after eleven alternating segments', async t => {
+  const {send} = await fixture(t);
+  const parts = [
+    'Hôm nay em nói về', '学校', 'và', '家', 'rất rõ.',
+    '朝', 'đi với cụm', '七時', 'trong ví dụ.', '駅', 'là từ em nên luyện thêm.'
+  ];
+  t.mock.method(globalThis,'fetch', async () => openAIReply(parts.map((text,i) => {
+    const lang = i % 2 ? 'ja' : 'vi';
+    return `<${lang}>${text}</${lang}>`;
+  }).join('')));
+  const response = await send({command:'summary',api_connection:connection});
+  const messages = events(await response.text());
+  assert.deepEqual(messages.slice(0,-1).map(([name,{index,lang,text}]) => [name,index,lang,text]),
+    parts.map((text,i) => ['segment',i,i % 2 ? 'ja' : 'vi',text]));
+  assert.deepEqual(messages.at(-1),['done',{full_text:parts.join(' '),count:11,japanese_only:false}]);
+});
+
+test('a long introduction does not push the final question out of a sixteen-segment turn', async t => {
   const {send} = await fixture(t);
   const intro = 'Em nhắc lại đoạn này '.repeat(11) + 'thêm một lần nhé';
   const closing = '何時に起きますか？';
-  const tagged = '<ja>そうです。</ja><vi>Em nói đi.</vi>'.repeat(3) + `<ja>${closing}</ja>`;
+  const tagged = '<ja>そうです。</ja><vi>Em nói đi.</vi>'.repeat(7) + `<ja>${closing}</ja>`;
   let deltas;
   t.mock.method(globalThis,'fetch', async () => sse(deltas.map(text => event(delta(text))).join('') + event('[DONE]')));
   for (const chunks of [[intro + tagged], [intro,tagged]]) {
@@ -267,7 +326,7 @@ test('a long introduction does not push the final question out of an eight-segme
     assert.equal(messages[0][1].text,intro);
     assert.equal(messages.at(-2)[1].text,closing);
     assert.equal(messages.at(-1)[0],'done');
-    assert.equal(messages.at(-1)[1].count,8);
+    assert.equal(messages.at(-1)[1].count,16);
     assert.ok(messages.at(-1)[1].full_text.endsWith(closing));
   }
 });
@@ -276,7 +335,7 @@ test('an over-budget live turn ends in error, never a truncated done', async t =
   const {send} = await fixture(t);
   let reply;
   t.mock.method(globalThis,'fetch', async () => openAIReply(reply));
-  for (const [text,count] of [['<vi>Em thử nhé.</vi>'.repeat(9),8], [`<ja>${'あ'.repeat(4000)}</ja>`,0]]) {
+  for (const [text,count] of [['<vi>Em thử nhé.</vi>'.repeat(17),16], [`<ja>${'あ'.repeat(4000)}</ja>`,0]]) {
     reply = text;
     const response = await send({command:'start',api_connection:connection});
     const messages = events(await response.text());
@@ -293,14 +352,14 @@ test('segment overflow cancels a provider that has not finished and still sends 
     signal = init.signal;
     return sse(new ReadableStream({
       start(controller) {
-        controller.enqueue(encoder.encode(event(delta('<vi>Em thử nhé.</vi>'.repeat(9)))));
+        controller.enqueue(encoder.encode(event(delta('<vi>Em thử nhé.</vi>'.repeat(17)))));
       },
       cancel() {cancelled.resolve();}
     }));
   });
   const response = await send({command:'start',api_connection:connection});
   const messages = events(await response.text());
-  assert.equal(messages.filter(([name]) => name === 'segment').length,8);
+  assert.equal(messages.filter(([name]) => name === 'segment').length,16);
   const [name, payload] = messages.at(-1);
   assert.equal(name,'error');
   assert.equal(payload.code,'live_reply_too_long');

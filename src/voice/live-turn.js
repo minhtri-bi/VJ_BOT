@@ -115,6 +115,23 @@ const upstreamFailure = (status) => {
   return {code:'live_unavailable', detail:'Chưa kết nối được với thầy. Em thử lại nhé.'};
 };
 
+const eventHeaders = {'Content-Type':'text/event-stream; charset=utf-8', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'};
+const eventFrame = (event, data) => `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+function choiceGuidance(command, japaneseOnly) {
+  // A model can solve a choice question even when the canonical key is absent.
+  // Live has no verified submission for the open item. Never speak model output here.
+  const text = japaneseOnly
+    ? command === 'summary'
+      ? '今日はここまでです。あとで、自分で選んでから、どうして選んだか考えてください。'
+      : '問題は何を聞いていますか。まずそこを考えてから、選べる答えを比べてください。'
+    : command === 'summary'
+      ? 'Mình dừng ở đây nhé. Khi ôn lại, em tự chọn trước rồi thử giải thích vì sao em chọn như vậy.'
+      : 'Em đọc lại đề và tự nói đề đang hỏi điều gì. Sau đó so sánh cả ý của các lựa chọn, đừng chỉ dựa vào một từ quen.';
+  return new Response(eventFrame('segment', {index:0,lang:japaneseOnly ? 'ja' : 'vi',boundary:'start',text})
+    + eventFrame('done', {full_text:text,count:1,japanese_only:japaneseOnly}), {headers:eventHeaders});
+}
+
 function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
   const encoder = new TextEncoder(), stop = new AbortController();
   const signal = AbortSignal.any([requestSignal, stop.signal]);
@@ -126,7 +143,7 @@ function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
   return new Response(new ReadableStream({
     start(controller) {
       const send = (event, data) => {
-        if (!signal.aborted) controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+        if (!signal.aborted) controller.enqueue(encoder.encode(eventFrame(event, data)));
       };
       function sendPending(final = false) {
         const joined = pending.map(item => compact(item.text)).join('');
@@ -167,7 +184,7 @@ function liveEvents(provider, envelope, system, japaneseOnly, requestSignal) {
       })();
     },
     cancel() {stop.abort();}
-  }), {headers:{'Content-Type':'text/event-stream; charset=utf-8', 'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff'}});
+  }), {headers:eventHeaders});
 }
 
 export async function liveTurnRoute(request, env) {
@@ -215,16 +232,20 @@ export async function liveTurnRoute(request, env) {
     grounded = groundLesson(canonical, focus, view);
     if (!grounded) return forbidden();
   }
-  const envelope = JSON.stringify({message:message || null,
+  const protectedChoice = grounded?.focus?.kind === 'question' && grounded.focus.item.mode === 'choice';
+  const envelope = protectedChoice ? '' : JSON.stringify({message:message || null,
     command:command ? {key:command, instruction:VOICE_COMMANDS[command]} : null, japanese_only,
     reference:{level, lesson:grounded, history:history.map(({role,text}) => ({role, text:text.replace(tags, ' ').trim()})).filter(turn => turn.text)}});
   if (envelope.length > 16000) return jsonError(413, 'live_context_too_large', 'Em chọn một mục cụ thể để thầy giải thích nhé.');
   if (request.signal.aborted) return new Response(null, {status:204});
   if (await rateLimited(env, user.user_id)) return jsonError(429, 'live_rate_limited', 'Em hãy đợi một phút rồi thử lại.');
   if (request.signal.aborted) return new Response(null, {status:204});
+  // No provider is needed for local guidance, but an explicit pin must not be ignored.
+  if (protectedChoice && profile === undefined && !Object.hasOwn(data, 'api_connection')) return choiceGuidance(command, japanese_only);
   const provider = await resolveProvider(env, user.user_id, data.api_connection, profile, {signal:request.signal});
   if (request.signal.aborted) return new Response(null, {status:204});
   const failure = providerFailure(provider);
   if (failure) return failure;
+  if (protectedChoice) return choiceGuidance(command, japanese_only);
   return liveEvents(provider, envelope, voiceStreamingInstructions(level, {japaneseOnly:japanese_only, preAnswerTask:focus?.kind === 'question'}), japanese_only, request.signal);
 }
