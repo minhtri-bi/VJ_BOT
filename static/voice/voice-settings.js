@@ -506,11 +506,12 @@
     url.disabled=urlField.hidden=!url.required;
     if (url.disabled) url.value='';
   }
-  function closeAccount() {
+  function closeAccount(restoreFocus=false) {
     if (!accountDialog.open) return;
     account.reset();showKey(false);layoutUrl();accountStatus.textContent='';
     accountOwner=null;
     accountDialog.close();
+    if (restoreFocus) el('add').focus();
   }
   kind.addEventListener('change',layoutUrl);
   keyToggle.addEventListener('click',()=>showKey(key.type==='password'));
@@ -520,8 +521,8 @@
     accountDialog.showModal();
     el('name').focus();
   });
-  el('account-cancel').addEventListener('click',closeAccount);
-  accountDialog.addEventListener('cancel',event=>{event.preventDefault();closeAccount();});
+  el('account-cancel').addEventListener('click',()=>closeAccount(true));
+  accountDialog.addEventListener('cancel',event=>{event.preventDefault();closeAccount(true);});
   account.addEventListener('submit',async event=>{
     event.preventDefault();if (busy) return;
     const user=owner(), role=roleKey(), button=event.submitter;

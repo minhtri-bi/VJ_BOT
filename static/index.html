@@ -775,7 +775,7 @@
               </section>
               <section class="settings-card ai-settings-card" id="ai-card">
                 <header class="card-head"><h2 class="card-title">Kết nối AI</h2></header>
-                <p id="ai-source" class="ai-source" role="status"></p>
+                <p id="ai-source" class="ai-source" role="status" hidden></p>
                 <section class="ai-current" aria-label="Kết nối trò chuyện hiện tại">
                   <div class="ai-current-heading"><span class="ai-current-dot" aria-hidden="true"></span><span class="status-pill" id="ai-pill" data-state="none">Chưa chọn kết nối</span></div>
                   <strong id="ai-current-model">Chọn một kết nối để bắt đầu</strong>
@@ -784,8 +784,10 @@
                 </section>
                 <div class="settings-connection-grid">
                 <div class="ai-saved-connections">
-                  <div class="settings-control-head"><label for="ai-profile-list">Kết nối AI cá nhân</label></div>
-                  <select id="ai-profile-list" aria-describedby="ai-profile-hint"><option value="">Chọn kết nối đã lưu</option></select>
+                  <div class="settings-control-head">
+                    <label for="ai-profile-list">Kết nối AI cá nhân</label>
+                    <select id="ai-profile-list" aria-describedby="ai-profile-hint"><option value="">Chọn kết nối đã lưu</option></select>
+                  </div>
                   <div class="settings-inline-actions"><button type="button" class="settings-link" id="ai-add-connection" aria-haspopup="dialog">+ Thêm</button><button type="button" class="settings-link" id="ai-edit-connection" hidden>Sửa kết nối</button></div>
                   <p class="ai-field-hint" id="ai-profile-hint" hidden></p>
                   <p id="ai-connection-status" class="ai-field-hint" role="status"></p>
@@ -821,9 +823,8 @@
                 </section>
                 <form id="ai-form" class="ai-form" autocomplete="off">
                   <div class="settings-chat-model">
-                    <h3>Model trò chuyện</h3>
-                    <p class="ai-field-hint settings-no-model">Chưa có model đã kiểm tra.</p>
-                    <label id="ai-models" hidden>Model đã kiểm tra<select id="ai-model-list" aria-describedby="ai-selection-hint" disabled></select></label>
+                    <label id="ai-models" hidden>Model trò chuyện<select id="ai-model-list" aria-describedby="ai-selection-hint" disabled></select></label>
+                    <div class="settings-model-empty"><span>Model trò chuyện</span><p class="ai-field-hint settings-no-model">Chưa có model đã kiểm tra.</p></div>
                     <input id="ai-model" type="hidden" maxlength="100">
                     <p class="ai-field-hint" id="ai-selection-hint">Chỉ liệt kê model đã thử. Tình trạng có thể thay đổi.</p>
                     <div class="settings-inline-actions"><button type="button" class="settings-link" id="ai-fetch-models" aria-controls="ai-api-scan">Quét model</button><button type="submit" class="public-cta" id="ai-save" disabled hidden>Lưu model</button></div>
@@ -841,7 +842,7 @@
                     </div>
                   </details>
                 </form>
-                <p class="ai-field-hint settings-connect-empty">Chọn hoặc thêm kết nối để cài đặt model trò chuyện.</p>
+                <div class="settings-model-empty settings-connect-empty"><span>Model trò chuyện</span><p class="ai-field-hint settings-no-model">Chưa có kết nối để chọn model.</p></div>
                 </div>
                 </div>
                   <dialog id="ai-edit-dialog" class="ai-add-dialog settings-dialog" aria-labelledby="ai-api-editor-title" aria-describedby="ai-edit-description">
@@ -907,8 +908,10 @@
                   <p id="speech-managed-summary" class="ai-field-hint" hidden>OpenAI quản trị · gpt-4o-mini-tts · alloy · Tự động dùng cấu hình máy chủ. <a href="#settings/admin">Model văn bản &amp; GPT-Live ↗</a></p>
                   <div class="sound-fields">
                   <div class="sound-stack speech-account-field">
-                    <div id="speech-account-controls"><label for="speech-profile">Tài khoản giọng nói</label></div>
-                    <select id="speech-profile" aria-describedby="ai-oauth-voice-hint speech-model-status"><option value="">Chọn tài khoản giọng nói đã lưu</option></select>
+                    <div class="sound-control-stack">
+                      <div id="speech-account-controls"><label for="speech-profile">Tài khoản giọng nói</label></div>
+                      <select id="speech-profile" aria-describedby="ai-oauth-voice-hint speech-model-status"><option value="">Chọn tài khoản giọng nói đã lưu</option></select>
+                    </div>
                     <button type="button" class="settings-link" id="speech-key-add" aria-haspopup="dialog" aria-expanded="false" aria-controls="speech-key-dialog">+ Thêm khóa</button>
                   </div>
                   <div class="sound-stack" id="speech-personal-setup">

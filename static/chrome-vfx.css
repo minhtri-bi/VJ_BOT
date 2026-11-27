@@ -112,7 +112,7 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 :root[data-theme=dark] #panel-settings :is(input:not([type=checkbox]),select,textarea){
   border-color:color-mix(in srgb,var(--line),var(--ink) 28%);
 }
-#panel-settings :is(input,textarea)::placeholder{color:var(--pencil);opacity:1}
+#panel-settings :is(input,textarea)::placeholder{color:var(--pencil-light);font-weight:400;opacity:1}
 #panel-settings :is(input,select,textarea):focus,:root[data-theme=dark] #panel-settings :is(input,select,textarea):focus{border-color:var(--accent);box-shadow:none}
 #panel-settings :is(input,select,textarea,button,a,summary):focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 #panel-settings label,#panel-settings legend{color:var(--pencil);font-size:13px;font-weight:700}
@@ -149,7 +149,11 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #panel-settings .settings-connection-grid :is(.ai-saved-connections,.ai-form){margin:0;padding:0;border:0;background:none;min-width:0}
 #panel-settings .settings-connection-grid :is(.ai-step,#ai-oauth-panel .ai-form){border:0;margin:0;padding:0;min-width:0}
 #panel-settings .settings-connection-grid label{margin:0}
-#panel-settings #ai-card .settings-chat-model #ai-models{gap:5px}
+#panel-settings #ai-card :is(.settings-control-head,.settings-model-empty),
+#panel-settings #ai-models:not([hidden]){display:grid;gap:5px}
+#panel-settings #ai-card .settings-model-empty>span{color:var(--pencil);font-size:13px;font-weight:700}
+#panel-settings #ai-card :is(#ai-profile-list,#ai-model-list,.settings-no-model){min-height:48px}
+#panel-settings #ai-card .settings-no-model{display:flex;align-items:center;margin:0;padding:6px 12px;border:1px solid var(--line);border-radius:10px}
 #panel-settings #ai-card .settings-chat-model{gap:8px}
 #panel-settings #ai-card .ai-add-dialog :is(p,small,#ai-key-toggle){color:var(--pencil)}
 #panel-settings #ai-edit-status{display:block}
@@ -157,16 +161,18 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #panel-settings #ai-edit-dialog label{display:grid;gap:6px;min-width:0}
 #panel-settings #speech-key-toggle{color:var(--pencil)}
 #panel-settings :is(.settings-chat-model,.settings-scan-body,#ai-api-manage){display:grid;gap:10px;min-width:0}
-#panel-settings .settings-chat-model h3{margin:0;font-size:15px;font-weight:800}
-#panel-settings .settings-chat-model:has(#ai-models:not([hidden])) .settings-no-model,
+#panel-settings .settings-chat-model:has(#ai-models:not([hidden])) .settings-model-empty,
 #panel-settings .settings-chat-controls:has(> :is(#ai-form,#ai-oauth-panel):not([hidden])) .settings-connect-empty{display:none}
 #panel-settings .settings-inline-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px 12px}
 #panel-settings .settings-link{
-  min-height:44px;min-width:44px;border:0;border-radius:8px;background:transparent;color:var(--ink);
-  padding:6px 8px;font:inherit;font-size:14px;font-weight:700;text-decoration:underline;text-underline-offset:3px;cursor:pointer;
+  min-height:44px;min-width:44px;border:0;border-radius:8px;background:transparent;color:var(--accent);
+  padding:6px 8px;font:inherit;font-size:14px;font-weight:700;text-decoration:none;text-underline-offset:3px;cursor:pointer;
 }
-#panel-settings .settings-link:hover:not(:disabled){background:var(--surface-2)}
+#panel-settings .settings-link:is(:hover,:focus-visible):not(:disabled){background:var(--surface-2);text-decoration:underline}
+#panel-settings .settings-inline-actions>.settings-link:first-child,
+#panel-settings #speech-legacy-settings .sound-stack>.settings-link{margin-inline-start:-8px}
 #panel-settings #ai-card .ai-current{margin:0 0 16px;gap:6px 12px;padding:14px}
+#panel-settings #ai-card .ai-current .ai-field-hint{grid-column:1}
 #panel-settings #ai-card .ai-current .status-pill{border:0;padding:0;background:none;color:var(--ink);box-shadow:none;white-space:normal}
 #panel-settings #ai-api-scan{margin:0;border-width:1px;border-radius:12px}
 #panel-settings #ai-api-scan summary{min-height:44px;margin:0;padding:8px 12px}
@@ -191,9 +197,11 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #settings-sound-card .sound-mode-row>label{flex:1 1 11rem;max-width:18rem}
 #settings-sound-card .sound-header .status-pill{border:0;box-shadow:none;color:var(--ink);font-weight:700;white-space:normal}
 #settings-sound-card .sound-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:4px;margin-bottom:12px;padding:4px;border-radius:12px;background:var(--surface-2)}
-#settings-sound-card .sound-tabs-secondary{margin:0;background:none;border-bottom:1px solid var(--line);border-radius:0;padding:0 0 4px}
 #settings-sound-card [role=tab]{min-height:44px;border:1px solid transparent;border-radius:9px;background:none;color:var(--pencil);padding:6px;font:inherit;font-size:14px;font-weight:700;cursor:pointer}
 #settings-sound-card [role=tab][aria-selected=true]{border-color:var(--accent);background:var(--sheet);color:var(--ink)}
+#settings-sound-card .sound-tabs-secondary{display:flex;flex-wrap:wrap;gap:0 16px;margin:0;padding:0;background:none;border-bottom:1px solid var(--line);border-radius:0}
+#settings-sound-card .sound-tabs-secondary [role=tab]{flex:0 0 auto;margin-bottom:-1px;padding:8px 4px;border:0;border-bottom:2px solid transparent;border-radius:0;background:none}
+#settings-sound-card .sound-tabs-secondary [role=tab][aria-selected=true]{border-bottom-color:var(--accent);background:none;color:var(--ink)}
 #settings-sound-card #voice-v2-account-dialog :is(.ai-field,.ai-add-heading){margin:0}
 #settings-sound-card #voice-v2-key-toggle{color:var(--pencil)}
 #settings-sound-card #voice-v2-use-default{justify-self:start}
@@ -223,6 +231,8 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #settings-sound-card .sound-fields{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));align-items:end;gap:10px 12px}
 #settings-sound-card .sound-full{grid-column:1/-1}
 #settings-sound-card label{display:grid;gap:5px;min-width:0;line-height:1.4}
+#settings-sound-card .sound-control-stack{display:grid;gap:5px}
+#settings-sound-card #speech-legacy-settings :is(#speech-model,#speech-profile){min-height:48px}
 #settings-sound-card :is(input,select){font-weight:600}
 #settings-sound-card label:has(>input[type=checkbox]){display:flex;align-items:center;gap:9px;min-height:44px;cursor:pointer}
 #settings-sound-card input[type=checkbox]{width:18px;height:18px;min-height:0;margin:0;flex:none;accent-color:var(--accent)}
@@ -244,10 +254,13 @@ body:not(.sidebar-expanded) .chrome-scene-wipe{inset-inline-start:72px}
 #settings-sound-card .sound-status:not(:empty){padding:8px 10px;border-left:2px solid var(--accent);background:var(--surface-2);overflow-wrap:anywhere}
 #settings-sound-card #voice-v2-account-status:empty{margin-top:-12px}
 @media(max-width:600px){
-  #settings-sound-card .sound-slot-header{gap:6px}
+  #settings-sound-card .sound-slot-header:not([hidden]){display:flex;flex-wrap:wrap;align-items:center;gap:4px 12px}
+  #settings-sound-card .sound-slot-header>label{flex:1 0 100%}
   #settings-sound-card .sound-slot-header button{font-size:12px}
+  #settings-sound-card .sound-slot-header>label+button{margin-inline-start:-8px}
   #settings-sound-card select{padding-inline:8px}
 }
+@media(max-width:419px){#settings-sound-card .sound-tabs:not(.sound-tabs-secondary) [role=tab]{font-size:13px;padding:6px 4px}}
 @media(max-width:359px){#settings-sound-card .sound-ids{grid-template-columns:1fr}}
 
 #panel-settings .danger-card{border-color:var(--warn)!important;background:linear-gradient(180deg,var(--sheet),color-mix(in srgb,var(--warn) 7%,var(--sheet)))!important}

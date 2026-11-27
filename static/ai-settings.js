@@ -8,6 +8,7 @@
   let activeScan = null, readiness = 0;
   let profileRows = [], selectedProfile = null, profileKey = '', rendering = 0;
   let profilesOwner = null, loadedProfile = null;
+  let editOpener = null;
   const methodKey = owner => 'vjbot_ai_method:' + owner;
   const managed = () => signedInUser?.is_admin === true;
   const accountIdentity = () => JSON.stringify([signedInUser?.user_id || null, managed()]);
@@ -72,6 +73,13 @@
       ? 'Được mã hóa trong trình duyệt này và không đồng bộ. Máy chủ chỉ nhận khóa khi gửi yêu cầu AI. Trình duyệt bị xâm nhập vẫn có thể đọc được khóa.'
       : 'Được mã hóa và lưu trên máy chủ theo tài khoản của em. Các thiết bị khác đăng nhập tài khoản này dùng được kết nối này.';
   }
+  function showApiKey(show) {
+    const toggle = el('ai-key-toggle');
+    el('ai-key').type = show ? 'text' : 'password';
+    toggle.textContent = show ? 'Ẩn' : 'Hiện';
+    toggle.setAttribute('aria-label', show ? 'Ẩn khóa API' : 'Hiện khóa API');
+    toggle.setAttribute('aria-pressed', String(show));
+  }
   function fillProfile(profile, cache = null, key = '') {
     el('ai-form').hidden = false;
     selectedProfile = profile;
@@ -90,10 +98,7 @@
     el('ai-model').value = profile?.model || '';
     el('ai-key').value = '';
     el('ai-key').placeholder = profile ? '••••' + profile.key_last4 : 'sk-…';
-    el('ai-key').type = 'password';
-    el('ai-key-toggle').textContent = 'Hiện';
-    el('ai-key-toggle').setAttribute('aria-label', 'Hiện khóa API');
-    el('ai-key-toggle').setAttribute('aria-pressed', 'false');
+    showApiKey(false);
     el('ai-key').required = !profile;
     el('ai-key-hint').textContent = profile ? 'Để trống để dùng lại khóa của kết nối này. Đổi URL hoặc loại API thì cần khóa mới.' : 'Chọn nơi lưu. Đừng dán khóa vào khung trò chuyện.';
     el('ai-remove').hidden = !profile;
@@ -596,8 +601,9 @@
       modelSnapshot = pending;
       scanHint();
       if (!window.usesAntigravityOAuth?.(owner)) {
-        el('ai-source').hidden = Boolean(profile);
-        el('ai-source').textContent = choice && choice.scope !== 'none' && !profile ? 'Kết nối API đã chọn không khả dụng. Hãy chọn kết nối khác; không tự động dùng kết nối thay thế.' : 'Em thêm kết nối AI để trò chuyện với thầy nhé.';
+        const warning = el('ai-source'), unavailable = Boolean(choice && choice.scope !== 'none' && !profile);
+        warning.hidden = !unavailable;
+        warning.textContent = unavailable ? 'Kết nối API đã chọn không khả dụng. Hãy chọn kết nối khác; không tự động dùng kết nối thay thế.' : '';
         pill(profile ? 'saved' : 'none', profile ? `Đang dùng ${profile.name}` : 'Chưa chọn API');
       }
       if (!profile && !pending && !el('ai-edit-dialog').open) el('ai-form').hidden=true;
@@ -723,13 +729,16 @@
     const dialog = el('ai-edit-dialog');
     if (!dialog.open) return;
     el('ai-key').value = '';
-    el('ai-key').type = 'password';
+    showApiKey(false);
     el('ai-edit-status').textContent = '';
+    editOpener = null;
     dialog.close();
   }
   function dismissApiEditor() {
     if (testing) return;
+    const opener = editOpener;
     closeApiEditor();
+    (opener && !opener.hidden ? opener : el('ai-profile-list')).focus();
     return returnToSavedConnection();
   }
   el('ai-api-back').addEventListener('click', dismissApiEditor);
@@ -759,6 +768,7 @@
       details.querySelector('summary').focus();
     } else if (selectedProfile) {
       if (el('ai-form').hidden) window.showAiConnectionForm?.('key');
+      editOpener = el('ai-edit-connection');
       el('ai-edit-dialog').showModal();
     }
   });
@@ -791,13 +801,7 @@
     invalidateSelection();
     publishModels();
   });
-  el('ai-key-toggle').addEventListener('click', () => {
-    const show = el('ai-key').type === 'password';
-    el('ai-key').type = show ? 'text' : 'password';
-    el('ai-key-toggle').textContent = show ? 'Ẩn' : 'Hiện';
-    el('ai-key-toggle').setAttribute('aria-label', show ? 'Ẩn khóa API' : 'Hiện khóa API');
-    el('ai-key-toggle').setAttribute('aria-pressed', String(show));
-  });
+  el('ai-key-toggle').addEventListener('click', () => showApiKey(el('ai-key').type === 'password'));
   el('auth-logout').addEventListener('click', () => {
     resetModels();
     syncProbeBudget(null);
@@ -815,6 +819,7 @@
     savedConnection = false;
     refreshSavedConnections();
     invalidateSelection();
+    editOpener = el('ai-add-connection');
     el('ai-edit-dialog').showModal();
     el('ai-profile-name').focus();
   });
@@ -879,6 +884,8 @@
     el('ai-profile-list').replaceChildren();
     el('ai-current-model').textContent = 'Chưa chọn kết nối';
     el('ai-current-hint').textContent = '';
+    el('ai-source').hidden = true;
+    el('ai-source').textContent = '';
     el('ai-card').dataset.connected = 'false';
     el('ai-form').hidden = el('ai-oauth-panel').hidden = true;
     closeApiEditor();

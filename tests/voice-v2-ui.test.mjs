@@ -306,6 +306,22 @@ test('voice account modal shows only custom URLs and clears revealed secrets on 
     assert.equal(el('account-dialog').open,false);
     assert.equal(el('key').type,'password');
     assert.equal(el('key').value,'');
+    assert.equal(el('add').focused,undefined);
+  }
+});
+
+test('dismissing the voice account dialog returns focus to Add Connection',()=>{
+  for (const cancel of [
+    el=>el('account-cancel').events.click(),
+    el=>el('account-dialog').events.cancel(new Event('cancel',{cancelable:true}))
+  ]) {
+    const {el}=settingsFixture();
+    el('add').events.click();
+    el('key').value='synthetic-draft';
+    cancel(el);
+    assert.equal(el('account-dialog').open,false);
+    assert.equal(el('key').value,'');
+    assert.equal(el('add').focused,true);
   }
 });
 

@@ -23,7 +23,7 @@ function settings({consent = true, models = ['paid', 'denied', 'working'], saved
       },
       close(value = '') { this.open = false; this.returnValue = value; this.events.close?.(); },
       click() { return this.events.click?.(); },
-      focus() {},
+      focus() { context.document.activeElement = this; },
       setAttribute(name, value) { this.attributes[name] = value; },
       getAttribute(name) { return this.attributes[name]; },
       removeAttribute(name) { delete this.attributes[name]; },
@@ -589,10 +589,27 @@ test('unified chooser groups API and OAuth accounts without duplicating profile 
   assert.equal(ui.requests.some(request => request.path.includes('/models')), false);
 });
 
+test('empty API settings hide the redundant hint but still warn about a missing selected connection', async () => {
+  const activeChoice = {value:{scope:'none', id:''}}, ui = settings({activeChoice});
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, true);
+  activeChoice.value = {scope:'server', id:'missing'};
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, false);
+  assert.match(ui.element('ai-source').textContent, /không khả dụng/);
+  activeChoice.value = {scope:'server', id:'saved-profile'};
+  await ui.context.renderAiPanels('settings');
+  assert.equal(ui.element('ai-source').hidden, true);
+  assert.equal(ui.element('ai-source').textContent, '');
+});
+
 test('adding an API draft preserves the selected saved connection and unsaved fields on reopen', async () => {
   const ui = settings();
   await ui.context.renderAiPanels('settings');
   ui.element('ai-profile-new').click();
+  ui.element('ai-key-toggle').click();
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Ẩn');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'true');
   ui.element('ai-profile-name').value = 'Unsaved draft';
   ui.element('ai-key').value = 'unsaved-secret';
   await ui.context.renderAiPanels('settings');
@@ -602,11 +619,28 @@ test('adding an API draft preserves the selected saved connection and unsaved fi
   assert.equal(JSON.stringify([...ui.storage]).includes('unsaved-secret'), false);
   await ui.element('ai-api-back').click();
   assert.equal(ui.element('ai-edit-dialog').open, false);
+  assert.equal(ui.context.document.activeElement, ui.element('ai-add-connection'));
+  assert.equal(ui.element('ai-key').type, 'password');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Hiện');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'false');
   assert.equal(ui.element('ai-profile-list').value, 'server:saved-profile');
   assert.equal(ui.element('ai-profile-name').value, 'Saved provider');
   assert.equal(ui.element('ai-key').value, '');
   assert.equal(ui.element('ai-current-model').textContent, 'paid');
   assert.equal(ui.requests.some(request => request.path.includes('/models')), false);
+});
+
+test('canceling API edits focuses the edit button or the connection list if it disappeared', async () => {
+  const ui = settings();
+  await ui.context.renderAiPanels('settings');
+  const opener = ui.element('ai-edit-connection');
+  opener.click();
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.context.document.activeElement, opener);
+  opener.click();
+  opener.hidden = true;
+  await ui.element('ai-api-back').click();
+  assert.equal(ui.context.document.activeElement, ui.element('ai-profile-list'));
 });
 
 test('API editor dismissal and account changes scrub keys without scanning or changing the active connection', async () => {
@@ -615,11 +649,16 @@ test('API editor dismissal and account changes scrub keys without scanning or ch
   ui.element('ai-edit-connection').click();
   assert.equal(ui.element('ai-edit-dialog').open, true);
   ui.element('ai-key').value = 'synthetic-unsaved-key';
-  ui.element('ai-key').type = 'text';
+  ui.element('ai-key-toggle').click();
+  assert.equal(ui.element('ai-key').type, 'text');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Ẩn');
   ui.context.dispatchEvent(new Event('hashchange'));
   assert.equal(ui.element('ai-edit-dialog').open, false);
   assert.equal(ui.element('ai-key').value, '');
   assert.equal(ui.element('ai-key').type, 'password');
+  assert.equal(ui.element('ai-key-toggle').textContent, 'Hiện');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-label'), 'Hiện khóa API');
+  assert.equal(ui.element('ai-key-toggle').getAttribute('aria-pressed'), 'false');
   assert.deepEqual(JSON.parse(JSON.stringify(ui.activeChoice.value)), {scope:'server', id:'saved-profile'});
   await ui.context.renderAiPanels('settings');
   ui.element('ai-edit-connection').click();
