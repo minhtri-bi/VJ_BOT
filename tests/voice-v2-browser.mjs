@@ -544,10 +544,11 @@ async function closeChromium() {
 }
 let timer;
 let failure;
+// The full shell adds navigation across four viewport widths; each UI wait stays bounded separately.
 try {
   await Promise.race([debuggerReady.then(url=>runLiveBrowser(url,origin)),
     exit.then(([code])=>{throw new Error(`Browser exited early (${code}): ${diagnostics}`);}),
-    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Browser smoke timed out (pages ${pages}; synthesis ${requests}; live ${liveRequests}): ${diagnostics}`)),25000);})]);
+    new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Browser smoke timed out (pages ${pages}; synthesis ${requests}; live ${liveRequests}): ${diagnostics}`)),45000);})]);
   assert.deepEqual(pages,['/','/?replay','/?live'],'Replay must survive navigation before the Live browser smoke');
   assert.deepEqual(requests,[['bilingual','Chào em. こんにちは。'],['bilingual','Xin chào. おはよう。'],
     ['ja','DVDを見ます。'],['bilingual','Đọc qua MP3.']],
