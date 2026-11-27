@@ -335,7 +335,7 @@ test('ElevenLabs catalog suggests models but keeps the blank default and guides 
   assert.equal(el('primary-catalog-status').textContent,'Provider refused the request.');
   code='tts_catalog_permission';
   await catalog();
-  assert.match(el('primary-catalog-status').textContent,/quyền đọc giọng và model.*nhập tay ID giọng/);
+  assert.match(el('primary-catalog-status').textContent,/quyền đọc giọng và model.*nhập tay ID giọng.*để trống hoặc nhập eleven_v3 hay eleven_turbo_v2_5/);
   el('primary-voice').value='manual_voice';
   await save();
   assert.equal(saved().primary.voice_id,'manual_voice');

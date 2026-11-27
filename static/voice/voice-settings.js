@@ -359,7 +359,7 @@
       if (role!==roleKey() || selection!==selectedAccounts.get(slot) || start!==identity(config)) return;
       if (!response.ok) {
         if (response.status===403 && data.code==='tts_catalog_permission' && config.primary.provider==='elevenlabs')
-          throw new Error('Cấp quyền đọc giọng và model trên ElevenLabs hoặc nhập tay ID giọng. Để trống ID model hoặc chọn eleven_v3 hay eleven_turbo_v2_5.');
+          throw new Error('Cấp quyền đọc giọng và model trên ElevenLabs hoặc nhập tay ID giọng. Ở ô ID model, để trống hoặc nhập eleven_v3 hay eleven_turbo_v2_5.');
         throw new Error(data.detail || 'Không tải được giọng và model.');
       }
       if (!Array.isArray(data.models) || !Array.isArray(data.voices)) throw new Error('Danh sách giọng không hợp lệ.');
