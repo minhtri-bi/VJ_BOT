@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {LIVE_MAX_SEGMENTS, VOICE_COMMANDS, voiceInstructions, voiceStreamingInstructions} from '../src/prompt.js';
+import {LIVE_MAX_SEGMENTS, VOICE_COMMANDS, reversedPrompt, voiceInstructions, voiceStreamingInstructions} from '../src/prompt.js';
 
 test('only a fresh explicit start authorizes a voice welcome', () => {
   const fresh = voiceStreamingInstructions('N5', {command: 'start'});
@@ -38,4 +38,14 @@ test('stream transport and protection are independent of command and language mo
     assert.ok(prompt.includes(`Use at most ${LIVE_MAX_SEGMENTS} tagged segments`));
     assert.match(prompt, /<ja>\.\.\.<\/ja>.*<vi>\.\.\.<\/vi>.*Write nothing outside the tags except separating whitespace/);
   }
+});
+
+test('a digits-only request changes presentation, not a protected exercise or a quoted phrase',()=>{
+  const message='Mình đã chọn bao nhiêu, chỉ viết một chữ số thôi.';
+  for (const build of [reversedPrompt,voiceStreamingInstructions]) {
+    assert.match(build('N5',{message}),/^REQUESTED FORMAT:/m);
+    assert.doesNotMatch(build('N5',{message:'Em dịch “chỉ viết một chữ số thôi” thế nào?'}),/^REQUESTED FORMAT:/m);
+  }
+  assert.doesNotMatch(voiceStreamingInstructions('N5',{message,preAnswerTask:true}),/^REQUESTED FORMAT:/m);
+  assert.doesNotMatch(reversedPrompt('N5',{message,intent:'hint'}),/^REQUESTED FORMAT:/m);
 });

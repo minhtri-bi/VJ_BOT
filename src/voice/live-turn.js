@@ -291,11 +291,11 @@ export async function liveTurnRoute(request, env) {
     if (!grounded) return forbidden();
   }
   const protectedChoice = grounded?.focus?.kind === 'question' && grounded.focus.item.mode === 'choice';
-  const envelope = protectedChoice ? '' : JSON.stringify({message:message || null,
+  const envelope = protectedChoice ? '' : JSON.stringify({
     command:command ? {key:command, instruction:VOICE_COMMANDS[command]} : null, japanese_only,
     reference:{level, lesson:grounded, history:history.map(({role,text,generation,playback}) => ({role,
       text:text.replace(tags, ' ').trim(), ...(generation === undefined ? {} : {generation}),
-      ...(playback === undefined ? {} : {playback})})).filter(turn => turn.text)}});
+      ...(playback === undefined ? {} : {playback})})).filter(turn => turn.text)}, message:message || null});
   if (envelope.length > 16000) return jsonError(413, 'live_context_too_large', 'Em chọn một mục cụ thể để thầy giải thích nhé.');
   if (request.signal.aborted) return new Response(null, {status:204});
   if (await rateLimited(env, user.user_id)) return jsonError(429, 'live_rate_limited', 'Em hãy đợi một phút rồi thử lại.');
@@ -308,5 +308,5 @@ export async function liveTurnRoute(request, env) {
   if (failure) return failure;
   if (protectedChoice) return choiceGuidance(command, japanese_only);
   return liveEvents(provider, envelope, voiceStreamingInstructions(level, {japaneseOnly:japanese_only,
-    preAnswerTask:focus?.kind === 'question', command, continuation:history.length > 0}), japanese_only, request.signal);
+    preAnswerTask:focus?.kind === 'question', command, continuation:history.length > 0, message}), japanese_only, request.signal);
 }

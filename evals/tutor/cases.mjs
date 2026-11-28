@@ -113,12 +113,38 @@ const confirmation=[
   ])
 ];
 
-export const casePacks = ['development','held-out','confirmation'];
+const transfer=[
+  sequence('chat','cafe-quantity',[
+    step('request','Em đóng vai khách mua cà phê mang về. Thầy làm người bán và chỉ hỏi em lấy mấy ly nhé.','Ask only how many, in the role of seller.'),
+    step('answer','二つです。','Accept the contextual quantity two. Do not demand a full sentence or say it was wrong.'),
+    step('recall','Thầy nhắc số ly em vừa gọi, chỉ viết một chữ số thôi.','Return only the digit 2, no words, units, greeting or new question.')
+  ]),
+  sequence('chat','window-state',[
+    step('meaning','窓が開いています ở đây nghĩa là gì? Chỉ nói bằng tiếng Việt cho em dễ hiểu.','Explain that the window is open, not that someone is in the middle of opening it. Vietnamese only; no drill.','vietnamese-only'),
+    step('detail','Lần này cho em biết kỹ hơn vì sao không nhất thiết là ai đó đang mở cửa sổ. Lấy một ví dụ cùng kiểu nhé.','Explain resultant state with an intransitive change-of-state verb; include one relevant example without a categorical rule for all verbs.'),
+    step('close','Rõ rồi thầy. Mình dừng ở đây, em không muốn làm bài nữa.','End naturally with no further exercise, quiz or invitation to practise.')
+  ]),
+  sequence('live','bus-destination',[
+    step('request','Thầy làm nhân viên bán vé xe buýt nhé. Chỉ hỏi em điểm đến.','Ask for the destination only; wait for the learner.'),
+    step('answer','奈良までです。','Accept Nara as the destination. Do not ask again where, or require a longer answer.'),
+    step('recall','Nhắc đúng điểm đến vừa rồi bằng tiếng Việt thôi, không cần hỏi thêm thầy nhé.','Give Nara in Vietnamese script without a Japanese restatement or new question.','vietnamese-only')
+  ]),
+  sequence('live','convenient-town',[
+    step('correct','Năm ngoái thị trấn này không tiện. Em nói 去年、この町は便利くありませんでした。 Em nhầm chỗ nào?','Correct the predicate to 便利ではありませんでした or a valid equivalent. Explain the な-adjective stem directly without inserting な.'),
+    step('retry','去年、この町は便利ではありませんでした。','Accept the corrected polite past negative. Do not manufacture an error or move to an unrelated exercise.'),
+    step('switch','Không luyện câu đó nữa. Cho em đúng một câu tiếng Nhật để hỏi bến xe buýt gần nhất ở đâu thôi.','Give one natural Japanese question asking where the nearest bus stop is. No Vietnamese preface or follow-up.','japanese-only')
+  ])
+];
+
+export const casePacks = ['development','held-out','confirmation','transfer','reserved-continuity'];
 export const turnId = (item, step) => `${item.channel}/${item.id}/${step.id}`;
 
 export async function selectCases(pack) {
   if (pack==='held-out') return heldOut;
   if (pack==='confirmation') return confirmation;
+  if (pack==='transfer') return transfer;
+  if (pack==='reserved-continuity') return heldOut.filter(item=>item.channel==='chat'
+    ? item.id==='chip-assent-switch' : item.id==='chip-assent-interrupt-switch');
   if (pack!=='development') throw new Error('Unknown tutor evaluation pack.');
   const previous = new Set(['first-hint','no-answer-after-attempt','correct-variant','partial-subgoal']);
   const reused = (await loadCases()).filter(item=>previous.has(item.id)).map(item=>sequence('chat',item.id,
