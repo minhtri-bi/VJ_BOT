@@ -204,6 +204,26 @@ node scripts/evaluate_tutor.mjs --live --base-url http://127.0.0.1:8787 --output
 
 Live mode accepts loopback origins only, refuses an existing output file, isolates cases in new quick-chat routes, records actual replies without credentials, stops on transport failure and never retries inference. Request starts are spaced by at least 3.1 seconds to respect the account's 20-request/minute limit; each step times out after 35 seconds. It does not delete learner history or change provider settings. Supply human review decisions separately; no approval is fabricated.
 
+#### Chat and Cascaded Live prompt comparisons
+
+`evals/tutor/cases.mjs` reuses the canonical Chat cases and adds reported regressions and held-out Live cases. Compare baseline and candidate with identical inputs, provider, model, and fresh in-memory test sessions. Start with `development`; use `regression` for a shorter rerun of known failures. Reserve `held-out` until the prompt is frozen. The runner sends fixed transcripts through `/api/live/turn`, not microphone capture, STT, TTS, or the native Live vendors.
+
+Use the approved local Promptfoo CLI (validated on `0.126.0`) from a scratch directory, with `PROMPTFOO_DISABLE_TELEMETRY=1`, `PROMPTFOO_DISABLE_UPDATE=1` and a separate `PROMPTFOO_CONFIG_DIR`:
+
+```sh
+promptfoo validate config -c <checkout>/evals/tutor/promptfooconfig.yaml
+promptfoo eval -c <checkout>/evals/tutor/promptfooconfig.yaml --no-cache --no-share -o <new-output.json>
+```
+
+With both recording variables unset, `echo` runs calibration only. Three controls must pass and seven must deliberately fail, with no evaluation errors. Use `node evals/tutor/replay.mjs <controls-result.json>` to check each verdict, not just totals.
+
+For an explicitly approved real run, `node evals/tutor/capture.mjs <checkout> <prompt-sha256> <development|held-out|regression> <gemini|mistral> <model> <new-recording.json> --approved-live <max-new-requests>` reads one key from standard input. Set the last argument to the approved maximum, not an estimate. Do not pass the key on the command line or save it in a file. The runner uses only exact official provider routes, allows at most one provider call per turn, and stops on a failed request. A protected multiple-choice control must not use a provider. The runner does not read learner accounts or histories.
+If the recorder itself stopped before opening an upstream request, use `--resume-from <partial-recording.json>` with a new output file. Resume checks prompt, model, grounding, transport, and case identity; it carries forward only whole completed cases. It refuses provider failures.
+
+For offline replay, set `VJBOT_TUTOR_EVAL_BASELINE` and `VJBOT_TUTOR_EVAL_RECORDING` to the two recordings, and `VJBOT_TUTOR_EVAL_BASELINE_DIR` and `VJBOT_TUTOR_EVAL_CANDIDATE_DIR` to their unchanged checkouts. Replay verifies prompt revisions and the rest of the Worker code, migrations, dependency manifests, case coverage, provider calls, and grounding fingerprints. Review the actual conversation for correctness, tone, continuity, and answer leakage. A JSON or segment pass does not attest teaching quality; keep recordings local and require blind human review for editorial approval.
+
+Release gate: require both objective checks and review of the actual teaching responses on fresh held-out cases. The Gemini 3.5 Flash Lite comparison completed all 12 held-out requests. The baseline passed 6/6 objective checks; the prompt candidate passed 3/6 because it opened all three Live turns with another greeting. Transcript review also found an invalid connector suggestion in Chat. This candidate is not approved for integration. A later candidate must use a new held-out set, not tune and rescore these examples as unseen.
+
 
 ### Prompt-injection boundaries
 

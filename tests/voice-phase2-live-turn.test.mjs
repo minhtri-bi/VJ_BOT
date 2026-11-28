@@ -255,8 +255,9 @@ test('Live sends the latest attempt with the instruction to correct that sentenc
   const response=await send({command:'check',level:'N5',api_connection:connection,history});
   assert.equal(response.status,200);
   const [system,user]=payload.messages;
-  assert.match(system.content,/BILINGUAL TURN: Use Vietnamese for explanations and correction reasons/);
-  assert.match(system.content,/offer one cue to repair the same sentence/);
+  assert.match(system.content,/Explain in everyday Vietnamese by default/);
+  assert.match(system.content,/give the relevant Japanese grammar pattern, and help repair the same sentence/);
+  assert.doesNotMatch(system.content,/COMMANDS YOU WILL RECEIVE/);
   const input=JSON.parse(user.content);
   assert.equal(input.command.key,'check');
   assert.match(input.command.instruction,/lượt của học viên trong lịch sử, không sửa ví dụ của thầy/);
