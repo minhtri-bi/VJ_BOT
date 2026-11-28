@@ -138,6 +138,7 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
       replaceChildren(...children) {this.children=[];this.append(...children);},
       prepend(child) {child.parentElement=this;this.children.unshift(child);},
       setAttribute(name,value){this.attributes[name]=value;},
+      removeAttribute(name){delete this.attributes[name];},
       focus(){this.focused=true;}, addEventListener(event,handler){this.events[event]=handler;}};
   }
   const el=id=>nodes.get('voice-v2-'+id);
@@ -147,11 +148,12 @@ function settingsFixture(apiFetch,profileReads=[],storage=new Map(),withLive=fal
     node('fixture').id='voice-v2-'+id;
   node('fixture').id='speech-legacy-settings';
   if (withLive) {
-    for (const id of ['engine','turn','stt','stt-slot']) node('select').id='voice-v2-live-'+id;
+    for (const id of ['engine','turn','stt','stt-slot','stt-language']) node('select').id='voice-v2-live-'+id;
     node('input').id='voice-v2-live-barge';
     el('live-settings').hidden=true;
     node('label').id='voice-v2-live-stt-slot-field';
     node('div').id='voice-v2-live-options';
+    node('p').id='voice-v2-live-browser-stt-hint';
   }
   const dialog=Object.assign(node('dialog'),{open:false,returnValue:'',
     showModal(){this.open=true;},
@@ -223,8 +225,8 @@ test('legacy identity replay migrates current synthesis audio without reading ke
   const reference={mode:'bilingual',lesson:options.lesson,focus:null,view:'checks'};
   const oldIdentity=JSON.stringify([JSON.stringify(['learner',false]),oldConfig,
     ['https://api.elevenlabs.io',null,'e123','1'],['https://generativelanguage.googleapis.com',null,'g123','1']]);
-  const oldKey=createHash('sha256').update(JSON.stringify(['synthesis-4',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
-  const staleKey=createHash('sha256').update(JSON.stringify(['synthesis-3',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
+  const oldKey=createHash('sha256').update(JSON.stringify(['synthesis-5',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
+  const staleKey=createHash('sha256').update(JSON.stringify(['synthesis-4',oldIdentity,text.normalize('NFC'),reference])).digest('hex');
   const storage=new Map([['vjbot_voice_routing_v2:learner',JSON.stringify({...oldConfig,live:{engine:'cascaded',stt_source:'browser'}})]]);
   const {records,indexedDB}=persistentCache(), reads=[], requests=[];
   function loadPage() {
@@ -535,16 +537,17 @@ test('Phase 1 routes restore native Live; settings change live identity but pres
   const {window,el,change,save,saved}=settingsFixture(undefined,[],storage,true);
   const routing=window.VJVoiceRouting, before=routing.identity(saved()), events=[];
   const liveBefore=routing.liveIdentity(saved());
-  const defaults={engine:'cascaded',turn_mode:'vad',barge_in:true,stt_source:'chat',stt_slot:'primary'};
+  const defaults={engine:'cascaded',turn_mode:'vad',barge_in:true,stt_source:'chat',stt_slot:'primary',stt_language:'auto'};
   assert.ok(Object.isFrozen(routing));
   assert.ok(Object.isFrozen(routing.liveConfig(saved())));
   assert.deepEqual({...routing.liveConfig(saved())},{...defaults,engine:'native'});
   assert.deepEqual({...routing.liveConfig(null)},defaults);
-  assert.deepEqual({...routing.liveConfig({live:{engine:'unknown',turn_mode:1,barge_in:'false',stt_source:'unknown',stt_slot:'xx'}})},defaults);
+  assert.deepEqual({...routing.liveConfig({live:{engine:'unknown',turn_mode:1,barge_in:'false',stt_source:'unknown',stt_slot:'xx',stt_language:'ja-JP'}})},defaults);
   assert.equal(el('live-engine').value,'native');
   assert.equal(el('live-options').hidden,true);
   assert.equal(el('live-stt-slot-field').hidden,true);
   assert.equal(el('live-stt-slot').disabled,true);
+  assert.equal(el('live-stt-language').value,'auto');
   window.addEventListener('vjbot-voice-changed',event=>events.push(event.detail));
   change('live-engine','cascaded');
   change('live-stt','voice');
@@ -554,11 +557,12 @@ test('Phase 1 routes restore native Live; settings change live identity but pres
   el('live-turn').value='ptt';
   el('live-barge').checked=false;
   el('live-stt-slot').value='ja';
+  el('live-stt-language').value='ja';
   change('live-engine','native');
   assert.equal(el('live-options').hidden,true);
-  assert.ok(['turn','barge','stt','stt-slot'].every(name=>el('live-'+name).disabled));
+  assert.ok(['turn','barge','stt','stt-slot','stt-language'].every(name=>el('live-'+name).disabled));
   save();
-  const edited={engine:'native',turn_mode:'ptt',barge_in:false,stt_source:'voice',stt_slot:'ja'};
+  const edited={engine:'native',turn_mode:'ptt',barge_in:false,stt_source:'voice',stt_slot:'ja',stt_language:'ja'};
   assert.deepEqual(saved().live,edited);
   assert.equal(routing.identity(saved()),before);
   assert.notEqual(routing.liveIdentity(saved()),liveBefore);
@@ -568,27 +572,46 @@ test('Phase 1 routes restore native Live; settings change live identity but pres
   assert.equal(again.el('live-turn').value,'ptt');
   assert.equal(again.el('live-barge').checked,false);
   assert.equal(again.el('live-stt-slot').value,'ja');
+  assert.equal(again.el('live-stt-language').value,'ja');
   again.change('live-engine','cascaded');
   assert.equal(again.el('live-options').hidden,false);
-  assert.ok(['turn','barge','stt','stt-slot'].every(name=>!again.el('live-'+name).disabled));
+  assert.ok(['turn','barge','stt','stt-slot','stt-language'].every(name=>!again.el('live-'+name).disabled));
   assert.equal(again.el('live-stt-slot').value,'ja');
 });
 
 test('new routes default to Cascaded and explicit Cascaded preferences survive reload',()=>{
   const storage=new Map(), first=settingsFixture(undefined,[],storage,true);
   assert.equal(first.el('live-engine').value,'cascaded');
+  assert.equal(first.el('live-stt-language').value,'auto');
+  assert.equal(first.el('live-browser-stt-hint').hidden,true);
   first.change('primary-profile','local:b');
   first.change('live-stt','browser');
+  assert.equal(first.el('live-stt-language').value,'auto');
+  assert.equal(first.el('live-browser-stt-hint').hidden,false);
+  assert.equal(first.el('live-stt-language').attributes['aria-describedby'],first.el('live-browser-stt-hint').id);
   first.el('live-turn').value='ptt';
   first.el('live-barge').checked=false;
   first.save();
   const reloaded=settingsFixture(undefined,[],storage,true);
   assert.equal(reloaded.el('live-engine').value,'cascaded');
   assert.equal(reloaded.el('live-stt').value,'browser');
+  assert.equal(reloaded.el('live-stt-language').value,'auto');
+  assert.equal(reloaded.el('live-browser-stt-hint').hidden,false);
   assert.equal(reloaded.el('live-turn').value,'ptt');
   assert.equal(reloaded.el('live-barge').checked,false);
   reloaded.save();
-  assert.deepEqual(reloaded.saved().live,{engine:'cascaded',turn_mode:'ptt',barge_in:false,stt_source:'browser',stt_slot:'primary'});
+  const prior=reloaded.saved(), routing=reloaded.window.VJVoiceRouting;
+  assert.deepEqual(prior.live,{engine:'cascaded',turn_mode:'ptt',barge_in:false,stt_source:'browser',stt_slot:'primary',stt_language:'auto'});
+  reloaded.el('live-stt-language').value='vi';
+  reloaded.save();
+  const again=settingsFixture(undefined,[],storage,true);
+  assert.equal(again.el('live-stt-language').value,'vi');
+  assert.equal(routing.identity(again.saved()),routing.identity(prior));
+  assert.notEqual(routing.liveIdentity(again.saved()),routing.liveIdentity(prior));
+  again.change('live-stt','chat');
+  assert.equal(again.el('live-browser-stt-hint').hidden,true);
+  assert.equal(again.el('live-stt-language').attributes['aria-describedby'],undefined);
+  assert.equal(again.el('live-stt-language').value,'vi');
 });
 
 test('saving cascaded voice STT rejects an unsupported split slot without replacing the saved route',()=>{

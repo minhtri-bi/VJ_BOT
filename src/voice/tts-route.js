@@ -1,6 +1,6 @@
 import {cleanBaseUrl, DEFAULT_BASES} from '../llm.js';
 import {unseal} from '../ai-secrets.js';
-import {authoredVoiceReading, normalizeVoiceText, particleReading} from './normalizer.js';
+import {authoredVoiceReading, normalizeVoiceText, particleReading, voiceBlank} from './normalizer.js';
 import {MAX_SEGMENTS, segmentVoiceText} from './segmenter.js';
 import {MAX_AUDIO, VOICE_BASES, VoiceError, synthesizeVoice, voiceCatalog, voiceSettings} from './tts-adapters.js';
 
@@ -157,12 +157,16 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
     const ja = routeSlot(routing,'ja');
     const kanjiMode = ja.kanji_mode ?? 'kanji_native';
     if (!['kanji_native','kana_first'].includes(kanjiMode)) throw bad();
-    const reading = mode === 'ja' ? authoredVoiceReading(body.reading) : '';
+    const input = normalizeVoiceText(body.text,{kanjiMode});
+    const reading = mode === 'ja' && !voiceBlank.test(input) ? authoredVoiceReading(body.reading) : '';
     const mixLanguages = routing.mode === 'single' && routing.primary.provider === 'mistral';
     const chunks = reading ? [{lang:'ja',text:reading,boundary:'start'}]
-      : segmentVoiceText(normalizeVoiceText(body.text,{kanjiMode}),mode,{mixLanguages});
+      : segmentVoiceText(input,mode,{mixLanguages,splitBlanks:true});
     if (!chunks) throw new VoiceError('tts_segment_limit',413,`Đoạn cần đọc có quá ${MAX_SEGMENTS} phần. Hãy chọn đoạn ngắn hơn.`);
     if (!chunks.length) throw new VoiceError('tts_no_text',400,'Không có chữ để đọc.');
+    for (const chunk of chunks) {
+      if (!reading && (mixLanguages || chunk.lang === 'ja')) chunk.text = particleReading(chunk.text);
+    }
     const routes = new Map();
     for (const {lang} of chunks) {
       if (routes.has(lang)) continue;
@@ -176,7 +180,6 @@ export async function voiceTts(body,env,{userId,admin=false,signal=new AbortCont
       routes.set(lang,{provider,speed,native_speed:slot.native_speed,...settings});
     }
     return streamAudio(chunks.map((chunk,index) => ({...chunk,...routes.get(chunk.lang),
-      text:!reading && (mixLanguages || chunk.lang === 'ja') ? particleReading(chunk.text,{citations:true}) : chunk.text,
       prevText:chunks[index-1]?.lang === chunk.lang ? chunks[index-1].text : undefined,
       nextText:chunks[index+1]?.lang === chunk.lang ? chunks[index+1].text : undefined})),signal,body.serial === true ? 1 : 2);
   } catch (error) {

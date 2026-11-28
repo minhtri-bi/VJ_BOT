@@ -1,8 +1,8 @@
-# Hướng dẫn Triển khai Chi tiết — Voice v2 Phase 2 (Cascaded Live Voice & Unified STT)
+# Voice v2 Phase 2 Implementation Guide
 
-Tài liệu này là bản hướng dẫn kỹ thuật chi tiết để triển khai **Phase 2** của [Voice Framework v2](VOICE_FRAMEWORK.md), ngay sau khi **Phase 1 (PR #1–#4)** đã hoàn tất nền tảng Multi-Provider Bilingual Read-Aloud (`ElevenLabs`, `Mistral`, `Custom OpenAI-compatible URL`, `OpenAI`, `Gemini`).
+This guide describes the Cascaded Live and unified STT architecture following Voice v2 Phase 1. The current implemented wire contract is maintained in [API_REFERENCE.md](API_REFERENCE.md#cascaded-live-voice-backend); historical targets below are not release evidence.
 
-> **Bối cảnh thực tế:** Trên production (`#67`, `#73`, `#76`), Mistral Voice Agents (LiveKit) khóa cứng 1 `voice_id`, bị cắt cụt khi trộn Việt–Nhật, giọng clone bị nhiễu hoàn toàn trong voice agents và không hỗ trợ Quick Commands. Trong khi đó, Phase 1 đã chứng minh kiến trúc tách ngôn ngữ `<ja>`/`<vi>` + Multi-Provider TTS + Web Audio Stitcher hoạt động ổn định và đã có test Chromium thật. Phase 2 đưa chính nền tảng này vào **Live Voice** và **STT**.
+The reliability repair separates display text from speech synthesis, preserves interrupted conversation context, adds explicit or automatic Vietnamese/Japanese transcription, and conditions teaching prompts on the current turn. Local protocol checks, real-provider output review and physical microphone/audio acceptance are separate gates. Existing provider credentials and source-permission boundaries remain unchanged.
 
 ---
 
@@ -81,7 +81,7 @@ sequenceDiagram
 - **Contract đề xuất:**
   ```js
   export async function streamLLM(provider, {system, turns, signal, onDelta})
-  // Trả về: { ok: true, text, finishReason } hoặc { ok: false, status, retryAfterMs? }
+  // Returns { ok: true, text, finishReason } or { ok: false, status, emitted, reason, upstreamStatus?, retryAfterMs? }.
   ```
 - **Yêu cầu kỹ thuật bắt buộc:**
   - Dùng chung `request()` và `endpoint()` hiện có trong `src/llm.js`; đặt `body.stream = true` (OpenAI/Anthropic) hoặc `:streamGenerateContent?alt=sse` (Gemini).
@@ -132,18 +132,18 @@ sequenceDiagram
   - Phân giải Chat provider bằng [`resolveProvider(env, userId, body.api_connection, profileId)`](../src/providers.js#L34-L41) → tự động hoạt động cho Admin (server OpenAI), Learner (API key local/server hoặc Antigravity OAuth!).
 - **Incremental Tag & Sentence Chunker (trong `src/voice/live-turn.js`):**
   - Đọc từng delta từ `streamLLM()` vào buffer:
-    1. Nếu phát hiện cặp thẻ hoàn chỉnh `<(ja|vi)>([\s\S]*?)<\/\1>`: emit ngay `event: segment` (chạy `normalizeVoiceText` + `particleReading` cho `ja`).
+    1. Emit display segments from complete language blocks without TTS normalization or particle respelling. Pronunciation transformations belong only in `/api/tts`.
     2. Nếu model quên thẻ (plain text không có `<ja>`/`<vi>`): cắt tại dấu kết thúc câu `[。！？.!?]\s*` rồi chạy [`segmentVoiceText()`](../src/voice/segmenter.js) để gán đúng `lang`.
     3. Allow at most **16 ordered segments** per Live Turn. Exceeding that limit or the 4,000-character playable text budget ends the stream with `live_reply_too_long`, not `done`.
-  - Khi kết thúc stream: flush phần buffer còn lại, phát `event: done` `{ full_text, count, japanese_only }`. Nếu lỗi giữa chừng, phát `event: error` `{ code, detail }` rồi đóng stream.
+  - At EOF, flush the display buffer and emit `done` with `{full_text,count,japanese_only}` only after valid generation completion. Failed generation emits `{code,detail,request_id}` and closes the stream; the request ID links to sanitized server diagnostics rather than provider text.
 
 #### Task 4: Nâng cấp `POST /api/stt` (`src/voice/stt-route.js`, thay/bọc [`src/transcription.js`](../src/transcription.js))
 - **Giữ tương thích ngược 100%** với mọi caller hiện có (Kaiwa `recorded-input.js` gửi `{action: 'capabilities'}` và `{audio, mime_type}`).
 - **Mở rộng 3 tính năng mới:**
   1. **Hỗ trợ ElevenLabs Scribe STT:**
      - Endpoint: `POST <base>/v1/speech-to-text` (mặc định `https://api.elevenlabs.io`, cho phép proxy nằm trong `VOICE_ALLOWED_ORIGINS` qua [`voiceBase()`](../src/voice/tts-route.js#L28-L42)).
-     - Header: `xi-api-key: <apiKey>`, body `FormData` gồm `file` và `model_id: 'scribe_v2'` (timeout 25s, `redirect: 'manual'`).
-     - Validate `typeof result.text === 'string' && result.text.length <= 6000`.
+     - Header: `xi-api-key: <apiKey>`; multipart fields include `file`, `model_id: 'scribe_v3'` and `tag_audio_events: 'false'` (25 s timeout, `redirect: 'manual'`).
+     - Validate transcript length and detected language. `language: auto|ja|vi` controls hints; auto sends none. Preserve validated detection confidence without treating it as correctness or inventing a cutoff.
   2. **Server-derived `context_bias` cho Mistral `voxtral-mini-transcribe-3`:**
      - Nếu request kèm `lesson: {id, level}` (đã qua `validLessonReference` + `catalogLesson`), server tự rút tối đa **40 từ vựng** đạt `processingAllowed` (tái dùng helper tương tự [`lessonVocabulary()`](../src/live.js#L22-L26) — tách ra dùng chung!).
      - Gửi `context_bias` (JSON array / repeated form fields theo spec Mistral `/v1/audio/transcriptions`), nếu nhận `422` thì retry 1 lần không kèm `context_bias` (giống [`src/live.js`](../src/live.js#L140-L151)).
@@ -212,6 +212,7 @@ sequenceDiagram
      - Lệnh **`Nói chậm`**: giảm hệ số tốc độ tiếng Nhật cho phiên hiện tại (`sessionJaRate = Math.max(0.75, current - 0.12)`) và gọi phát lại câu cuối (hoặc gửi `command: 'slower'`).
   4. **Giữ lịch sử ngắn trong phiên:**
      - Lưu mảng `history` tối đa 12 lượt (`user` / `assistant`) trong RAM trang (không ghi D1, đúng cam kết quyền riêng tư ở `#live-privacy` & `docs/API_REFERENCE.md`). Xóa trắng khi kết thúc cuộc gọi hoặc đổi tài khoản.
+     - Retain accepted learner text before generation, and validated assistant text before playback. Assistant `generation` and `playback` metadata distinguish completion, interruption and audio failure; they do not prove what the learner heard. Never reuse invalid generation as a complete reply.
 
 #### Task 8: Cập nhật Wiring (`static/api-profiles.js`, `static/account.js`, `static/voice/voice-settings.js`, `static/index.html`, `static/live.js`)
 - **`static/api-profiles.js` & `static/account.js`:**
@@ -222,6 +223,7 @@ sequenceDiagram
     - **Kiểu thu micro:** `Tự động (VAD)` | `Bấm để nói (PTT)`.
     - **Cho phép ngắt lời (Barge-in):** checkbox (mặc định `true`).
     - **Nguồn chép lời (STT):** `Tự động theo kết nối Chat` | `Dùng kết nối giọng nói (Mistral / ElevenLabs / OpenAI)`.
+    - **Spoken language:** automatic Vietnamese/Japanese detection (default), Vietnamese or Japanese. Browser STT requires an explicit language; unsupported auto mode does not silently select Japanese.
 - **`static/index.html` (trong `#classroom-voice`):**
   - Thêm nút chuyển nhanh `Tự động / Bấm để nói` + nút `Bấm để nói` (hiện khi chọn PTT, `min-height: 44px`).
   - Nạp thêm các script theo thứ tự cuối `index.html`: `voice/live-cascaded.js`, `voice/live-core.js` (trước hoặc thay thế thân monolithic của `live.js`).
@@ -248,7 +250,7 @@ sequenceDiagram
   - Lịch sử vượt 12 lượt hoặc prompt-injection trong `transcript`/`history` vẫn giữ trong JSON user envelope.
   - Abort request phía client hủy sạch upstream `fetch` của provider.
 - [ ] `tests/voice-phase2-stt.test.mjs`:
-  - ElevenLabs Scribe STT (`xi-api-key`, `scribe_v2`, chặn URL ngoài `VOICE_ALLOWED_ORIGINS`).
+  - ElevenLabs Scribe v3 with API-key isolation, auto/explicit language modes, safe confidence metadata and no unapproved origin.
   - Mistral STT tự gắn server `context_bias` đạt `processingAllowed`, retry sạch nếu 422.
   - `stt_routing` dùng Voice profile hoạt động khi Chat dùng Antigravity OAuth; fail-closed khi profile bị xóa hoặc sai quyền Admin.
 - [ ] `tests/voice-phase2-live-ui.test.mjs`:

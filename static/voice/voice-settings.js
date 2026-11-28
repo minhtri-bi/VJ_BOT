@@ -9,6 +9,7 @@
   const mode=el('mode'), slots=el('slots'), status=el('status'), kind=el('kind'), url=el('url');
   const liveEngine=el('live-engine'), liveTurn=el('live-turn'), liveBarge=el('live-barge'),
     liveStt=el('live-stt'), liveSlot=el('live-stt-slot'), liveSlotField=el('live-stt-slot-field'), liveOptions=el('live-options');
+  const liveLanguage=el('live-stt-language'), browserSttHint=el('live-browser-stt-hint');
   const controls=new Map(), catalogs=new Map(), selectedAccounts=new Map(), drafts=new Map();
   let rows=[], metadataRole, drawnIdentity, busy=false, pendingRemoval=null, routingRevision=0, restoredLive, accountOwner;
   const owner=()=>signedInUser?.user_id;
@@ -54,16 +55,23 @@
       turn_mode:live?.turn_mode==='ptt'?'ptt':'vad',
       barge_in:live?.barge_in!==false,
       stt_source:['voice','browser'].includes(live?.stt_source)?live.stt_source:'chat',
-      stt_slot:names.includes(live?.stt_slot)?live.stt_slot:'primary'
+      stt_slot:names.includes(live?.stt_slot)?live.stt_slot:'primary',
+      stt_language:['vi','ja'].includes(live?.stt_language)?live.stt_language:'auto'
     });
   }
   function layoutLive() {
     const native=liveEngine?.value==='native';
     if (liveOptions) liveOptions.hidden=native;
-    for (const control of [liveTurn,liveBarge,liveStt]) if (control) control.disabled=native;
+    for (const control of [liveTurn,liveBarge,liveStt,liveLanguage]) if (control) control.disabled=native;
     const hide=native || liveStt?.value!=='voice';
     if (liveSlotField) liveSlotField.hidden=hide;
     if (liveSlot) liveSlot.disabled=hide;
+    if (browserSttHint) {
+      const browser=!native && liveStt?.value==='browser';
+      browserSttHint.hidden=!browser;
+      if (browser) liveLanguage?.setAttribute('aria-describedby',browserSttHint.id);
+      else liveLanguage?.removeAttribute('aria-describedby');
+    }
   }
   function stored() {
     if (!owner()) return null;
@@ -255,7 +263,8 @@
       turn_mode:liveTurn?.value ?? restoredLive.turn_mode,
       barge_in:liveBarge ? liveBarge.checked : restoredLive.barge_in,
       stt_source:liveStt?.value ?? restoredLive.stt_source,
-      stt_slot:liveSlot?.value ?? restoredLive.stt_slot
+      stt_slot:liveSlot?.value ?? restoredLive.stt_slot,
+      stt_language:liveLanguage?.value ?? restoredLive.stt_language
     }});
     for (const [slot,control] of controls) {
       if (slot!=='primary' && config.mode==='single') continue;
@@ -311,6 +320,7 @@
     if (liveBarge) liveBarge.checked=restoredLive.barge_in;
     if (liveStt) liveStt.value=restoredLive.stt_source;
     if (liveSlot) liveSlot.value=restoredLive.stt_slot;
+    if (liveLanguage) liveLanguage.value=restoredLive.stt_language;
     layoutLive();
     for (const [slot,control] of controls) {
       const value=config?.[slot] || {};

@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {voiceTts} from '../src/voice/tts-route.js';
+import {segmentVoiceText} from '../src/voice/segmenter.js';
+import {createSegmentChunker} from '../src/voice/live-turn.js';
 
 const key = 'synthetic-tts-test-key';
 const slot = (provider, voice_id, base_url) => ({provider, voice_id,
@@ -149,6 +151,65 @@ test('Mistral keeps quoted particle pronunciation when slower Live separates lan
   assert.deepEqual(calls,[[japanese,'voice_clone'],['Em đọc nhé.','voice_clone']]);
 });
 
+test('display segmentation keeps particle spellings and placeholders; only TTS reads citations phonetically', async t => {
+  const text = '<ja>は</ja> → <ja>「へ」</ja> → <ja>学校へ行きます。</ja>';
+  assert.deepEqual(segmentVoiceText(text),[
+    {lang:'ja',text:'は',boundary:'start'},
+    {lang:'ja',text:'「へ」',boundary:'arrow'},
+    {lang:'ja',text:'学校へ行きます。',boundary:'arrow'}
+  ]);
+  assert.deepEqual(segmentVoiceText('猫___が＿＿＿いる。'),[
+    {lang:'ja',text:'猫___が＿＿＿いる。',boundary:'start'}
+  ]);
+  for (const [input,options] of [
+    ['<ja>___ ＿＿＿</ja>',{}],
+    ['<ja>___ ＿＿＿</ja>',{mixLanguages:true}],
+    ['___ ＿＿＿',{hint:'ja'}]
+  ]) {
+    assert.deepEqual(segmentVoiceText(input,'bilingual',options),[
+      {lang:'ja',text:'___ ＿＿＿',boundary:'start'}
+    ]);
+  }
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const routing = {version:2,mode:'single',primary:slot('openai','alloy')};
+  const records = await lines(await tts({text,mode:'ja',stream:true,routing}));
+  assert.deepEqual(records.at(-1),{type:'done',count:3});
+  assert.deepEqual(inputs,['わ','「え」','学校へ行きます。']);
+});
+
+test('synthesis sends attached ASCII and fullwidth blanks only as clip boundaries', async t => {
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const primary = {...slot('mistral','voice_clone'),kanji_mode:'kana_first'};
+  const single = {version:2,mode:'single',primary};
+  const dual = {...single,mode:'dual_same_api',ja:{profile:null},vi:{profile:null}};
+  const text = '___ <vi>__Đọc__ nhé: </vi><ja>**猫**___{学校|がっこう}＿＿＿へ行きます。</ja> (gakkō ___ e ikimasu) → <vi>___Tốt___ lắm!</vi> ＿＿＿';
+  for (const [routing,mode,expectedInputs,expectedBoundaries] of [
+    [single,'bilingual',['Đọc nhé: 猫','がっこう','へ行きます。','Tốt lắm!'],['start','blank','blank','arrow']],
+    [dual,'bilingual',['Đọc nhé:','猫','がっこう','へ行きます。','Tốt lắm!'],['start','inline','blank','blank','arrow']],
+    [single,'ja',['猫','がっこう','へ行きます。'],['start','blank','blank']]
+  ]) {
+    const records = await lines(await tts({text,mode,stream:true,routing}));
+    assert.deepEqual(records.map(row=>row.boundary),[...expectedBoundaries,undefined]);
+    assert.deepEqual(records.at(-1),{type:'done',count:expectedInputs.length});
+    assert.deepEqual(inputs.splice(0),expectedInputs);
+  }
+  const numbers = await lines(await tts({text:'<ja>３。___４?</ja>',stream:true,routing:single}));
+  assert.deepEqual(numbers.map(row=>row.boundary),['start','blank',undefined]);
+  assert.deepEqual(inputs.splice(0),['３。','４?']);
+  const formatted = await lines(await tts({text:'<ja>**猫**___**犬**____**鳥**</ja>',stream:true,routing:single}));
+  assert.deepEqual(formatted.map(row=>row.boundary),['start','blank','blank',undefined]);
+  assert.deepEqual(inputs.splice(0),['猫','犬','鳥']);
+
+  for (const text of ['___','<ja>＿＿＿</ja>','___ → ＿＿＿']) {
+    const empty = await tts({text,mode:'ja',reading:'くうらん',stream:true,routing:single});
+    assert.equal(empty.status,400);
+    assert.equal((await empty.json()).code,'tts_no_text');
+  }
+  assert.deepEqual(inputs,[]);
+});
+
 test('shared romaji cleanup preserves reading preference, annotations and grammatical particles', async t => {
   const inputs = [];
   intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
@@ -160,6 +221,35 @@ test('shared romaji cleanup preserves reading preference, annotations and gramma
   }
   assert.deepEqual(inputs,['「わ」と「え」。私は学校へ行きます。 パーティーと日々。','Nhắc lại (N5).',
     '「わ」と「え」。私はがっこうへ行きます。 パーティーと日々。','Nhắc lại (N5).']);
+});
+
+test('Live captions preserve readings and standalone blanks while TTS only sends spoken clips', async t => {
+  const captions = [], chunker = createSegmentChunker({onSegment:item => captions.push(item)});
+  const source = '<ja>食べる(taberu)</ja> （＿＿＿！？） <ja>学校（gakkō） Em đọc nhé.</ja>'
+    + '食べる(taberu)<ja>走る</ja>（hashiru）<ja>日本語能力試験 (JLPT)</ja> ___!';
+  for (const delta of source) chunker.push(delta);
+  chunker.flush();
+  assert.deepEqual(captions.map(({lang,text,speech_start}) => [lang,text,speech_start]),[
+    ['ja','食べる(taberu)',undefined],['ja','（＿＿＿！？）',undefined],['ja','学校（gakkō）',undefined],
+    ['vi','Em đọc nhé.',undefined],['ja','食べる(taberu)',undefined],['ja','走る',undefined],['ja','（hashiru）',9],
+    ['ja','日本語能力試験 (JLPT)',undefined],['ja','___!',undefined]
+  ]);
+
+  const inputs = [];
+  intercept(t, async (_url,init) => {inputs.push(JSON.parse(init.body).input);return mp3();});
+  const routing = {version:2,mode:'single',primary:slot('openai','alloy')};
+  const playback = parts => tts({text:parts
+    .map(({lang,text,speech_start}) => `<${lang}>${text.slice(speech_start)}</${lang}>`).join(' '),
+    mode:'bilingual',stream:true,routing});
+  const records = await lines(await playback(captions));
+  assert.deepEqual(records.map(({type,boundary})=>[type,boundary]),[
+    ['segment','start'],['segment','blank'],['segment','inline'],['segment','sentence'],['done',undefined]
+  ]);
+  assert.deepEqual(inputs.splice(0),['食べる','学校','Em đọc nhé.','食べる 走る 日本語能力試験 (JLPT)']);
+  const blank = await playback([captions[1],captions.at(-1)]);
+  assert.equal(blank.status,400);
+  assert.equal((await blank.json()).code,'tts_no_text');
+  assert.deepEqual(inputs,[]);
 });
 
 test('Mistral mixed mode enforces text, segment, connection and admin limits before synthesis', async t => {

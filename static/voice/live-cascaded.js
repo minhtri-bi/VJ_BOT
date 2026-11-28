@@ -13,8 +13,41 @@
   const firstSentenceEnd=/[。！？!?…][。！？.!?…]*[」』”’"')）]*|\.+[」』”’"')）]*(?=\s|$)/gu;
   // Mirror the TTS check for spoken text and explicitly labelled numbers.
   const hasSpokenText=text=>/\p{L}/u.test(text) || /^[\d０-９][\d０-９.,，、:：%％〜～\s]*[。！？!?]?$/u.test(text);
+  const leadingBlank=/^[\s「『“‘"(（]*(?:_{3,}|＿{3,})/u;
+  const trailingBlank=/(?:_{3,}|＿{3,})[\s。！？.!?…」』”’"')）]*$/u;
+  // A tagged caption can expand into many synthesis clips. Keep its original text and
+  // cut only at an existing audio break when the next spoken clause would exceed the cap.
+  function speechBatches(parts,limit,room) {
+    const groups=[];
+    let group=[],size=0,total=0;
+    for (const part of parts) {
+      const {lang}=part, text=part.text.slice(part.speech_start ?? 0);
+      let from=0,clause=0,boundary=part.boundary;
+      for (const mark of text.matchAll(/_{3,}|＿{3,}|→|$/gu)) {
+        if (/[\p{L}\p{N}]/u.test(text.slice(clause,mark.index))) {
+          if (++total>room) return null;
+          if (size===limit) {
+            if (clause>from) group.push({lang,text:text.slice(from,clause),boundary});
+            groups.push(group);group=[];size=0;from=clause;
+            if (clause) boundary=text[clause-1]==='→'?'arrow':'blank';
+          }
+          size++;
+        }
+        clause=mark.index+mark[0].length;
+      }
+      if (from<text.length) group.push({lang,text:text.slice(from),boundary});
+    }
+    if (group.length) groups.push(group);
+    return {groups,total};
+  }
   const message=(error,fallback)=>error instanceof SyntaxError ? invalidReply : error?.message || fallback;
   const detail=(body,fallback)=>typeof body?.detail==='string' && body.detail.trim() ? body.detail.slice(0,600) : fallback;
+  function responseError(body,fallback) {
+    const error=new Error(detail(body,fallback));
+    if (/^[a-z][a-z0-9_]{0,63}$/.test(body?.code)) error.code=body.code;
+    if (/^[a-f0-9-]{36}$/.test(body?.request_id)) error.message+=` Mã đối chiếu: ${body.request_id}.`;
+    return error;
+  }
   const cancelBody=response=>{void response.body?.cancel().catch(()=>{});};
   function post(path,body,signal,options) {
     return apiFetch(path,{method:'POST',signal,body:JSON.stringify(body),...options,
@@ -49,7 +82,7 @@
     }
     let result;
     try {result=JSON.parse(text);} catch {throw new Error(fallback);}
-    if (!response.ok) throw new Error(detail(result,fallback));
+    if (!response.ok) throw responseError(result,fallback);
     return result;
   }
   const chatRequest=(chatBinding,chatProfile)=>chatBinding ? {chatBinding}
@@ -71,12 +104,14 @@
     if (live.stt_source==='browser') {
       if (!window.SpeechRecognition && !window.webkitSpeechRecognition)
         throw new Error('Trình duyệt không hỗ trợ chép lời. '+sttSettings);
+      if (!['ja','vi'].includes(live.stt_language))
+        throw new Error('Nguồn chép lời trình duyệt cần chọn Tiếng Việt hoặc Tiếng Nhật trong Cài đặt → Âm thanh → Ngôn ngữ nói.');
       return 'browser';
     }
     if (!window.MediaRecorder) throw new Error('Trình duyệt không hỗ trợ ghi âm. '+sttSettings);
     const routing=await routingForStt(live,stt,signal);
     if (!current()) return null;
-    const response=await post('/api/stt',{action:'capabilities',...routing},signal,sttOptions(live,chatBinding,chatProfile));
+    const response=await post('/api/stt',{action:'capabilities',language:live.stt_language ?? 'auto',...routing},signal,sttOptions(live,chatBinding,chatProfile));
     const result=await jsonResponse(response,signal,current,'Không kiểm tra được kết nối chép lời.');
     if (!current()) return null;
     if (result?.supported===true && ['openai','mistral','elevenlabs'].includes(result.provider)) return result.provider;
@@ -103,14 +138,15 @@
         if (line) throw new Error(invalidReply);
         if (!event && !data) continue;
         const row=JSON.parse(data);data='';
-        if (event==='error') throw new Error(detail(row,invalidReply));
+        if (event==='error') throw responseError(row,invalidReply);
         if (event==='done' && segments.length && row?.count===segments.length && typeof row.full_text==='string'
           && row.full_text===segments.map(part=>part.text).join(' ') && typeof row.japanese_only==='boolean') {
           reply=row;
           onDone(segments);
         } else if (event==='segment' && row?.index===segments.length && row.index<maxSegments
           && ['ja','vi'].includes(row.lang) && (row.index ? ['inline','sentence'].includes(row.boundary) : row.boundary==='start')
-          && typeof row.text==='string' && row.text.trim() && !/<\/?(?:ja|vi)>/i.test(row.text)) {
+          && typeof row.text==='string' && row.text.trim() && !/<\/?(?:ja|vi)>/i.test(row.text)
+          && (row.speech_start===undefined || Number.isInteger(row.speech_start) && row.speech_start>=0 && row.speech_start<=row.text.length)) {
           length+=row.text.length+9+Number(row.index>0);
           if (length>maxText) throw new Error('Lượt trả lời quá dài. Em thử hỏi ngắn hơn nhé.');
           segments.push(row);
@@ -159,9 +195,17 @@
     function caption(turn,role,text,start_ms,end_ms) {
       if (owns(turn)) onCaption({role,key:'cascaded-'+turn.id+'-'+role,text,start_ms,end_ms});
     }
-    function releaseTurn() {
+    function remember(entry) {
+      history.push(entry);
+      history=history.slice(-12);
+      return entry;
+    }
+    function releaseTurn(outcome='interrupted') {
       const turn=active;active=null;
       if (!turn) return;
+      if (turn.reply?.playback==='pending') turn.reply.playback=outcome;
+      else if (!turn.reply && turn.partialText && outcome==='interrupted')
+        remember({role:'assistant',text:trimHistory(turn.partialText),generation:'partial',playback:'interrupted'});
       releaseCapture(pendingBrowser);
       clearTimeout(turn.timer);
       turn.audio?.stop();
@@ -173,7 +217,7 @@
     }
     function turnError(turn,error) {
       if (!owns(turn)) return;
-      releaseTurn();state('listening');
+      releaseTurn('failed');state('listening');
       if (ownsSession()) onError(message(error,'Chưa xử lý được lượt nói. Em thử lại nhé.'));
     }
     function deadline(turn,ms,detail) {
@@ -182,7 +226,7 @@
     }
     function completeTurn(turn) {
       if (!owns(turn)) return;
-      releaseTurn();state('listening');
+      releaseTurn('completed');state('listening');
     }
     function fatal(error) {
       if (!ownsSession()) return;
@@ -338,7 +382,7 @@
     }
     function startBrowserRecognition(record,audio) {
       const recognizer=record.recognizer=new Recognition();
-      recognizer.lang='ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
+      recognizer.lang=live.stt_language==='vi'?'vi-VN':'ja-JP';recognizer.continuous=true;recognizer.interimResults=false;
       recognizer.onresult=event=>{
         if (!ownsCapture(record) || !ownsSession()) return;
         let text='';
@@ -462,7 +506,8 @@
           const routing=await routingForStt(live,stt,signal);
           if (!current()) return;
           const {level,lesson}=reference;
-          const response=await post('/api/stt',{audio:btoa(binary),mime_type:blob.type,level,lesson,...routing},signal,transcriptionOptions);
+          const response=await post('/api/stt',{audio:btoa(binary),mime_type:blob.type,level,lesson,
+            language:live.stt_language ?? 'auto',...routing},signal,transcriptionOptions);
           const result=await jsonResponse(response,signal,current,'Chưa chép được bản ghi. Em thử lại nhé.');
           if (!current()) return;
           transcript=result?.text;
@@ -471,6 +516,8 @@
         if (!transcript) throw new Error(noSpeech);
         if (transcript.length>1500) throw new Error('Câu nói quá dài. Em thử nói ngắn hơn nhé.');
         caption(turn,'user',transcript,start,end);
+        turn.priorHistory=history.slice();
+        remember({role:'user',text:trimHistory(transcript)});
         if (current()) await generate(turn,reference,null,transcript);
       } catch (error) {turnError(turn,error);}
     }
@@ -479,7 +526,7 @@
       const audioAbort=new AbortController(), audioSignal=AbortSignal.any([signal,audioAbort.signal]);
       deadline(turn,35000,'Thầy phản hồi quá lâu. Em thử lại nhé.');
       let routing, firstReady, appendChain=Promise.resolve(), elevenChain=appendChain, text='', firstAt;
-      let mistralSingle=false, audioFailure='', firstEnd=0, cut=0, batched=0, tail;
+      let mistralSingle=false, audioFailure='', firstEnd=0, cut=0, batched=0, tail, pendingBlank=false, spokenBatch=false, plannedClips=0;
       const audioSegments=[];
       const steps=slowerSteps;
       const audioCurrent=()=>!audioSignal.aborted && current();
@@ -491,6 +538,22 @@
         if (phase==='speaking') state('thinking');
       }
       function batch(parts) {
+        const managed=parts.some(({lang})=>(routing.mode==='single'
+          ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
+        const plan=speechBatches(parts,managed ? managedTtsSegments : maxSegments,2*maxSegments-plannedClips);
+        if (!plan) {failAudio(new Error('Câu trả lời có quá nhiều phần để phát âm thanh.'));return;}
+        plannedClips+=plan.total;
+        for (const group of plan.groups) dispatchAudio(group);
+      }
+      function dispatchAudio(parts) {
+        const raw=parts.map(part=>part.text).join(' ');
+        if (!/[\p{L}\p{N}]/u.test(raw)) {
+          pendingBlank ||= /(?:_{3,}|＿{3,})/u.test(raw);
+          return;
+        }
+        const boundary=!spokenBatch ? 'start' : pendingBlank || leadingBlank.test(raw) ? 'blank' : parts[0].boundary;
+        pendingBlank=trailingBlank.test(raw);
+        spokenBatch=true;
         const before=appendChain, priorEleven=elevenChain;
         const serialEleven=parts.some(({lang})=>(routing.mode==='single'
           ? routing.primary.provider : routing[lang]?.provider ?? routing.primary.provider)==='elevenlabs');
@@ -509,7 +572,7 @@
           await window.VJVoice.consume(response,async part=>{
             await before;
             if (!audioCurrent()) return;
-            const clip={...part,boundary:part.index===0 ? parts[0].boundary : part.boundary,
+            const clip={...part,boundary:part.index===0 ? boundary : part.boundary,
               speed:part.lang==='ja' ? part.speed*jaScale : part.speed};
             turn.audio??=window.VJVoiceStitcher.create({audioContext,sink});
             await turn.audio.append(clip);
@@ -529,31 +592,36 @@
           const rest=last.text.slice(cut).trim();
           if (rest) {
             parts[parts.length-1]={...last,text:last.text.slice(0,cut)};
-            if (hasSpokenText(rest)) tail={...last,text:rest,boundary:'sentence'};
+            if (hasSpokenText(rest) || /(?:_{3,}|＿{3,})/u.test(rest)) tail={...last,text:rest,speech_start:0,boundary:'sentence'};
           }
         }
         batch(parts);
       }
       const payload={...reference,command,transcript,history:[],japanese_only:japaneseOnly};
       const room=maxTurnBytes-textEncoder.encode(JSON.stringify(payload)).length;
-      let first=history.length, bytes=0;
+      const prior=turn.priorHistory ?? history;
+      let first=prior.length, bytes=0;
       while(first){
-        bytes+=1+textEncoder.encode(JSON.stringify(history[first-1])).length;
+        bytes+=1+textEncoder.encode(JSON.stringify(prior[first-1])).length;
         if(bytes>room)break;
         first--;
       }
-      if(first)history=history.slice(first);
-      payload.history=history;
+      payload.history=prior.slice(first);
       const response=await post('/api/live/turn',payload,signal,chatOptions);
       const result=await liveEvents(response,signal,current,(part,segments)=>{
         const now=time();firstAt??=now;
         text+=(text?' ':'')+part.text;
+        turn.partialText=text;
         caption(turn,'assistant',text,firstAt,now);
         if (!current() || batched) return;
         if (!firstEnd) {
           for (const end of part.text.matchAll(firstSentenceEnd)) {
             const at=end.index+end[0].length;
-            if (part.index===0 && !hasSpokenText(part.text.slice(0,at).trim())) continue;
+            const start=part.speech_start ?? 0;
+            if (at<=start || part.index===0 && !hasSpokenText(part.text.slice(start,at).trim())) continue;
+            // A parenthetical reading can contain punctuation; keep it attached until Worker normalization.
+            const head=part.text.slice(start,end.index);
+            if (Math.max(head.lastIndexOf('('),head.lastIndexOf('（'))>Math.max(head.lastIndexOf(')'),head.lastIndexOf('）'))) continue;
             if (/[」』]$/u.test(end[0]) && /^[\s]*[\p{Script=Hiragana}\p{Script=Han}]/u.test(part.text.slice(at))) continue;
             firstEnd=part.index+1;cut=at;break;
           }
@@ -572,6 +640,8 @@
         flushFirstSentence(segments);
       });
       if (!result || !current()) return;
+      turn.reply=remember({role:'assistant',text:trimHistory(result.reply.full_text),generation:'complete',playback:'pending'});
+      japaneseOnly=result.reply.japanese_only;
       clearTimeout(turn.timer);
       const audioTimeout=new Promise(resolve=>{
         turn.timer=setTimeout(()=>{
@@ -585,22 +655,16 @@
         if (tail || result.segments.length>batched) {
           const remaining=result.segments.slice(batched);
           if (tail) remaining.unshift(tail);
-          const managed=remaining.some(({lang})=>(routing.mode==='single'
-            ? routing.primary.profile : routing[lang]?.profile ?? routing.primary.profile)?.scope==='platform');
-          const limit=managed ? managedTtsSegments : mistralSingle ? maxSegments : maxSegments-1;
-          for(let i=0;i<remaining.length;i+=limit) batch(remaining.slice(i,i+limit));
+          batch(remaining);
         }
         await appendChain;
-        if (audioCurrent()) await turn.audio.finish();
+        if (audioCurrent()) await turn.audio?.finish();
       };
       await Promise.race([play().catch(failAudio),audioTimeout]);
       if (!current()) return;
-      // A validated text reply is still usable when only its speech failed.
-      if (transcript) history.push({role:'user',text:trimHistory(transcript)});
-      history.push({role:'assistant',text:trimHistory(result.reply.full_text)});
-      history=history.slice(-12);
-      lastAudio=audioFailure ? null : audioSegments;
-      japaneseOnly=result.reply.japanese_only;
+      // Text completion and audio delivery are independent evidence.
+      turn.reply.playback=audioFailure ? 'failed' : 'completed';
+      lastAudio=audioFailure || !audioSegments.length ? null : audioSegments;
       if (audioFailure) turnError(turn,new Error(`${audioFailure} Câu trả lời vẫn có trong bản chép lời.`));
       else completeTurn(turn);
     }

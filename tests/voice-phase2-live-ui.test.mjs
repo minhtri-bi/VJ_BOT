@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
+import {voiceTts} from '../src/voice/tts-route.js';
 
 const source=name=>readFileSync(new URL(`../static/voice/${name}.js`,import.meta.url),'utf8');
 const scripts=['voice-player','live-cascaded'].map(source);
@@ -14,6 +15,7 @@ const sse=(event,data)=>`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
 const segment=(index,indexed=segments[index])=>sse('segment',{index,...indexed});
 const done=(items=segments)=>sse('done',{full_text:items.map(row=>row.text).join(' '),count:items.length,japanese_only:false});
 const turnResponse=(stream=segments.map((_,i)=>segment(i)).join('')+done())=>new Response(stream,{headers:{'Content-Type':'text/event-stream'}});
+const historyReply=(text,playback='completed',generation='complete')=>({role:'assistant',text,generation,playback});
 function audioResponse(...langs) {
   const rows=langs.map((lang,index)=>({type:'segment',index,lang,boundary:index?'inline':'start',speed:1,audioBase64:'SUQzBA==',mimeType:'audio/mpeg'}));
   return new Response([...rows,{type:'done',count:rows.length}].map(row=>JSON.stringify(row)+'\n').join(''),{headers:{'Content-Type':'application/x-ndjson'}});
@@ -92,7 +94,7 @@ function fixture({live={},fetch,route,recognition=true,recordedRecognition=false
       throw new Error(`Unexpected request: ${path}`);
     }});
   for (const script of scripts) vm.runInContext(script,sandbox);
-  const engine=window.VJLiveCascaded.create({audioContext,microphone:mic,sink,live:{stt_source:'browser',turn_mode:'ptt',barge_in:true,...live},
+  const engine=window.VJLiveCascaded.create({audioContext,microphone:mic,sink,live:{stt_source:'browser',stt_language:'ja',turn_mode:'ptt',barge_in:true,...live},
     route:route || (async()=>routeSingle),stt:async signal=>{sttSignals.push(signal);return sttRoute;},context:async()=>reference,chatBinding,
     current:()=>valid,onState:state=>states.push(state),onCaption:caption=>captions.push(caption),onError:(message,fatal=false)=>errors.push({message,fatal})});
   return {engine,calls,states,captions,errors,clips,audio,recorders,recognizers,nodes,modules,sttSignals,timers,advance,decoded,bufferedSources,track,
@@ -176,7 +178,7 @@ test('an early audio limit does not abort the text stream or lose the completed 
   assert.equal(f.calls.length,2);
   assert.equal(f.clips.length,0);
   await f.engine.sendCommand('hint');
-  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,[{role:'assistant',text}]);
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,[historyReply(text,'failed')]);
   f.engine.stop();
 });
 
@@ -206,7 +208,7 @@ test('an audio playback timeout stops audio but leaves the valid text in session
   assert.match(f.errors.at(-1).message,/Âm thanh tải hoặc phát quá lâu.*bản chép lời/);
   const followUp=f.engine.sendCommand('hint');await cycle();
   assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,
-    [{role:'assistant',text:segments.map(part=>part.text).join(' ')}]);
+    [historyReply(segments.map(part=>part.text).join(' '),'failed')]);
   f.audio.at(-1).finishPlayback();await followUp;
   f.engine.stop();
 });
@@ -387,7 +389,7 @@ test('commands carry canonical context; repeat is RAM only; slower changes Japan
   for (const command of ['hint','explain','situation','check','slower','summary']) await f.engine.sendCommand(command);
   const turns=f.calls.filter(call=>call.path==='/api/live/turn');
   assert.deepEqual(turns.map(call=>call.body.command),['start','hint','explain','situation','check','slower','summary']);
-  assert.deepEqual(turns[1].body,{...reference,command:'hint',transcript:'',history:[{role:'assistant',text:'こんにちは。 Chào em. どうぞ。'}],japanese_only:false});
+  assert.deepEqual(turns[1].body,{...reference,command:'hint',transcript:'',history:[historyReply('こんにちは。 Chào em. どうぞ。')],japanese_only:false});
   assert.deepEqual(f.clips.slice(-6).map(({lang,speed})=>[lang,speed]),[['ja',0.88],['vi',1],['ja',0.88],['ja',0.88],['vi',1],['ja',0.88]]);
   assert(f.calls.filter(call=>call.path==='/api/tts').every(call=>call.body.routing.primary.speed===1));
   f.engine.stop();await f.engine.sendCommand('repeat');assert.equal(f.errors.length,0);
@@ -423,7 +425,7 @@ test('chat and explicit voice STT route and transcribe strictly through their ow
     await f.engine.start();assert.equal(f.states.at(-1).sttProvider,explicit?'elevenlabs':'openai');
     f.engine.toggleTalk();f.recorders[0].data(1024);f.advance(400);f.engine.toggleTalk();await cycle();
     const [probe,transcription]=f.calls.filter(call=>call.path==='/api/stt');
-    assert.deepEqual(probe.body,{action:'capabilities',...(explicit?{stt_routing:sttRoute}:{})});
+    assert.deepEqual(probe.body,{action:'capabilities',language:'ja',...(explicit?{stt_routing:sttRoute}:{})});
     assert.equal(probe.options.voiceRouting,explicit?true:undefined);
     assert.equal(transcription.options.voiceRouting,probe.options.voiceRouting);
     for (const {options} of [probe,transcription]) {
@@ -432,6 +434,7 @@ test('chat and explicit voice STT route and transcribe strictly through their ow
     }
     assert.deepEqual(transcription.body.lesson,reference.lesson);assert.equal(transcription.body.level,'N5');
     assert.equal(transcription.body.mime_type,'audio/webm;codecs=opus');
+    assert.equal(transcription.body.language,'ja');
     assert.equal(atob(transcription.body.audio).length,1024);
     assert.deepEqual(transcription.body.stt_routing,explicit?sttRoute:undefined);
     assert.equal(f.sttSignals.length,explicit?2:0);assert.equal(f.recognizers.length,0);
@@ -614,7 +617,7 @@ test('rejected pre-answer and overflowing turns never enter history or replace r
   await f.engine.sendCommand('repeat');assert.equal(f.calls.length,requests);
   assert.deepEqual(f.clips.slice(beforeReplay),last);
   await f.engine.sendCommand('summary');
-  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,[{role:'assistant',text:'こんにちは。 Chào em. どうぞ。'}]);
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body.history,[historyReply('こんにちは。 Chào em. どうぞ。')]);
   f.engine.stop();
 });
 
@@ -734,4 +737,151 @@ test('long Japanese history keeps the newest completed replies inside the byte b
   assert.equal(body.history.filter(turn=>turn.role==='user').at(-1).text,'己'.repeat(600));
   assert.equal(f.errors.length,0);
   f.engine.stop();
+});
+
+test('barge-in retains learner identity and completed text while marking unfinished playback',async()=>{
+  const f=fixture({playback:true});
+  const opening=f.engine.start();await cycle();f.audio[0].finishPlayback();await opening;
+  f.engine.toggleTalk();f.recognizers[0].result('Em tên là Mai.');f.advance(400);f.engine.toggleTalk();await cycle();
+  assert.equal(f.states.at(-1).phase,'speaking');
+  f.engine.toggleTalk();f.recognizers[1].result('Thầy nhớ tên em không?');f.advance(400);f.engine.toggleTalk();await cycle();
+  const last=f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body;
+  assert.equal(last.transcript,'Thầy nhớ tên em không?');
+  assert.deepEqual(last.history.slice(-2),[
+    {role:'user',text:'Em tên là Mai.'},historyReply(segments.map(part=>part.text).join(' '),'interrupted')
+  ]);
+  assert.equal(last.history.filter(row=>row.text===last.transcript).length,0);
+  f.engine.stop();
+});
+
+test('generation interruption keeps visible partial text separate from a complete reply',async()=>{
+  const stream=pushStream('text/event-stream');
+  const f=fixture({fetch:call=>call.path==='/api/live/turn' && call.body.command==='start'?stream.response:undefined});
+  const opening=f.engine.start();await cycle();stream.write(segment(0));await cycle();
+  f.engine.toggleTalk();f.recognizers[0].result('Em chưa nghe hết.');f.advance(400);f.engine.toggleTalk();await cycle();
+  await opening;
+  const last=f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body;
+  assert.deepEqual(last.history,[historyReply(segments[0].text,'interrupted','partial')]);
+  assert.equal(stream.cancelled,true);
+  f.engine.stop();
+});
+
+test('generation failure retains the learner turn but not unvalidated assistant output',async()=>{
+  const f=fixture({fetch:call=>call.path==='/api/live/turn' && call.body.transcript
+    ?turnResponse(segment(0)+sse('error',{code:'live_incomplete',detail:'Lượt trả lời bị ngắt.'})):undefined});
+  await f.engine.start();
+  f.engine.toggleTalk();f.recognizers[0].result('Em tên là Mai.');f.advance(400);f.engine.toggleTalk();await cycle();
+  await f.engine.sendCommand('hint');
+  const last=f.calls.filter(call=>call.path==='/api/live/turn').at(-1).body;
+  assert.deepEqual(last.history,[historyReply(segments.map(part=>part.text).join(' ')),{role:'user',text:'Em tên là Mai.'}]);
+  assert.match(f.errors[0].message,/bị ngắt/);assert.equal(f.states.at(-1).phase,'listening');
+  f.engine.stop();
+});
+
+test('browser STT requires an explicit language and does not silently force Japanese',async()=>{
+  const auto=fixture({live:{stt_language:'auto'}});
+  await auto.engine.start();
+  assert.equal(auto.calls.length,0);assert.equal(auto.recognizers.length,0);
+  assert.match(auto.errors[0].message,/chọn Tiếng Việt hoặc Tiếng Nhật/);
+  auto.engine.stop();
+  for (const [language,locale] of [['vi','vi-VN'],['ja','ja-JP']]) {
+    const f=fixture({live:{stt_language:language}});
+    await f.engine.start();f.engine.toggleTalk();
+    assert.equal(f.recognizers[0].lang,locale);f.engine.stop();
+  }
+});
+
+test('automatic API STT is sent once with auto language and a rejected transcript never reaches Chat',async()=>{
+  const f=fixture({live:{stt_source:'voice',stt_language:'auto'},fetch(call){
+    if(call.path==='/api/stt' && !call.body.action)return Response.json({
+      code:'stt_language_unsupported',detail:'Em chọn ngôn ngữ hoặc nói lại nhé.'},{status:422});
+  }});
+  await f.engine.start();
+  f.engine.toggleTalk();f.recorders[0].data(1024);f.advance(400);f.engine.toggleTalk();await cycle();
+  assert(f.calls.filter(call=>call.path==='/api/stt').every(call=>call.body.language==='auto'));
+  assert.equal(f.calls.filter(call=>call.path==='/api/stt' && !call.body.action).length,1);
+  assert.equal(f.calls.filter(call=>call.path==='/api/live/turn').length,1);
+  assert.equal(f.captions.filter(row=>row.role==='user').length,0);
+  assert.match(f.errors.at(-1).message,/chọn ngôn ngữ/);f.engine.stop();
+});
+
+test('a safe correlation id survives a Live error and restores listening without a retry',async()=>{
+  const requestId='12345678-1234-4234-8234-123456789abc';
+  const f=fixture({fetch:()=>turnResponse(sse('error',{
+    code:'live_incomplete',detail:'Câu trả lời bị ngắt.',request_id:requestId}))});
+  await f.engine.start();
+  assert.equal(f.calls.length,1);assert.equal(f.states.at(-1).phase,'listening');
+  assert(f.errors[0].message.includes(requestId));f.engine.stop();
+});
+
+test('a learner blank at a TTS batch edge keeps its pause and original caption on replay',async()=>{
+  for (const pieces of [['わたしは＿＿＿','です。'],['わたしは','___です。'],['＿＿＿','です。']]) {
+    const parts=pieces.map((text,index)=>({lang:'ja',text,boundary:index?'inline':'start'}));
+    const f=fixture({fetch:call=>call.path==='/api/live/turn'
+      ?turnResponse(parts.map((part,index)=>segment(index,part)).join('')+done(parts)):undefined});
+    await f.engine.start();
+    assert.equal(f.captions.at(-1).text,pieces.join(' '));
+    assert.deepEqual(f.clips.map(clip=>clip.boundary),pieces[0]==='＿＿＿'?['start']:['start','blank']);
+    const requests=f.calls.length, clips=f.clips.map(clip=>clip.boundary);
+    await f.engine.sendCommand('repeat');
+    assert.equal(f.calls.length,requests);
+    assert.deepEqual(f.clips.slice(-clips.length).map(clip=>clip.boundary),clips);
+    assert.deepEqual(f.errors,[]);f.engine.stop();
+  }
+});
+
+test('Live batches expanded blanks within actual personal and managed TTS caps, even inside one caption',async t=>{
+  const key='synthetic-batch-fixture', requested=[];
+  t.mock.method(globalThis,'fetch',async(_url,init)=>{
+    requested.push(JSON.parse(init.body).input);
+    return new Response(Uint8Array.of(73,68,51,4),{headers:{'Content-Type':'audio/mpeg'}});
+  });
+  for (const managed of [false,true]) {
+    const groups=[Array.from({length:18},(_,i)=>`語${i}`),['Em','thử'],['次','です。']];
+    const parts=groups.map((words,index)=>({lang:index===1?'vi':'ja',text:words.join(index===1?'___':'＿＿＿'),boundary:index?'inline':'start'}));
+    const profile=managed?{scope:'platform',id:'openai'}:{scope:'local',connection:{api_key:key}};
+    const routing={version:2,mode:'single',primary:{provider:'openai',profile,voice_id:'alloy'}};
+    const f=fixture({route:async()=>routing,fetch:call=>{
+      if (call.path==='/api/live/turn') return turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts));
+      if (call.path==='/api/tts') return voiceTts(call.body,managed?{OPENAI_API_KEY:key}:{},{userId:'learner',admin:managed});
+    }});
+    requested.length=0;
+    await f.engine.start();
+    assert.deepEqual(f.errors,[]);
+    assert.deepEqual([...requested].sort(),groups.flat().sort());
+    assert.equal(f.captions.at(-1).text,parts.map(part=>part.text).join(' '));
+    assert.deepEqual(f.clips.map(clip=>clip.boundary),['start',...Array(17).fill('blank'),'inline','blank','inline','blank']);
+    const calls=f.calls.length;
+    await f.engine.sendCommand('repeat');
+    assert.equal(f.calls.length,calls);assert.equal(f.clips.length,44);
+    f.engine.stop();
+  }
+});
+
+test('excessive blank expansion keeps the caption without spending unbounded synthesis requests',async()=>{
+  const parts=[{lang:'ja',text:Array(33).fill('語').join('＿＿＿'),boundary:'start'}];
+  const f=fixture({fetch:call=>call.path==='/api/live/turn'?turnResponse(segment(0,parts[0])+done(parts)):undefined});
+  await f.engine.start();
+  assert.equal(f.calls.filter(call=>call.path==='/api/tts').length,0);
+  assert.equal(f.captions.at(-1).text,parts[0].text);
+  assert.match(f.errors.at(-1).message,/quá nhiều phần/);f.engine.stop();
+});
+
+test('a detached reading stays in the caption but not the following spoken batch',async()=>{
+  const parts=[{lang:'ja',text:'食べる。',boundary:'start'},
+    {lang:'vi',text:'(taberu) Nghĩa là ăn.',speech_start:8,boundary:'sentence'}];
+  const f=fixture({fetch:call=>call.path==='/api/live/turn'?turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts)):undefined});
+  await f.engine.start();
+  assert.equal(f.captions.at(-1).text,'食べる。 (taberu) Nghĩa là ăn.');
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/tts').map(call=>call.body.text),['<ja>食べる。</ja>','<vi> Nghĩa là ăn.</vi>']);
+  assert.deepEqual(f.errors,[]);f.engine.stop();
+});
+
+test('first-sentence Mistral batching leaves punctuation inside a parenthetical reading for the TTS normalizer',async()=>{
+  const parts=[{lang:'ja',text:'食べる(taberu!)',boundary:'start'},{lang:'vi',text:'nghĩa là ăn.',boundary:'inline'}];
+  const f=fixture({route:async()=>({...routeSingle,primary:{provider:'mistral',speed:1}}),fetch:call=>
+    call.path==='/api/live/turn'?turnResponse(parts.map((part,i)=>segment(i,part)).join('')+done(parts)):undefined});
+  await f.engine.start();
+  assert.deepEqual(f.calls.filter(call=>call.path==='/api/tts').map(call=>call.body.text),['<ja>食べる(taberu!)</ja> <vi>nghĩa là ăn.</vi>']);
+  assert.deepEqual(f.errors,[]);f.engine.stop();
 });

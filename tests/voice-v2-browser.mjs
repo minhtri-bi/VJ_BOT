@@ -27,7 +27,7 @@ const config = {admin_override:false};
 window.VJVoiceRouting = {stored:()=>config, identity:()=> 'fixture', prepared:async value=>value, legacyCacheKey:async()=>null};
 const apiFetch = (path, init) => fetch(path, init);
 window.Audio = class {constructor(){throw new Error('Detached media metadata is unavailable in this fixture');}};
-let mp3Playback=false;
+let mp3Playback=false, blankPlayback=false, previousEnd;
 const states = [];
 const mascotMgr = {setState:value=>states.push(value)};
 const createSource = AudioContext.prototype.createBufferSource;
@@ -51,6 +51,11 @@ AudioContext.prototype.createBufferSource = function () {
       return;
     }
     if (mp3Playback) {states.push('mp3:'+rate.toFixed(1));return;}
+    if (blankPlayback && previousEnd!==undefined) {
+      const gap=when-previousEnd;
+      states.push(gap>=0.45 && gap<=0.6 ? 'blank-gap' : 'unexpected-gap:'+gap);
+    }
+    previousEnd=when+duration/rate;
     let rising=0;
     for (let i=first;i<=last;i++) if (i>0 && samples[i-1]<=0 && samples[i]>0) rising++;
     const frequency=Math.round(rising*sampleRate/(last-first+1));
@@ -68,7 +73,7 @@ document.getElementById('playback-check').addEventListener('click',async event=>
     if (!replay) {
       const prior=await fetch('/prior-cache').then(response=>response.json());
       for (const [mode,text] of [['ja',japanese],['bilingual',existingBilingual]]) {
-        const parts=['synthesis-3','fixture',text,{mode}];
+        const parts=['synthesis-4','fixture',text,{mode}];
         const hash=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(JSON.stringify(parts)));
         const oldKey=Array.from(new Uint8Array(hash),b=>b.toString(16).padStart(2,'0')).join('');
         await VJVoiceCache.put(oldKey,prior[mode],true);
@@ -81,9 +86,12 @@ document.getElementById('playback-check').addEventListener('click',async event=>
       ['bilingual','Chào em. こんにちは。','ended:660@1.0,ended:440@1.0,idle'],
       ['bilingual',existingBilingual,'ended:550@1.0,ended:880@1.0,idle'],
       ['ja',japanese,'ended:770@1.0,idle'],
+      ['bilingual','前＿＿＿後','ended:660@1.0,blank-gap,ended:440@1.0,idle'],
       ['bilingual','Đọc qua MP3.','mp3:1.0,idle']
     ]) {
       mp3Playback=text==='Đọc qua MP3.';
+      blankPlayback=text==='前＿＿＿後';
+      previousEnd=undefined;
       await VJVoice.speak(text,{mode,cacheAudio:true});
       const status=document.getElementById('speech-status').textContent;
       const events=states.splice(0).filter(state=>state!=='speaking');
@@ -145,7 +153,7 @@ document.querySelector('#recognize').onclick=async()=>{
     const mic=context.createMediaStreamDestination(), oscillator=context.createOscillator(), level=context.createGain();
     oscillator.connect(level).connect(mic);level.gain.value=0;oscillator.start();
     proof.microphone=mic.stream.getAudioTracks()[0];
-    const engine=VJLiveCascaded.create({audioContext:context,microphone:mic.stream,live:{stt_source:'browser',turn_mode:'vad',barge_in:true},
+    const engine=VJLiveCascaded.create({audioContext:context,microphone:mic.stream,live:{stt_source:'browser',stt_language:'ja',turn_mode:'vad',barge_in:true},
       route:async()=>({mode:'single',primary:{speed:1}}),context:async()=>({level:'N5'}),current:()=>true,
       onError:error=>proof.errors.push(error),onCaption(){},onState({phase}){
         if(phase==='listening' && proof.turns.includes('はい')){
@@ -405,6 +413,14 @@ async function runLiveBrowser(debuggerUrl,origin){
     await click('#voice-v2-live-tab');
     await choose('#voice-v2-live-stt','voice');
     assert.ok(await visible('#voice-v2-live-stt-slot'));
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-live-stt-language').value),'auto');
+    await choose('#voice-v2-live-stt','browser');
+    assert.ok(await visible('#voice-v2-live-browser-stt-hint'));
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-live-stt-language').value),'auto',
+      'Selecting browser STT must not silently choose Japanese');
+    await choose('#voice-v2-live-stt-language','vi');
+    await choose('#voice-v2-live-stt','voice');
+    assert.ok(!await visible('#voice-v2-live-browser-stt-hint'));
     assert.deepEqual(await clippedControls('#voice-v2-live-settings'),[]);
     await choose('#voice-v2-live-stt','chat');
     await click('#voice-v2-reading-tab');
@@ -434,6 +450,7 @@ async function runLiveBrowser(debuggerUrl,origin){
     assert.match(await activeVoice(),/Đang dùng: Giọng song ngữ/,'Viewing default voice must not alter the saved route');
     await click('#voice-v2-bilingual-tab');
     assert.equal(await observe(()=>document.querySelector('#voice-v2-live-turn').value),'ptt');
+    assert.equal(await observe(()=>document.querySelector('#voice-v2-live-stt-language').value),'vi');
     await click('#tab-btn-classroom');
     await until('Classroom chat ready',()=>observe(()=>document.querySelector('.classroom-chat-window').dataset.ai==='ready'));
     await width(390);
@@ -599,6 +616,7 @@ const rows = [
   {type:'done',count:2}
 ];
 const alternate = [{...rows[0],audioBase64:wavTone(550)},{...rows[1],audioBase64:tone(880).toString('base64')},rows[2]];
+const blankRows = [{...rows[0],lang:'ja'},{...rows[1],boundary:'blank'},rows[2]];
 const prior = {
   ja:[{...rows[0],lang:'ja',speed:1.2,audioBase64:wavTone(990)}],
   bilingual:rows.slice(0,-1).map(row=>({...row,speed:1.2}))
@@ -723,7 +741,8 @@ const server = createServer(async (req,res)=>{
       return send(records([['ja',hint?880:770]],hint));
     }
     requests.push([mode,text]);
-    const segments=mode==='ja' ? japanese : text==='Đọc qua MP3.' ? mp3 : text==='Xin chào. おはよう。' ? alternate : rows;
+    const segments=mode==='ja' ? japanese : text==='Đọc qua MP3.' ? mp3 : text==='Xin chào. おはよう。' ? alternate
+      : text==='前＿＿＿後' ? blankRows : rows;
     send(segments);
   } else if (req.url==='/result' && req.method==='POST') {
     let body='';
@@ -770,9 +789,9 @@ try {
     new Promise((_,reject)=>{timer=setTimeout(()=>reject(new Error(`Browser smoke timed out (pages ${pages}; synthesis ${requests}; live ${liveRequests}): ${diagnostics}`)),45000);})]);
   assert.deepEqual(pages,['/','/?replay','/?live'],'Replay must survive navigation before the Live browser smoke');
   assert.deepEqual(requests,[['bilingual','Chào em. こんにちは。'],['bilingual','Xin chào. おはよう。'],
-    ['ja','DVDを見ます。'],['bilingual','Đọc qua MP3.']],
+    ['ja','DVDを見ます。'],['bilingual','前＿＿＿後'],['bilingual','Đọc qua MP3.']],
     'Old synthesis revisions must miss once; every new recording must replay from disk after reload');
-  console.log('Chromium played WAV, PCM with retained padding, and MP3 without metadata; refreshed stale recordings and replayed them from IndexedDB.');
+  console.log('Chromium played WAV, PCM with retained padding, and MP3 without metadata; scheduled the blank pause on new and cached playback.');
   assert.deepEqual(liveBatches,['rest','first'],'The second HTTP response must finish before the first');
   const sttProfile={scope:'server',id:'fixture'};
   assert.deepEqual(liveRequests,[['stt','capabilities','mistral',sttProfile,true],['turn','start'],

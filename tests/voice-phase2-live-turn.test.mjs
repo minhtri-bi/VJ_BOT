@@ -60,41 +60,42 @@ test('OpenAI-compatible empty refusal markers preserve visible text', async t =>
 
 test('streams reject blocked or truncated provider completions, even with readable text', async t => {
   const cases = [
-    ['openai', {choices:[{finish_reason:'content_filter',delta:{content:'blocked'}}]}],
-    ['openai', {choices:[{delta:{refusal:'I cannot help',content:'blocked'}}]}],
-    ['anthropic', {type:'message_delta',delta:{stop_reason:'max_tokens'}}],
-    ['anthropic', {type:'message_delta',delta:{stop_reason:'refusal'}}],
-    ['gemini', {candidates:[{finishReason:'SAFETY',content:{parts:[{text:'blocked'}]}}]}]
+    ['openai', {choices:[{finish_reason:'content_filter',delta:{content:'blocked'}}]}, 'blocked'],
+    ['openai', {choices:[{delta:{refusal:'I cannot help',content:'blocked'}}]}, 'blocked'],
+    ['anthropic', {type:'message_delta',delta:{stop_reason:'max_tokens'}}, 'incomplete'],
+    ['anthropic', {type:'message_delta',delta:{stop_reason:'refusal'}}, 'blocked'],
+    ['gemini', {candidates:[{finishReason:'SAFETY',content:{parts:[{text:'blocked'}]}}]}, 'blocked']
   ];
   let output;
   t.mock.method(globalThis, 'fetch', async () => sse(event(output)));
-  for (const [protocol, payload] of cases) {
+  for (const [protocol, payload, reason] of cases) {
     output = payload;
     const seen = [];
-    assert.deepEqual(await requestLLM(protocol, value => seen.push(value)), {ok:false,status:502,emitted:false});
+    assert.deepEqual(await requestLLM(protocol, value => seen.push(value)), {ok:false,status:502,emitted:false,reason,upstreamStatus:200});
     assert.deepEqual(seen, []);
   }
 });
 
-test('a proxy may return JSON; fallback runs only before the first delta', async t => {
+test('a proxy may return JSON but a failed turn never retries another model', async t => {
   const models = [];
-  let failed = false;
+  let failure = 'http';
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     models.push(JSON.parse(init.body).model);
-    if (failed) return sse(event(delta('<ja>はい。</ja>')) + event({error:{message:key}}));
-    if (models.length === 1) return new Response(key, {status:503});
-    // No JSON media type: decode by body as well as by headers.
-    return new Response(JSON.stringify({choices:[{message:{content:'<vi>Chào em.</vi>'},finish_reason:'stop'}]}));
+    if (failure === 'http') return new Response(key, {status:503});
+    if (failure === 'stream') return sse(event(delta('<ja>はい。</ja>')) + event({error:{message:key}}));
+    return new Response(JSON.stringify({choices:[{message:{content:'<vi>Em thử nhé.</vi>'},finish_reason:'stop'}]}));
   });
   const seen = [];
-  assert.equal((await requestLLM('openai', text => seen.push(text))).text, '<vi>Chào em.</vi>');
-  assert.deepEqual(models, ['first','second']);
-  assert.deepEqual(seen, ['<vi>Chào em.</vi>']);
-  failed = true;
-  models.length = seen.length = 0;
-  assert.deepEqual(await requestLLM('openai', text => seen.push(text)), {ok:false,status:502,emitted:true});
+  assert.deepEqual(await requestLLM('openai', text => seen.push(text)),
+    {ok:false,status:503,emitted:false,reason:'http',upstreamStatus:503});
+  assert.deepEqual(models, ['first']);assert.deepEqual(seen, []);
+  failure = 'stream';models.length = 0;
+  assert.deepEqual(await requestLLM('openai', text => seen.push(text)),
+    {ok:false,status:502,emitted:true,reason:'upstream_error',upstreamStatus:200});
+  assert.deepEqual(models, ['first']);assert.deepEqual(seen, ['<ja>はい。</ja>']);
+  failure = null;models.length = 0;
+  assert.equal((await requestLLM('openai')).text, '<vi>Em thử nhé.</vi>');
   assert.deepEqual(models, ['first']);
-  assert.deepEqual(seen, ['<ja>はい。</ja>']);
 });
 
 test('provider redirects and oversized payloads are not emitted', async t => {
@@ -103,10 +104,10 @@ test('provider redirects and oversized payloads are not emitted', async t => {
     assert.equal(init.redirect,'manual');
     return response();
   });
-  for (const build of [() => Response.redirect('https://elsewhere.example'),
-    () => sse(event(delta('x'.repeat(256 * 1024))))]) {
+  for (const [build,reason,upstreamStatus] of [[() => Response.redirect('https://elsewhere.example'),'http',302],
+    [() => sse(event(delta('x'.repeat(256 * 1024)))),'response_limit',200]]) {
     response = build;
-    assert.deepEqual(await requestLLM('openai', () => assert.fail('unexpected delta')), {ok:false,status:502,emitted:false});
+    assert.deepEqual(await requestLLM('openai', () => assert.fail('unexpected delta')), {ok:false,status:502,emitted:false,reason,upstreamStatus});
   }
 });
 
@@ -115,12 +116,12 @@ test('aborting a pending body read cancels both the reader and provider request'
   let providerSignal, cancelled = false;
   t.mock.method(globalThis, 'fetch', async (_url, init) => {
     providerSignal = init.signal;
-    return sse(new ReadableStream({pull() {started.resolve();},cancel() {cancelled = true;}}));
+    return sse(new ReadableStream({pull() {started.resolve();},cancel() {cancelled = true;}},{highWaterMark:0}));
   });
   const pending = requestLLM('openai', () => assert.fail('stale delta'), {signal:controller.signal});
   await started.promise;
   controller.abort();
-  assert.deepEqual(await pending, {ok:false,status:504,emitted:false});
+  assert.deepEqual(await pending, {ok:false,status:504,emitted:false,reason:'cancelled',upstreamStatus:200});
   assert.equal(providerSignal.aborted, true);
   assert.equal(cancelled, true);
 });
@@ -128,16 +129,16 @@ test('aborting a pending body read cancels both the reader and provider request'
 test('chunker consumes split and empty tags and keeps actual sentence boundaries', () => {
   const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
   for (const char of '<ja>。</ja><ja>おはよう</ja><vi>Chào em.</vi><ja>「は」</ja>') chunker.push(char);
-  assert.deepEqual(chunker.flush(), {fullText:'おはよう Chào em. 「わ」', count:3, overflow:false});
+  assert.deepEqual(chunker.flush(), {fullText:'おはよう Chào em. 「は」', count:3, overflow:false});
   assert.deepEqual(items.map(({lang,boundary}) => [lang,boundary]), [['ja','start'],['vi','inline'],['ja','sentence']]);
 });
 
 test('live tagged numeric ranges retain both endpoints in captions', () => {
   const items=[], chunker=createSegmentChunker({onSegment:part=>items.push(part)});
   chunker.push('<ja>10〜20%</ja><vi>２０％　～　３０％</vi><ja>〜ます</ja>');
-  assert.equal(chunker.flush().fullText,'10〜20% ２０％　～　３０％ ます');
+  assert.equal(chunker.flush().fullText,'10〜20% ２０％　～　３０％ 〜ます');
   assert.deepEqual(items.map(({lang,text})=>[lang,text]),[
-    ['ja','10〜20%'],['vi','２０％　～　３０％'],['ja','ます']
+    ['ja','10〜20%'],['vi','２０％　～　３０％'],['ja','〜ます']
   ]);
 });
 
@@ -156,7 +157,7 @@ test('chunker emits plain text early, separates wrong-language text inside tags,
   assert.equal(items[0].text, 'いいですね。');
   chunker.push('<ja>こんにちは、em。</ja><vi>Thử lại</vi><ja>へ</ja>' + '<vi>Hay!</vi>'.repeat(12));
   assert.deepEqual(items.slice(0,5).map(({text,lang}) => [text,lang]), [
-    ['いいですね。','ja'], ['こんにちは、','ja'], ['em。','vi'], ['Thử lại','vi'], ['え','ja']]);
+    ['いいですね。','ja'], ['こんにちは、','ja'], ['em。','vi'], ['Thử lại','vi'], ['へ','ja']]);
   const result = chunker.flush();
   assert.equal(result.count,16);
   assert.equal(result.overflow,true);
@@ -481,12 +482,12 @@ test('cancelling the SSE response stops upstream generation without a terminal e
 test('native streams reject truncated EOF and Anthropic errors before message_stop', async t => {
   let frames;
   t.mock.method(globalThis, 'fetch', async () => sse(frames));
-  const expected = {ok:false,status:502,emitted:true};
+  const expected = {ok:false,status:502,emitted:true,reason:'incomplete',upstreamStatus:200};
   frames = event(delta('Unfinished'));
   assert.deepEqual(await requestLLM('openai'), expected);
   frames = event({type:'content_block_delta',delta:{type:'text_delta',text:'Unfinished'}})
     + event({type:'message_delta',delta:{stop_reason:'end_turn'}}) + event({type:'error'});
-  assert.deepEqual(await requestLLM('anthropic'), expected);
+  assert.deepEqual(await requestLLM('anthropic'), {...expected,reason:'upstream_error'});
   frames = event(delta('Compatible proxy reply.'));
   const provider = {protocol:'openai',baseUrl:connection.base_url,apiKey:key,models:['first']};
   assert.equal((await streamLLM(provider,{turns:[{role:'user',content:'hello'}],onDelta() {}})).text,'Compatible proxy reply.');
@@ -556,7 +557,18 @@ test('a provider key reflected across two tagged segments is never emitted', asy
   t.mock.method(globalThis,'fetch', async () => sse(event(delta('<vi>synthetic-live</vi>'))
     + event(delta('<vi>-test-key</vi>')) + event('[DONE]')));
   const response = await send({command:'start',api_connection:connection});
-  assert.deepEqual(events(await response.text()).map(([kind,data]) => [kind,data.code]),[['error','live_unavailable']]);
+  assert.deepEqual(events(await response.text()).map(([kind,data]) => [kind,data.code]),[['error','live_invalid_response']]);
+});
+
+test('a provider key in a detached pronunciation caption is still rejected', async t => {
+  const {send} = await fixture(t);
+  t.mock.method(globalThis,'fetch', async () => openAIReply(`<ja>食べる</ja> (${key})`));
+  const response = await send({command:'start',api_connection:connection});
+  const output = await response.text();
+  assert.ok(!output.includes(key));
+  assert.deepEqual(events(output).map(([kind,data]) => [kind,data.text ?? data.code]),[
+    ['segment','食べる'],['error','live_invalid_response']
+  ]);
 });
 
 test('aborting provider selection cancels the Antigravity verification request', {timeout:3000}, async t => {
@@ -578,4 +590,98 @@ test('aborting provider selection cancels the Antigravity verification request',
   assert.equal((await pending).status,204);
   assert.equal(upstreamSignal.aborted,true);
   assert.equal(fetch.mock.callCount(),1);
+});
+
+test('display segments preserve particles, readings and learner blanks without synthesis changes', () => {
+  const items=[], chunker=createSegmentChunker({onSegment:part=>items.push(part)});
+  chunker.push('<ja>「は」「へ」。食べる(たべる)。わたしは＿＿＿です。わたしは___です。</ja>');
+  assert.equal(chunker.flush().fullText,'「は」「へ」。食べる(たべる)。わたしは＿＿＿です。わたしは___です。');
+  assert.equal(items.length,1);
+});
+
+test('chunker keeps attached romaji in Japanese captions without swallowing Vietnamese', () => {
+  const text = '<ja>食べる(taberu)、学校（gakkō） Em đọc nhé.</ja>食べる(taberu) rồi đọc tiếp.<ja>日本語能力試験 (JLPT)</ja>';
+  for (const deltas of [[text],text]) {
+    const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+    for (const delta of deltas) chunker.push(delta);
+    assert.deepEqual(chunker.flush(),{
+      fullText:'食べる(taberu)、学校（gakkō） Em đọc nhé. 食べる(taberu) rồi đọc tiếp. 日本語能力試験 (JLPT)',
+      count:5,overflow:false
+    });
+    assert.deepEqual(items.map(({lang,text}) => [lang,text]),[
+      ['ja','食べる(taberu)、学校（gakkō）'],['vi','Em đọc nhé.'],
+      ['ja','食べる(taberu)'],['vi','rồi đọc tiếp.'],['ja','日本語能力試験 (JLPT)']
+    ]);
+  }
+});
+
+test('late romaji is captioned with only its prefix skipped in audio', () => {
+  const text = ' (taberu!) Em thử nhé.<ja>走る</ja>（hashiru）<ja>試験</ja> (JLPT)<vi>Tiếp nhé.</vi>'
+    + '<ja>読む</ja><vi>(mai) Em đọc tiếp nhé.</vi>';
+  for (const deltas of [[text],text]) {
+    const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+    chunker.push('食べる。');
+    assert.equal(items[0].text,'食べる。');
+    for (const delta of deltas) chunker.push(delta);
+    assert.equal(chunker.flush().fullText,'食べる。 (taberu!) Em thử nhé. 走る （hashiru） 試験 (JLPT) Tiếp nhé. 読む (mai) Em đọc tiếp nhé.');
+    assert.deepEqual(items.map(item => [item.lang,item.text,item.speech_start]),[
+      ['ja','食べる。',undefined],['vi','(taberu!) Em thử nhé.',10],
+      ['ja','走る',undefined],['ja','（hashiru）',9],['ja','試験',undefined],['vi','(JLPT)',undefined],
+      ['vi','Tiếp nhé.',undefined],['ja','読む',undefined],['vi','(mai) Em đọc tiếp nhé.',undefined]
+    ]);
+  }
+});
+
+test('chunker preserves punctuated standalone blanks across tags and at EOF', () => {
+  const text = '___<ja>左</ja> （＿＿＿！？） <vi>Đọc nhé.</vi>___。 ＿＿＿!';
+  for (const deltas of [[text],text]) {
+    const items = [], chunker = createSegmentChunker({onSegment:item => items.push(item)});
+    for (const delta of deltas) chunker.push(delta);
+    assert.deepEqual(chunker.flush(),{fullText:'___ 左 （＿＿＿！？） Đọc nhé. ___。 ＿＿＿!',count:5,overflow:false});
+    assert.deepEqual(items.map(({lang,text}) => [lang,text]),[
+      ['ja','___'],['ja','左'],['ja','（＿＿＿！？）'],['vi','Đọc nhé.'],['vi','___。 ＿＿＿!']
+    ]);
+  }
+});
+
+test('Live errors correlate safe diagnostics without exposing provider bodies or prompts', async t => {
+  const {send}=await fixture(t), logs=[];
+  t.mock.method(console,'warn',(...args)=>logs.push(args));
+  let reply;
+  const fetch=t.mock.method(globalThis,'fetch',async()=>reply());
+  for (const [build,code,reason] of [
+    [()=>sse(event({candidates:[{content:{parts:[{text:'partial'}]}}]})),'live_incomplete','incomplete'],
+    [()=>sse(event({candidates:[{finishReason:'SAFETY',content:{parts:[{text:key}]}}]})),'live_blocked','blocked'],
+    [()=>sse(`data: ${key}\n\n`),'live_invalid_response','invalid_response']
+  ]) {
+    reply=build;
+    const response=await send({transcript:'Private learner sentence',api_connection:{
+      protocol:'gemini',base_url:DEFAULT_BASES.gemini,api_key:key,model:'selected-model'}});
+    const frames=events(await response.text()), payload=frames.at(-1)[1];
+    assert.equal(frames.at(-1)[0],'error');assert.equal(payload.code,code);
+    assert.match(payload.request_id,/^[a-f0-9-]{36}$/);
+    const diagnostic=JSON.parse(logs.at(-1)[1]);
+    assert.equal(diagnostic.request_id,payload.request_id);
+    assert.equal(diagnostic.reason,reason);assert.equal(diagnostic.upstream_status,200);
+    assert.doesNotMatch(JSON.stringify([frames,logs]),/synthetic-live-test-key|Private learner sentence|selected-model/);
+  }
+  assert.equal(fetch.mock.callCount(),3);
+});
+
+test('interrupted generation and playback are bounded history evidence, never system instructions', async t => {
+  const {send}=await fixture(t), history=[
+    {role:'user',text:'Em tên là Mai.'},
+    {role:'assistant',text:'Mai, em thử câu này.',generation:'complete',playback:'interrupted'},
+    {role:'assistant',text:'Chưa nói xong',generation:'partial',playback:'interrupted'}
+  ];
+  let wire;
+  t.mock.method(globalThis,'fetch',async(_url,init)=>{wire=JSON.parse(init.body);return openAIReply('<vi>Em nói tiếp nhé.</vi>');});
+  const response=await send({transcript:'Thầy nhớ tên em không?',history,api_connection:connection});
+  assert.equal(events(await response.text()).at(-1)[0],'done');
+  assert.deepEqual(JSON.parse(wire.messages.at(-1).content).reference.history,history);
+  assert(!wire.messages[0].content.includes('Em tên là Mai.'));
+  for (const turn of [
+    {role:'user',text:'Hi',playback:'completed'}, {role:'assistant',text:'Hi',generation:'invented'},
+    {role:'assistant',text:'Hi',playback:'heard-everything'}
+  ]) assert.equal((await send({transcript:'Ừ',history:[turn],api_connection:connection})).status,400);
 });

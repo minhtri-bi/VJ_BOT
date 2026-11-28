@@ -1,6 +1,6 @@
 (function () {
   const floor=10**(-42/20), rmsTarget=10**(-18/20), peakLimit=0.98;
-  const pause={start:0,inline:0.055,sentence:0.2,arrow:0.26};
+  const pause={start:0,inline:0.055,sentence:0.2,arrow:0.26,blank:0.5};
   const maxSeconds=90;
   function bounded(promise,signal,milliseconds,detail) {
     return new Promise((resolve,reject)=>{

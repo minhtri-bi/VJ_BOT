@@ -89,8 +89,10 @@ async function generateTurn(env, userId, request, session, token) {
   const envelope = JSON.parse(chatEnvelope(request.message, lesson, request.screen, learner, history, teaching));
   envelope.reference.learning_retrieval = retrieval;
   if(JSON.stringify(envelope).length>16000)return {response:failure('Em chọn một từ, một ví dụ hoặc một câu hỏi cụ thể để thầy giải thích nhé.',413)};
+  // Changing items hides old dialogue, but does not open a new session unless requested.
+  const continuation = request.intent !== 'restart' && (history.length > 0 || !!session.state);
   const asked = await askAI(env, userId, {
-    system: reversedPrompt(request.level, history.length) + '\n' + learningBoundary
+    system: reversedPrompt(request.level, {intent: request.intent, continuation}) + '\n' + learningBoundary
       +(focus?.kind==='question'?'\nThis is a pre-answer canonical task. Offer only a small strategy or clarification. Never solve it, name the correct option, eliminate choices, reveal a transcript or accepted answers, or claim the source key is reviewed. No overview or examples are available as task evidence.':''),
     schema: tutorSchema(request.intent), schemaName: 'tutor_reply',
     turns: [{role: 'user', content: JSON.stringify(envelope)}]

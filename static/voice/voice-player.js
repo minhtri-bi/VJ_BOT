@@ -39,7 +39,8 @@
           if (record.type==='error') throw new Error(record.detail || 'Không đọc được đoạn này.');
           if (record.type==='done' && segments.length && record.count===segments.length) {ended=true;continue;}
           if (record.type!=='segment' || record.index!==segments.length || segments.length>=maxSegments
-            || !['ja','vi'].includes(record.lang) || !['start','inline','sentence','arrow'].includes(record.boundary)
+            || !['ja','vi'].includes(record.lang) || !['start','inline','sentence','arrow','blank'].includes(record.boundary)
+            || record.boundary==='blank' && record.index===0
             || typeof record.speed!=='number' || record.speed<0.5 || record.speed>2
             || typeof record.audioBase64!=='string' || !record.audioBase64) throw new Error('Đoạn âm thanh không hợp lệ.');
           segments.push(record);

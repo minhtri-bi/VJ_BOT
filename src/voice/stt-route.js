@@ -24,7 +24,10 @@ const invalidRouting = (detail = 'Cấu hình chép lời không hợp lệ.') =
 const unavailable = () => json({detail:'Chưa chép được bản ghi. Thử lại hoặc nhập câu trả lời.'},503);
 const invalidTranscript = () => json({detail:'Bản chép lời không hợp lệ.'},502);
 const timeout = () => json({detail:'Kết nối chép lời hết thời gian. Thử lại hoặc nhập câu trả lời.'},504);
-const lessonLanguages = new Set(['ja','jpn','vi','vie']);
+const languageModes = ['auto','vi','ja'];
+const lessonLanguage = code => code==='ja' || code==='jpn' ? 'ja' : code==='vi' || code==='vie' ? 'vi' : null;
+const unsupportedLanguage = () => json({detail:'Chưa nhận ra tiếng Việt hoặc tiếng Nhật. Em nói lại một câu ngắn hoặc chọn ngôn ngữ nói trong Âm thanh nhé.',code:'stt_language_unsupported'},422);
+const mismatchedLanguage = language => json({detail:`Lời nói không khớp với ngôn ngữ đã chọn. Em nói lại bằng ${language==='vi'?'tiếng Việt':'tiếng Nhật'} hoặc đổi ngôn ngữ nói trong Âm thanh nhé.`,code:'stt_language_mismatch'},422);
 // Reject unexpected scripts without stripping kanji, kana or Latin loanwords.
 const otherScript = /(?=\p{L})[^\p{scx=Latin}\p{scx=Han}\p{scx=Hiragana}\p{scx=Katakana}]/u;
 
@@ -53,7 +56,7 @@ async function legacyConnection(env,userId,apiConnection,profileId) {
   return null;
 }
 
-async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, explicit) {
+async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, explicit, language) {
   const engine = engines[kind], eleven = kind === 'elevenlabs';
   const url = baseUrl + (eleven ? '/v1/speech-to-text' : '/audio/transcriptions');
   const headers = eleven ? {'xi-api-key':apiKey} : {Authorization:`Bearer ${apiKey}`};
@@ -62,11 +65,9 @@ async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, 
     const form = new FormData();
     form.set('file',file,filename);
     form.set(eleven ? 'model_id' : 'model',engine.model);
-    if (eleven) {
-      form.set('language_code','ja');
-      form.append('secondary_language_codes','vi');
-      form.set('tag_audio_events','false');
-    }
+    if (language!=='auto') form.set(eleven ? 'language_code' : 'language',language);
+    else if (kind==='mistral') form.set('return_language','true');
+    if (eleven) form.set('tag_audio_events','false');
     for (const term of terms) form.append('context_bias',term);
     return fetch(url,{method:'POST',redirect:'manual',signal,headers,body:form});
   };
@@ -94,12 +95,23 @@ async function transcribe(request, {kind,baseUrl,apiKey}, file, filename, bias, 
   try {result = JSON.parse(raw);} catch {return explicit ? invalidTranscript() : timeout();}
   if (typeof result?.text !== 'string' || result.text.length > 6000 || result.text.includes(apiKey)) return invalidTranscript();
   const text=result.text.trim();
-  if (eleven && text) {
-    if (Array.isArray(result.words) && result.words.some(part=>part?.type==='audio_event')
-      && !result.words.some(part=>part?.type==='word')) return json({text:''});
-    if (!lessonLanguages.has(result.language_code) || otherScript.test(text))
-      return json({detail:'Chưa nhận ra tiếng Nhật hoặc tiếng Việt. Em nói lại một câu ngắn nhé.',code:'stt_language_unsupported'},422);
+  if (!text || eleven && Array.isArray(result.words) && result.words.some(part=>part?.type==='audio_event')
+    && !result.words.some(part=>part?.type==='word')) return json({text:''});
+  if (otherScript.test(text)) return unsupportedLanguage();
+  if (eleven) {
+    const detected=lessonLanguage(result.language_code);
+    if (!detected) return unsupportedLanguage();
+    if (language!=='auto' && detected!==language) return mismatchedLanguage(language);
+    const probability=result.language_probability;
+    return json({text,language:detected,language_probability:Number.isFinite(probability) && probability>=0 && probability<=1 ? probability : null});
   }
+  // Mistral may return null (including when language is pinned); do not invent a detection.
+  const detected = kind==='mistral' && result.language!=null ? [result.language]
+    : kind==='openai' && result.languages!==undefined && Array.isArray(result.languages) ? result.languages.map(entry=>entry?.code)
+    : null;
+  if (kind==='openai' && result.languages!==undefined && !detected
+    || detected && (!detected.length || detected.some(code=>!lessonLanguage(code)))) return unsupportedLanguage();
+  if (language!=='auto' && detected?.some(code=>lessonLanguage(code)!==language)) return mismatchedLanguage(language);
   return json({text});
 }
 
@@ -115,6 +127,10 @@ export async function transcriptionRoute(request,env) {
     data = JSON.parse(raw);
   } catch {return json({detail:'Dữ liệu không hợp lệ.'},400);}
   if (!object(data)) return json({detail:'Dữ liệu không hợp lệ.'},400);
+  const {language = 'auto'} = data;
+  if (!languageModes.includes(language)) {
+    return json({detail:'Chọn Tự nhận diện Việt–Nhật, Tiếng Việt hoặc Tiếng Nhật trong Âm thanh rồi thử lại.',code:'stt_invalid_language'},400);
+  }
 
   const explicit = Object.hasOwn(data,'stt_routing'), routing = data.stt_routing;
   const profileId = request.headers.get('X-VJBot-Profile') ?? undefined;
@@ -159,5 +175,5 @@ export async function transcriptionRoute(request,env) {
   if (!bytes) return json({detail:'Bản ghi không hợp lệ hoặc quá lớn.'},400);
   if (await rateLimited(env,user.user_id)) return json({detail:'Đợi một phút rồi thử lại.'},429);
   const bias = connection.kind === 'mistral' && lesson ? lessonVocabulary(lesson) : [];
-  return transcribe(request,connection,new Blob([bytes],{type:mime}),'recording.'+formats[mime],bias,explicit);
+  return transcribe(request,connection,new Blob([bytes],{type:mime}),'recording.'+formats[mime],bias,explicit,language);
 }

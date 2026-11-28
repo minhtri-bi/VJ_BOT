@@ -67,41 +67,63 @@ async function reject(response, status, code) {
 
 const success = () => Response.json({text:' こんにちは。 ',language_code:'jpn'});
 
-test('Scribe capabilities are free; ElevenLabs sends only Japanese and Vietnamese hints through approved mounts',async t => {
+test('Scribe capabilities are free; auto omits language hints through either approved mount',async t => {
   const {send,env,usage} = await fixture(t);
   const calls = intercept(t,success);
   const official = local('elevenlabs','https://api.elevenlabs.io/v1/');
   const custom = local('elevenlabs','https://voice.example/gateway/v1/');
-  assert.deepEqual(await (await send({...action,stt_routing:official})).json(),{supported:true,provider:'elevenlabs',model:'scribe_v3'});
+  for (const language of [undefined,'auto','ja','vi']) {
+    assert.deepEqual(await (await send({...action,stt_routing:official,language})).json(),{supported:true,provider:'elevenlabs',model:'scribe_v3'});
+  }
   assert.deepEqual(await (await send({...action,stt_routing:custom})).json(),{supported:false,provider:null,model:null});
   await reject(await send({...audio,stt_routing:custom}),403,'stt_profile_unavailable');
   assert.equal(usage(),0);
   assert.equal(calls.length,0);
   env.VOICE_ALLOWED_ORIGINS='https://voice.example';
-  for (const stt_routing of [official,custom]) {
-    const response = await send({...audio,stt_routing});
+  for (const [stt_routing,language] of [[official,undefined],[custom,'auto']]) {
+    const response = await send({...audio,stt_routing,language});
     assert.equal(response.status,200);
-    assert.deepEqual(await response.json(),{text:'こんにちは。'});
+    assert.deepEqual(await response.json(),{text:'こんにちは。',language:'ja',language_probability:null});
   }
   assert.deepEqual(calls.map(call => call.url),['https://api.elevenlabs.io/v1/speech-to-text','https://voice.example/gateway/v1/v1/speech-to-text']);
   for (const {method,redirect,headers,body} of calls) {
     assert.deepEqual([method,redirect,headers],['POST','manual',{'xi-api-key':key}]);
     assert.equal(body.get('model_id'),'scribe_v3');
-    assert.equal(body.get('language_code'),'ja');
-    assert.deepEqual(body.getAll('secondary_language_codes'),['vi']);
+    assert.equal(body.has('language_code'),false);
+    assert.equal(body.has('secondary_language_codes'),false);
     assert.equal(body.get('tag_audio_events'),'false');
     assert.equal(body.has('model'),false);
     assert.deepEqual([body.get('file').name,body.get('file').type,await body.get('file').text()],['recording.wav','audio/wav',recording]);
   }
 });
 
+test('invalid STT languages fail before a capability probe or recording is routed or billed',async t => {
+  const {send,usage}=await fixture(t);
+  const calls=intercept(t,success);
+  for (const language of [null,'','en','ja-JP','jpn',1,['vi']]) {
+    for (const payload of [action,audio]) {
+      for (const binding of [{stt_routing:local('elevenlabs')},{}]) {
+        const response=await send({...payload,...binding,language});
+        assert.equal(response.status,400);
+        const error=await response.json();
+        assert.equal(error.code,'stt_invalid_language');
+        assert.match(error.detail,/Chọn.+Tiếng Việt.+Tiếng Nhật/);
+      }
+    }
+  }
+  assert.equal(calls.length,0);
+  assert.equal(usage(),0);
+});
+
 test('ElevenLabs accepts Japanese, Vietnamese and mixed speech without forwarding wrong-language guesses',async t => {
   const {send}=await fixture(t);
   const valid=[
-    {language_code:'jpn',text:' 今日はスーパーに行きます。 '},
-    {language_code:'vie',text:' Vào buổi sáng em đi học. '},
-    {language_code:'ja',text:' Em muốn tập nói 「学校に行きます」. '},
-    {language_code:'vi',text:' Em đọc số 20. '}
+    {language_code:'jpn',language_probability:0,text:' 今日はスーパーに行きます。 '},
+    {language_code:'vie',language_probability:1,text:' Vào buổi sáng em đi học. '},
+    {language_code:'ja',language_probability:'0.93',text:' Em muốn tập nói 「学校に行きます」. '},
+    {language_code:'vi',language_probability:1.1,text:' Em đọc số 20. '},
+    {language_code:'jpn',language_probability:-0.1,text:' はい。 '},
+    {language_code:'vie',language_probability:0.74,text:' Dạ.',words:[{type:'word',text:key}]}
   ];
   const rejected=[
     {language_code:'zho',text:'就啊。'},
@@ -112,12 +134,14 @@ test('ElevenLabs accepts Japanese, Vietnamese and mixed speech without forwardin
   ];
   const noise={language_code:'jpn',text:'[singing]',words:[{type:'audio_event',text:'[singing]'}]};
   const samples=[...valid,...rejected,noise,{text:'  '}];
-  intercept(t,n=>Response.json(samples[n-1]));
+  const calls=intercept(t,n=>Response.json(samples[n-1]));
   const body={...audio,stt_routing:local('elevenlabs')};
-  for (const row of valid) {
+  const metadata=[['ja',0],['vi',1],['ja',null],['vi',null],['ja',null],['vi',0.74]];
+  for (const [i,row] of valid.entries()) {
     const response=await send(body);
     assert.equal(response.status,200);
-    assert.deepEqual(await response.json(),{text:row.text.trim()});
+    const [language,language_probability]=metadata[i];
+    assert.deepEqual(await response.json(),{text:row.text.trim(),language,language_probability});
   }
   for (const row of rejected) {
     const response=await send(body);
@@ -131,6 +155,66 @@ test('ElevenLabs accepts Japanese, Vietnamese and mixed speech without forwardin
     const response=await send(body);
     assert.equal(response.status,200,row.text);
     assert.deepEqual(await response.json(),{text:''});
+  }
+  assert.equal(calls.length,samples.length);
+});
+
+test('explicit Scribe language pins a single hint and refuses mismatches without retrying',async t => {
+  const {send}=await fixture(t);
+  const rows=[
+    ['ja',{language_code:'jpn',language_probability:0.4,text:' 学校です。 '}],
+    ['vi',{language_code:'vie',language_probability:0.6,text:' Em đi học. '}],
+    ['ja',{language_code:'vie',text:'Bản chép không đúng tiếng.'}],
+    ['vi',{language_code:'jpn',text:'違う言語です。'}]
+  ];
+  const calls=intercept(t,n=>Response.json(rows[n-1][1]));
+  for (const [i,[language,row]] of rows.entries()) {
+    const response=await send({...audio,stt_routing:local('elevenlabs'),language});
+    assert.equal(response.status,i<2?200:422);
+    if (i<2) assert.deepEqual(await response.json(),{text:row.text.trim(),language,language_probability:row.language_probability});
+    else {
+      const error=await response.json();
+      assert.equal(error.code,'stt_language_mismatch');
+      assert.match(error.detail,language==='vi'?/nói lại bằng tiếng Việt/:/nói lại bằng tiếng Nhật/);
+      assert.equal(error.text,undefined);
+    }
+    assert.equal(calls.length,i+1);
+    assert.deepEqual(calls[i].body.getAll('language_code'),[language]);
+    assert.equal(calls[i].body.has('secondary_language_codes'),false);
+  }
+});
+
+test('OpenAI and Mistral use the transcription language, never translation, and reject contradictory detection',async t => {
+  const {send}=await fixture(t);
+  const cases=[
+    ['openai','vi',{languages:[{code:'vi'}],text:' Tiếng Việt. '},200],
+    ['openai','ja',{languages:[{code:'vi'}],text:'Tiếng Việt.'},422,'stt_language_mismatch'],
+    ['openai','auto',{languages:[{code:'ja'},{code:'vi'}],text:'こんにちは。 Em chào thầy.'},200],
+    ['openai','auto',{languages:[],text:'Unknown language.'},422,'stt_language_unsupported'],
+    ['openai','auto',{languages:[{code:'en'}],text:'English.'},422,'stt_language_unsupported'],
+    ['openai','auto',{text:'Привет.'},422,'stt_language_unsupported'],
+    ['mistral','ja',{language:null,text:'こんにちは。'},200],
+    ['mistral','vi',{language:'vi',text:'Em chào thầy.'},200],
+    ['mistral','ja',{language:'vi',text:'Em chào thầy.'},422,'stt_language_mismatch'],
+    ['mistral','auto',{language:'ja',text:'こんにちは。'},200],
+    ['mistral','auto',{language:'zh',text:'中文。'},422,'stt_language_unsupported']
+  ];
+  const calls=intercept(t,n=>Response.json(cases[n-1][2]));
+  for (const [i,[kind,language,result,status,code]] of cases.entries()) {
+    const response=await send({...audio,stt_routing:local(kind),language});
+    assert.equal(response.status,status);
+    const payload=await response.json();
+    if (status===200) assert.deepEqual(payload,{text:result.text.trim()});
+    else {
+      assert.equal(payload.code,code);
+      assert.equal(payload.text,undefined);
+      assert.equal(payload.language,undefined);
+    }
+    assert.equal(calls.length,i+1);
+    const {url,body}=calls[i];
+    assert.match(url,/\/audio\/transcriptions$/);
+    assert.deepEqual(body.getAll('language'),language==='auto'?[]:[language]);
+    assert.equal(body.get('return_language'),kind==='mistral' && language==='auto'?'true':null);
   }
 });
 
@@ -146,7 +230,7 @@ test('Mistral sends canonical allowed terms only and retries one 422 without bia
     cancel() {cancelled++;}
   }),{status:attempts[n-1]}));
   const stt_routing = local('mistral');
-  assert.equal((await send({...audio,stt_routing,lesson:reference('long')})).status,200);
+  assert.equal((await send({...audio,stt_routing,lesson:reference('long'),language:'ja'})).status,200);
   assert.equal(calls.length,2);
   assert.equal(usage(),1);
   assert.equal(cancelled,1);
@@ -157,6 +241,7 @@ test('Mistral sends canonical allowed terms only and retries one 422 without bia
   assert.notEqual(calls[1].body,first.body);
   assert.equal(await calls[1].body.get('file').text(),recording);
   assert.deepEqual(calls[1].body.getAll('context_bias'),[]);
+  assert.deepEqual(calls.slice(0,2).map(call=>call.body.getAll('language')),[['ja'],['ja']]);
   // A generic 400 does not retry, and a second 422 ends an otherwise eligible retry.
   await reject(await send({...audio,stt_routing,lesson:reference('short')}),503);
   assert.equal(calls.length,3);
